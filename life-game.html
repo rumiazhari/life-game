@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>LIFE FILE — Subject Dossier</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=Special+Elite&family=Stardos+Stencil:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="desk">
+  <div class="grain"></div>
+
+  <section id="cover" class="coverwrap">
+    <div class="folder cover">
+      <div class="tab">SUBJECT FILE</div>
+      <div class="stamp confidential">Confidential</div>
+      <p class="kicker">FORM 114-A · DOSSIER SECTION</p>
+      <h1 class="masthead">LIFE<br>FILE</h1>
+      <div class="division">RECORDS &amp; ARCHIVES DIVISION</div>
+      <p class="coverline">Every subject gets one file. You steer the life; the Bureau rules on what's allowed; the century decides what happens. Spend each year's hours, sign the decisions, and stamp it forward — there's no going back.</p>
+      <div class="cover-actions">
+        <button id="btn-open" class="btn btn-big">Open a New File ▸</button>
+        <span class="micro">you drive · the bureau vetoes · no appeals</span>
+      </div>
+      <button id="btn-archive" class="archive-link">THE BUREAU ARCHIVE <span id="archive-count"></span> ▸</button>
+      <button id="btn-achieve-cover" class="archive-link">COMMENDATIONS <span id="achieve-count"></span> ▸</button>
+      <div class="note">
+        <span class="paperclip"></span>
+        CLERK'S NOTE — Contents may include: war, inflation, ambition, matrimony, the racetrack, the back room, beekeeping, and worse. The subject chooses the worse, sometimes. Handle the years with care.
+      </div>
+      <div class="formno">FORM 114-A · REV. 1962 · PRINTED IN QUADRUPLICATE</div>
+    </div>
+  </section>
+
+  <section id="dossier" class="dossier folder hidden">
+    <div class="tabstrip" id="tabstrip">
+      <div class="dtab dtab-file" id="tab-name">FILE: —</div>
+      <button id="btn-hold" class="dtab">THE HOLD ▸</button>
+      <button id="btn-caselog" class="dtab">CASE LOG ▸</button>
+      <button id="btn-achieve" class="dtab">COMMENDATIONS ▸</button>
+      <button id="btn-sound" class="dtab">SOUND: ON</button>
+    </div>
+    <header class="dhead">
+      <div class="dtop">
+        <div>
+          <p class="kicker">SUBJECT DOSSIER · SECTION 114-A</p>
+          <h2 class="dtitle">LIFE FILE</h2>
+          <p class="dintent">READ ON FILE — INTENT — <b id="d-intent">—</b></p>
+          <p class="dintent">READ ON FILE — DISPOSITION — <b id="d-disp">—</b></p>
+          <p class="dintent">LIFE STAGE — <b id="d-stage">—</b></p>
+        </div>
+        <div class="stamp mini">Confidential</div>
+      </div>
+    </header>
+    <div class="spread">
+      <div class="page page-left">
+        <span class="hole t"></span><span class="hole b"></span>
+        <div class="sec-h">SECTION A — IDENTIFICATION <span>FORM A-1</span></div>
+        <div class="idgrid">
+          <div class="photo"><div class="photo-art" id="photo-art"></div><em class="photo-cap" id="photo-cap">FILE PHOTO</em></div>
+          <div class="idfields">
+            <div class="frow"><span class="flabel">NAME</span><span class="fval" id="id-name">—</span></div>
+            <div class="frow"><span class="flabel">SEX · FILE №</span><span class="fval" id="id-file">—</span></div>
+            <div class="frow"><span class="flabel">BORN</span><span class="fval" id="id-dob">—</span></div>
+            <div class="frow hotspot" data-hotspot="job"><span class="flabel">OCCUPATION</span><span class="fval" id="val-job">—</span></div>
+            <div class="frow"><span class="flabel">CIVIL STATUS</span><span class="fval" id="val-status">—</span></div>
+            <div class="frow hotspot" data-hotspot="vice"><span class="flabel">VICE NOTES</span><span class="fval" id="val-vice">none on record</span></div>
+            <div class="frow"><span class="flabel">MARKED</span><span class="fval" id="val-marked">none</span></div>
+            <div class="frow hotspot" data-hotspot="skills"><span class="flabel">SKILLS</span><span class="fval" id="val-skills">none developed</span></div>
+          </div>
+        </div>
+        <div class="sec-h">KIN &amp; ASSOCIATES <span>TENDED ANNUALLY</span></div>
+        <div class="kinsplit">
+          <div class="kincol"><div class="kincol-h">KIN INDEX</div><div id="kin"></div></div>
+          <div class="kincol assoc"><div class="kincol-h">ASSOCIATES INDEX</div><div id="assoc"></div></div>
+        </div>
+        <div id="standing"></div>
+        <div class="sec-h">SECTION B — VITAL INDICES <span>ANNUAL</span></div>
+        <div class="stat hotspot" id="row-health" data-hotspot="health"><span class="slabel">HEALTH</span><div class="sbar"><div class="sfill f-health" id="fill-health"></div></div><b class="sval" id="val-health">0</b></div>
+        <div class="stat hotspot" id="row-happiness" data-hotspot="happiness"><span class="slabel">HAPPINESS</span><div class="sbar"><div class="sfill f-happiness" id="fill-happiness"></div></div><b class="sval" id="val-happiness">0</b></div>
+        <div class="stat hotspot" id="row-smarts" data-hotspot="smarts"><span class="slabel">SMARTS</span><div class="sbar"><div class="sfill f-smarts" id="fill-smarts"></div></div><b class="sval" id="val-smarts">0</b></div>
+        <div class="stat hotspot" id="row-looks" data-hotspot="looks"><span class="slabel">LOOKS</span><div class="sbar"><div class="sfill f-looks" id="fill-looks"></div></div><b class="sval" id="val-looks">0</b></div>
+        <div class="frow moneyrow hotspot" data-hotspot="assets"><span class="flabel">ASSETS ON RECORD</span><span class="fval big" id="val-assets">$0</span></div>
+        <p class="pagefoot">Earlier pages are sealed. Do not attempt to turn back.</p>
+      </div>
+      <div class="page page-right">
+        <span class="hole t"></span><span class="hole b"></span>
+        <div class="sec-h">SECTION C — HOUSEHOLD LEDGER <span>ANNUAL</span></div>
+        <div id="inventory"></div>
+        <p class="pagefoot">The full case log is filed separately — see CASE LOG, above.</p>
+        <div class="coffeering"></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="actionbar"><div class="barinner">
+    <div class="advrow">
+      <div class="datestamp" id="datestamp"><b>YEAR 0</b><span>—</span></div>
+      <div class="streakbadge hidden" id="streakBadge"><b id="streak-n">0</b><span>STRAIGHT</span></div>
+      <button id="btn-plan" class="btn-plan disabled"><b id="plan-label">NO AGENCY YET</b><span class="hpips" id="plan-pips"></span></button>
+    </div>
+    <div class="advrow">
+      <button id="btn-advance" class="btn btn-advance" style="flex:1">Advance the Year ▸</button>
+      <button id="btn-fastforward" class="btn btn-advance" style="flex:0 0 auto;font-size:14px;padding:11px 14px 10px">Fast Forward ▸▸</button>
+    </div>
+    <p class="micro bar-micro" id="bar-micro">plan the year, then stamp it · the record only moves forward</p>
+  </div></div>
+
+  <div id="hotspotBubble" class="hidden"></div>
+
+  <div id="archiveWrap" class="overlay hidden"><div class="plansheet" id="archiveSheet"></div></div>
+  <div id="holdWrap" class="overlay hidden"><div class="plansheet" id="holdSheet"></div></div>
+  <div id="logWrap" class="overlay hidden"><div class="plansheet" id="logSheet">
+    <div class="ps-head"><span>SECTION C — CASE LOG</span><span>ENTRIES FINAL</span></div>
+    <div id="log" class="log"></div>
+    <div class="coffeering"></div>
+    <div class="ps-foot"><button class="btn" id="logClose">Close the File ▸</button></div>
+  </div></div>
+  <div id="skillWrap" class="overlay hidden"><div class="plansheet" id="skillSheet"></div></div>
+  <div id="jobWrap" class="overlay hidden"><div class="plansheet" id="jobSheet"></div></div>
+  <div id="jobDetailWrap" class="overlay hidden"><div class="plansheet" id="jobDetailSheet"></div></div>
+  <div id="householdWrap" class="overlay hidden"><div class="plansheet" id="householdSheet"></div></div>
+  <div id="intentWrap" class="overlay hidden"><div class="intentslip" id="intentSlip"></div></div>
+  <div id="planWrap" class="overlay hidden"><div class="plansheet" id="planSheet"></div></div>
+  <div id="slipWrap" class="overlay hidden"><div class="slipcard" id="slipCard"></div></div>
+
+  <div id="burstWrap" class="burst-wrap hidden"><div class="burst-stack" id="burstStack"></div><div class="burst-timer" id="burstTimerBar"></div></div>
+  <div id="fxParticles" class="fxparticles"></div>
+  <div id="achieveWrap" class="achieve-wrap hidden"><div class="achievecard" id="achieveCard"></div></div>
+  <div id="achieveListWrap" class="overlay hidden"><div class="plansheet" id="achieveListSheet"></div></div>
+
+  <div id="closedWrap" class="overlay hidden">
+    <div class="closedfile folder">
+      <div class="tab">FILE CLOSED</div>
+      <div class="stamp deceased">Deceased</div>
+      <h2 class="closedtitle">FILE CLOSED</h2>
+      <p class="closedsub">RECORDS &amp; ARCHIVES DIVISION · FINAL SUMMARY</p>
+      <div class="sumcard">
+        <div class="frow"><span class="flabel">SUBJECT</span><span class="fval" id="c-name">—</span></div>
+        <div class="frow"><span class="flabel">FILE №</span><span class="fval" id="c-file">—</span></div>
+        <div class="frow"><span class="flabel">HOLD</span><span class="fval" id="c-hold">—</span></div>
+        <div class="frow"><span class="flabel">YEARS</span><span class="fval" id="c-years">—</span></div>
+        <div class="frow"><span class="flabel">OCCUPATION</span><span class="fval" id="c-job">—</span></div>
+        <div class="frow"><span class="flabel">CIVIL STATUS</span><span class="fval" id="c-kin">—</span></div>
+        <div class="frow"><span class="flabel">ESTATE</span><span class="fval" id="c-estate">—</span></div>
+        <div class="frow"><span class="flabel">CAUSE</span><span class="fval" id="c-cause">—</span></div>
+      </div>
+      <div class="assess">
+        <div class="grade" id="grade">—</div>
+        <div><p class="flabel2">THE BUREAU'S ASSESSMENT</p><p id="verdict" class="verdict"></p></div>
+      </div>
+      <div class="selfrow">
+        <div class="stars" id="c-stars">☆☆☆☆☆</div>
+        <div class="stxt"><b id="c-intent-lab">BY THEIR OWN MEASURE</b><span id="c-intent-line"></span></div>
+      </div>
+      <button id="btn-reopen" class="btn">Open a New File ▸</button>
+      <p class="micro" style="margin-top:14px">This file will be archived. It will not be read again.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ WATCHDOG: reports any load failure on-screen ============ -->
+<script>
+(function(){
+  window.addEventListener('error',function(ev){
+    try{window.__lifeErr=(ev&&ev.message?ev.message:'script error')+' (line '+(ev&&ev.lineno?ev.lineno:'?')+')';}catch(_){}
+  });
+  function banner(html){
+    if(document.getElementById('__lifeBanner'))return;
+    var b=document.createElement('div');b.id='__lifeBanner';
+    b.style.cssText='position:fixed;left:0;right:0;top:0;z-index:99999;background:#7a1f16;color:#ffe9e3;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;padding:10px 12px 11px;box-shadow:0 6px 18px rgba(0,0,0,.5);border-bottom:2px solid #ff6b5c';
+    b.innerHTML='<b style="font:700 12px/1 ui-monospace,monospace;letter-spacing:.04em">⚠ LIFE FILE DID NOT START</b><br>'+html;
+    (document.body||document.documentElement).appendChild(b);
+  }
+  window.addEventListener('DOMContentLoaded',function(){
+    setTimeout(function(){
+      if(window.__lifeReady)return;
+      banner(window.__lifeErr
+        ? ('The code threw while loading: <i>'+window.__lifeErr+'</i> — replace the entire file in one paste; do not hand-edit.')
+        : 'The script never finished loading — almost always a single stray character (a syntax error) in the code block. Replace the whole file in one paste; do not hand-edit on the phone.');
+    },700);
+  });
+})();
+</script>
+
+<script src="js/lore.js"></script>
+<script src="js/data.js"></script>
+<script src="js/state.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
