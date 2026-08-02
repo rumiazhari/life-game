@@ -18,13 +18,19 @@
     const text=String(settlement&&settlement.population||'0').replace(/[^0-9]/g,'');
     return Math.max(0,Number(text)||0);
   }
+  function clinicCoverage(settlement){
+    return clamp(clinicCount(settlement)*50000/Math.max(1,populationOf(settlement)));
+  }
+  function clinicCapacityTarget(settlement,investment,clinicClosure){
+    return clamp(.12+clinicCoverage(settlement)*.38+(settlement&&settlement.kind==='city'?.08:0)+investment*.2-clinicClosure*.55);
+  }
   function emptyShocks(){
     const shocks={}; SHOCK_TYPES.forEach(type=>{shocks[type]=0;}); return shocks;
   }
   function create(settlement){
     const clinics=clinicCount(settlement);
     const sanitation=clamp(kindBase(settlement)+clinics*.035);
-    const clinicCapacity=clamp(.18+clinics*.08+(settlement&&settlement.kind==='city'?.08:0));
+    const clinicCapacity=clinicCapacityTarget(settlement,0,0);
     return {sanitation,clinicCapacity,clinicDemand:clamp(.12+(1-sanitation)*.18),outbreakRisk:clamp((1-sanitation)*.3),shocks:emptyShocks(),lastShockYear:null};
   }
   function nationalValue(context,keys,fallback){
@@ -72,10 +78,9 @@
       .1+(1-previous.sanitation)*.2+Math.min(.12,population/1000000*.12)+influx*.2+medicineShortage*.04+
       nationalValue(context,['healthDemand'],0)+((rng&&rng.range)?rng.range(-.012,.012):0)
     )*.28);
-    const capacityBase=.16+clinicCount(settlement)*.085+(settlement&&settlement.kind==='city'?.08:0);
-    const capacityTarget=clamp(capacityBase+investment*.2-clinicClosure*.55);
+    const capacityTarget=clinicCapacityTarget(settlement,investment,clinicClosure);
     const clinicCapacity=clamp(previous.clinicCapacity*.86+capacityTarget*.14);
-    const sanitationTarget=clamp(kindBase(settlement)+clinicCount(settlement)*.035-schoolCount(settlement)*.006+sanitationSupport-investment*.02-shocks.sanitationFailure*.55);
+    const sanitationTarget=clamp(kindBase(settlement)+clinicCount(settlement)*.035-schoolCount(settlement)*.006+sanitationSupport+investment*.12-shocks.sanitationFailure*.55);
     const sanitation=clamp(previous.sanitation*.84+sanitationTarget*.16+((rng&&rng.range)?rng.range(-.01,.01):0));
     const outbreakPressure=shocks.outbreak*.8+shocks.sanitationFailure*.22+medicineShortage*.12;
     const outbreakRisk=clamp(previous.outbreakRisk*.76+(
@@ -93,5 +98,5 @@
       shocks.outbreak*.58+shocks.clinicClosure*.5+shocks.sanitationFailure*.18+shocks.medicineShortage*.12);
   }
   function pressureLabel(value){ const v=bounded(value); return v>=.7?'Critical':v>=.45?'Strained':v>=.22?'Watch':'Clear'; }
-  root.PublicHealth={SHOCK_TYPES,create,tick,pressure,pressureLabel,triggerShock,normalizeShocks};
+  root.PublicHealth={SHOCK_TYPES,create,tick,pressure,pressureLabel,triggerShock,normalizeShocks,clinicCapacityTarget,clinicCoverage};
 })(typeof globalThis!=='undefined'?globalThis:this);

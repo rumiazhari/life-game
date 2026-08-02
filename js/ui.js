@@ -1508,6 +1508,7 @@ function runEconomy(){
     if(S.jobName==='Conscript')income=400; else if(S.career)income=CAREERS.find(c=>c.id===S.career).stages[S.jobTier-1].salary; else if(S.jobTier>0)income=INC[S.jobTier]; else if(S.jobName.startsWith('Pensioner'))income=S.pensionBase;
     if(S.garnishUntil>S.age) income=Math.round(income*0.6);
     if(typeof medicalWorkPenalty==='function'){ const medicalPenalty=medicalWorkPenalty(S); if(medicalPenalty) income=Math.round(income*Math.max(.55,1-medicalPenalty*.14)); }
+    if(typeof WorldGameplay==='object'&&WorldGameplay&&typeof WorldGameplay.adjustPaidIncome==='function') income=WorldGameplay.adjustPaidIncome(income,S);
     S.assets+=income; }
   if(S.jailUntil<=S.age) runBudget(WAR);
   if(S.jailUntil>S.age){ S.assets-=200; }

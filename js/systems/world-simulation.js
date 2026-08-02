@@ -11,16 +11,11 @@
   function baseDefinitions(){
     return typeof KARSEN_SETTLEMENTS!=='undefined'&&Array.isArray(KARSEN_SETTLEMENTS)?KARSEN_SETTLEMENTS.slice():[];
   }
-  function genericDefinition(id,runtime){
-    const demographics=runtime&&runtime.demographics||{};
-    return {id,name:id,kind:'town',region:'Unclassified',population:String(integer(demographics.population||1000)),surveillance:40,travelDifficulty:1,buildings:[]};
-  }
   function definitions(world){
     const list=baseDefinitions();
     const known=new Set(list.map(item=>item.id));
     const extra=world&&Array.isArray(world.settlementDefinitions)?world.settlementDefinitions:[];
     extra.forEach(item=>{if(item&&item.id&&!known.has(item.id)){list.push(item);known.add(item.id);}});
-    Object.keys(world&&world.settlements||{}).forEach(id=>{if(!known.has(id)){list.push(genericDefinition(id,world.settlements[id]));known.add(id);}});
     return list.sort((a,b)=>String(a.id).localeCompare(String(b.id)));
   }
   function populationOf(settlement){
@@ -61,8 +56,8 @@
     if(!h.shocks||typeof h.shocks!=='object') h.shocks={};
     root.PublicHealth.SHOCK_TYPES.forEach(key=>mergeField(h.shocks,key,0,v=>Number.isFinite(Number(v))&&Number(v)>=0&&Number(v)<=1));
     if(!h.shockExpiry||typeof h.shockExpiry!=='object') h.shockExpiry={};
-    const ed=runtime.education;
-    ['schoolCapacity','enrolledStudents'].forEach(key=>mergeField(ed,key,dh[key]||0,v=>Number.isFinite(Number(v))&&Number(v)>=0));
+    const ed=runtime.education, ded=defaults.education;
+    ['schoolCapacity','enrolledStudents'].forEach(key=>mergeField(ed,key,ded[key]||0,v=>Number.isFinite(Number(v))&&Number(v)>=0));
     ed.enrolledStudents=Math.min(ed.enrolledStudents,Math.max(0,finite(runtime.demographics&&runtime.demographics.population,populationOf(settlement))));
     mergeField(ed,'capacityPressure',0,v=>Number.isFinite(Number(v))&&Number(v)>=0&&Number(v)<=1);
     const sec=runtime.security, ds=defaults.security;
@@ -105,7 +100,11 @@
   }
   function attractiveness(runtime){
     const economy=runtime.economy, health=runtime.publicHealth, security=runtime.security;
-    return clamp(economy.employmentIndex*.46+(1-economy.rentIndex/1.55)*.2+health.sanitation*.2+(1-security.surveillance)*.14);
+    const healthcarePressure=root.PublicHealth.pressure(runtime);
+    const wageAttractiveness=clamp((economy.wageIndex-.65)/.9);
+    const rentAttractiveness=clamp(1-(economy.rentIndex-.65)/.9);
+    return clamp(economy.employmentIndex*.22+wageAttractiveness*.18+rentAttractiveness*.14+
+      health.sanitation*.18+(1-healthcarePressure)*.14+(1-security.unrest)*.14);
   }
   function allocateInteger(total,items,weight,capacity){
     const result={}; items.forEach(item=>{result[item.id]=0;});
@@ -211,10 +210,13 @@
       updateDemographics(runtime,settlement,world,year,national);
       world.settlements[settlement.id]=runtime;
     });
+    const naturalPopulation=defs.reduce((sum,settlement)=>sum+world.settlements[settlement.id].demographics.population,0);
     const internal=applyInternalMigration(world,defs,year);
     let externalNet=0;
     defs.forEach(settlement=>{
-      const runtime=world.settlements[settlement.id], external=externalFor(world,ctx,settlement.id);
+      const runtime=world.settlements[settlement.id];
+      const requestedExternal=externalFor(world,ctx,settlement.id);
+      const external=requestedExternal<0?-Math.min(Math.abs(requestedExternal),runtime.demographics.population):requestedExternal;
       runtime.demographics.externalMigration=external;
       runtime.demographics.population=Math.max(0,runtime.demographics.population+external);
       runtime.demographics.netMigration=runtime.demographics.internalIn-runtime.demographics.internalOut+external;
@@ -224,7 +226,7 @@
     });
     const after=defs.reduce((sum,settlement)=>sum+world.settlements[settlement.id].demographics.population,0);
     world.totalPopulation=after;
-    world.lastMigrationAccounting={year,populationBefore:before,naturalPopulation:before+defs.reduce((sum,settlement)=>{const d=world.settlements[settlement.id].demographics;return sum+d.births-d.deaths;},0),populationAfter:after,internalIn:internal.internalIn,internalOut:internal.internalOut,balance:internal.balance,externalNet};
+    world.lastMigrationAccounting={year,populationBefore:before,naturalPopulation,populationAfter:after,internalIn:internal.internalIn,internalOut:internal.internalOut,balance:internal.balance,externalNet};
     return world.settlements;
   }
   function getSettlementState(world,id){ return world&&world.settlements&&world.settlements[id]||null; }
@@ -240,5 +242,5 @@
     if(!state)return {employment:'Unknown',costOfLiving:'Unknown',healthcare:'Unknown',unrest:'Unknown',surveillance:'Unknown'};
     return {employment:getEmploymentConditions(world,id),costOfLiving:costLabel(getCostOfLiving(world,id)),healthcare:root.PublicHealth.pressureLabel(getHealthcarePressure(world,id)),unrest:unrestLabel(state.security.unrest),surveillance:securityLabel(state.security.surveillance)};
   }
-  root.WorldSimulation={SIMULATION_SCHEMA_VERSION,RANGES,migrate,initialize,tick,getSettlementState,getCostOfLiving,getEmploymentConditions,getHealthcarePressure,getSettlementConditions,definitions,streamFor};
+  root.WorldSimulation={SIMULATION_SCHEMA_VERSION,RANGES,migrate,initialize,tick,getSettlementState,getCostOfLiving,getEmploymentConditions,getHealthcarePressure,getSettlementConditions,definitions,streamFor,attractiveness};
 })(typeof globalThis!=='undefined'?globalThis:this);

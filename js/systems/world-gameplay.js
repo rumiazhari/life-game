@@ -19,6 +19,11 @@
     const runtime=state(), economy=runtime&&runtime.economy;
     return economy&&Number.isFinite(Number(economy[field]))?Number(economy[field]):fallback;
   }
+  function adjustPaidIncome(nominal,subject){
+    const paid=Math.max(0,Number(nominal)||0), wageIndex=localCost('wageIndex',1);
+    if(subject){ subject.__worldWageIndex=wageIndex; subject.__worldWageNominal=paid; subject.__worldWagePaid=Math.round(paid*wageIndex); }
+    return Math.round(paid*wageIndex);
+  }
   function wrapLiving(original,field){
     if(typeof original!=='function') return original;
     return function(){
@@ -55,25 +60,7 @@
 
     if(originals.currentHousing) root.currentHousing=wrapLiving(originals.currentHousing,'rent');
     if(originals.currentFood) root.currentFood=wrapLiving(originals.currentFood,'cost');
-    if(typeof originals.runEconomy==='function') root.runEconomy=function(){
-      const before=typeof S!=='undefined'&&Number(S.assets)||0;
-      originals.runEconomy.apply(this,arguments);
-      const subject=typeof S!=='undefined'?S:null;
-      if(!subject||!world()) return;
-      let salary=0;
-      const careerList=typeof CAREERS!=='undefined'?CAREERS:[];
-      const incomeTable=typeof INC!=='undefined'?INC:null;
-      if(subject.career){ const track=careerList.find(item=>item.id===subject.career); const stage=track&&track.stages[subject.jobTier-1]; salary=stage&&Number(stage.salary)||0; }
-      else if(subject.jobTier>0&&incomeTable) salary=Number(incomeTable[subject.jobTier])||0;
-      if(subject.jobName==='Conscript') salary=400;
-      if(subject.jobName&&subject.jobName.indexOf('Pensioner')===0) salary=Number(subject.pensionBase)||0;
-      const wageIndex=localCost('wageIndex',1);
-      const bonus=Math.round(salary*(wageIndex-1));
-      if(bonus){ subject.assets+=bonus; }
-      subject.__worldWageIndex=wageIndex;
-      subject.__worldWageDelta=bonus;
-      subject.__worldEconomyAssetsBefore=before;
-    };
+    if(typeof originals.runEconomy==='function') root.runEconomy=function(){ originals.runEconomy.apply(this,arguments); };
     if(typeof originals.rollJobVacancies==='function') root.rollJobVacancies=function(){
       originals.rollJobVacancies.apply(this,arguments);
       const subject=typeof S!=='undefined'?S:null;
@@ -122,11 +109,16 @@
       return result;
     };
     if(typeof originals.educationOptionsForStage==='function') root.educationOptionsForStage=function(stage){
-      const options=originals.educationOptionsForStage.apply(this,arguments)||[];
-      const runtime=state(), pressure=healthPressure(runtime);
-      if(!stage||stage.id!=='university'||pressure<.28||options.length<2) return options;
-      const keep=Math.max(1,Math.ceil(options.length*(1-pressure*.55)));
-      return options.slice().sort((a,b)=>(Number(b.quality)||0)-(Number(a.quality)||0)||String(a.id).localeCompare(String(b.id))).slice(0,keep);
+      if(!stage) return [];
+      let options=originals.educationOptionsForStage.apply(this,arguments)||[];
+      const runtime=state(), capacityPressure=runtime&&runtime.education?clamp(runtime.education.capacityPressure):0;
+      const basicStage=['lower','middle','upper'].includes(stage.id);
+      if(!options.length&&basicStage&&typeof root.institutionsForStage==='function') options=root.institutionsForStage(stage.id);
+      if(!options.length) return options;
+      const qualityFactor=1-capacityPressure*.4;
+      const adjusted=options.map(option=>Object.assign({},option,{quality:clamp((Number(option.quality)||0)*qualityFactor,0,1)}));
+      const keep=Math.max(1,Math.ceil(adjusted.length-capacityPressure*(adjusted.length-1)));
+      return adjusted.slice().sort((a,b)=>(Number(b.quality)||0)-(Number(a.quality)||0)||String(a.id).localeCompare(String(b.id))).slice(0,keep);
     };
     if(typeof originals.educationAnnualPayment==='function') root.educationAnnualPayment=function(){
       const base=Number(originals.educationAnnualPayment.apply(this,arguments))||0;
@@ -139,6 +131,6 @@
     };
     return root.WorldGameplay;
   }
-  root.WorldGameplay={install,originals,localCost,healthPressure};
+  root.WorldGameplay={install,originals,localCost,healthPressure,adjustPaidIncome};
   install();
 })(typeof globalThis!=='undefined'?globalThis:this);

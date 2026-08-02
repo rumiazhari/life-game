@@ -687,6 +687,7 @@ body.burst-open .recent-record{display:none}
   .map-kicker{font-size:9px}.map-kicker span:last-child{font-size:7px}
   .map-selection{align-items:stretch;flex-direction:column}.map-selection .btn{width:100%;font-size:13px}
   .map-actions{align-items:stretch;min-width:0}.map-travel-note{text-align:left}
+  #btn-fastforward{flex:0 1 42%!important;min-width:0;font-size:12px;padding-left:4px;padding-right:4px;letter-spacing:0;overflow:hidden;text-overflow:ellipsis}
 }
 @media(min-width:920px){
   .desk{padding:52px 18px 90px}

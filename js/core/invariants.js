@@ -41,6 +41,13 @@
       ['populationBefore','naturalPopulation','populationAfter','internalIn','internalOut','externalNet'].forEach(key=>{
         if(!Number.isFinite(Number(accounting[key]))) violations.push('migration accounting '+key+' must be finite');
       });
+      if(Number.isFinite(Number(accounting.populationAfter))&&Number.isFinite(Number(accounting.naturalPopulation))&&Number.isFinite(Number(accounting.externalNet))&&
+        Number(accounting.populationAfter)!==Number(accounting.naturalPopulation)+Number(accounting.externalNet)){
+        violations.push('population after migration must equal natural population plus external migration');
+      }
+      if(Number.isFinite(Number(accounting.internalIn))&&Number.isFinite(Number(accounting.internalOut))&&Number(accounting.internalIn)!==Number(accounting.internalOut)){
+        violations.push('internal migration inflow and outflow must match nationally');
+      }
     }
     return violations;
   }

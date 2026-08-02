@@ -17,6 +17,7 @@ function gameplayContext(){
     function medicalAccessFor(){return {facility:'Clinic',quality:.9,costMultiplier:1,delay:0};}
     function medicalExposureRisk(){return .1;}
     function medicalStartOutbreak(id,severity,years){World.publicHealth.outbreak={id,severity,endYear:World.year+years};}
+    function institutionsForStage(stageId){return stageId==='lower'?[{id:'basic-fallback',quality:.7}]:[];}
     function educationOptionsForStage(){return [{id:'a',quality:.5},{id:'b',quality:.7},{id:'c',quality:.9}];}
     function educationAnnualPayment(){return 100;}
     function educationAnnualCommuteCost(){return 100;}`);
@@ -35,4 +36,23 @@ test('world gameplay adapter applies local economy, vacancies, travel, health, a
   assert.ok(parsed.access.quality<.9&&parsed.access.costMultiplier>1&&parsed.access.delay>0);
   assert.ok(parsed.risk>.1);
   assert.ok(parsed.optionCount>=1);
+});
+
+test('wageIndex changes equivalent take-home after garnishment and medical penalties',()=>{
+  const context=gameplayContext();
+  const result=expose(context,`(function(){ const state=World.settlements[World.activeSettlementId]; const nominal=Math.round(100*.6*.86); state.economy.wageIndex=.8; const low=WorldGameplay.adjustPaidIncome(nominal,S); state.economy.wageIndex=1.3; const high=WorldGameplay.adjustPaidIncome(nominal,S); return JSON.stringify({nominal,low,high}); })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.low,Math.round(parsed.nominal*.8));
+  assert.equal(parsed.high,Math.round(parsed.nominal*1.3));
+  assert.ok(parsed.high>parsed.low);
+});
+
+test('education capacity pressure changes availability and preserves basic fallback',()=>{
+  const context=gameplayContext();
+  const result=expose(context,`(function(){ const state=World.settlements[World.activeSettlementId]; const stage={id:'university'}; state.education.capacityPressure=.05; state.publicHealth.shocks.outbreak=1; state.publicHealth.shocks.clinicClosure=1; const healthHigh=educationOptionsForStage(stage); state.publicHealth.shocks.outbreak=0; state.publicHealth.shocks.clinicClosure=0; state.education.capacityPressure=1; const capacityHigh=educationOptionsForStage(stage); const fallback=educationOptionsForStage({id:'lower'}); return JSON.stringify({healthHigh:healthHigh.length,capacityHigh:capacityHigh.length,healthQuality:healthHigh[0].quality,capacityQuality:capacityHigh[0].quality,fallback:fallback.length}); })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.healthHigh,3);
+  assert.equal(parsed.capacityHigh,1);
+  assert.ok(parsed.capacityQuality<parsed.healthQuality);
+  assert.equal(parsed.fallback,1);
 });
