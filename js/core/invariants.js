@@ -10,6 +10,7 @@
   function checkSettlementRuntimeState(world){
     const violations=[];
     const settlements=world&&world.settlements||{};
+    if(world&&Object.keys(settlements).length&&world.simulationSchemaVersion!==2) violations.push('world simulation schema must be version 2');
     Object.keys(settlements).forEach(id=>{
       const state=settlements[id]||{};
       runtimeUnitFields.forEach(([group,key])=>{
@@ -27,13 +28,20 @@
         if(!Number.isFinite(Number(value))||Number(value)<0||Number(value)>1) violations.push('settlement '+id+' industry demand must be between 0 and 1');
       });
       const education=state.education||{}, demographics=state.demographics||{};
-      ['population','initialPopulation','births','deaths','netMigration'].forEach(key=>{
+      ['population','initialPopulation','births','deaths','internalIn','internalOut','externalMigration','netMigration'].forEach(key=>{
         if(!Number.isFinite(Number(demographics[key]))) violations.push('settlement '+id+' demographics.'+key+' must be finite');
       });
       if(Number(demographics.population)<0||Number(demographics.initialPopulation)<0) violations.push('settlement '+id+' population must not be negative');
       if(Number(education.schoolCapacity)<0||Number(education.enrolledStudents)<0) violations.push('settlement '+id+' education counts must not be negative');
       if(Number(education.enrolledStudents)>Number(demographics.population)) violations.push('settlement '+id+' enrolled students cannot exceed population');
     });
+    const accounting=world&&world.lastMigrationAccounting;
+    if(accounting){
+      if(!Number.isFinite(Number(accounting.balance))||Number(accounting.balance)!==0) violations.push('internal migration must balance nationally at zero');
+      ['populationBefore','naturalPopulation','populationAfter','internalIn','internalOut','externalNet'].forEach(key=>{
+        if(!Number.isFinite(Number(accounting[key]))) violations.push('migration accounting '+key+' must be finite');
+      });
+    }
     return violations;
   }
 

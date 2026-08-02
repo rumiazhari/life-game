@@ -175,7 +175,7 @@ function newWorld(){
   const home=pick(KARSEN_SETTLEMENTS);
   const year=RI(1917,1936);
   const homeBuilding=home.buildings.find(b=>b.type==='residence')||home.buildings[0];
-  World={year,place:home.name,activeSettlementId:home.id,activeBuildingId:homeBuilding.id,map:{discoveredSettlementIds:[home.id],visitedSettlementIds:[home.id],selectedSettlementId:home.id,selectedBuildingId:homeBuilding.id,mode:'national'},publicHealth:{outbreak:null,lastNoticeYear:null},mandate:'continuity'};
+  World={year,seed:'karsen:'+year+':'+home.id,simulationSchemaVersion:2,place:home.name,activeSettlementId:home.id,activeBuildingId:homeBuilding.id,map:{discoveredSettlementIds:[home.id],visitedSettlementIds:[home.id],selectedSettlementId:home.id,selectedBuildingId:homeBuilding.id,mode:'national'},publicHealth:{outbreak:null,lastNoticeYear:null,activeSettlementId:home.id},mandate:'continuity'};
   if(typeof WorldSimulation==='object'&&WorldSimulation&&typeof WorldSimulation.initialize==='function') WorldSimulation.initialize(World);
 }
 function currentYear(){ return World?World.year:(S?S.dob+S.age:0); }

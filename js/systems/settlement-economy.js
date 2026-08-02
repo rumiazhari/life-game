@@ -17,8 +17,8 @@
     const markets=buildings.filter(b=>b.type==='market').length;
     const schools=buildings.filter(b=>b.type==='school').length;
     const clinics=buildings.filter(b=>b.type==='clinic').length;
-    const kindBase=kind==='city'?0.68:kind==='town'?0.56:0.44;
-    const industryBase=kind==='city'?0.72:kind==='town'?0.58:0.38;
+    const kindBase=kind==='city'?.68:kind==='town'?.56:.44;
+    const industryBase=kind==='city'?.72:kind==='town'?.58:.38;
     return {
       population:populationOf(settlement),
       urbanity:kind==='city'?1:kind==='town'?.62:.3,
@@ -37,8 +37,9 @@
   function create(settlement){
     const traits=traitProfile(settlement);
     const industryDemand={};
-    const types=['agriculture','manufacturing','services'];
-    types.forEach((type,index)=>{ industryDemand[type]=bounded(traits.industryBase-(index===0?traits.urbanity*.12:0)+(index===1?traits.urbanity*.08:0)); });
+    ['agriculture','manufacturing','services'].forEach((type,index)=>{
+      industryDemand[type]=bounded(traits.industryBase-(index===0?traits.urbanity*.12:0)+(index===1?traits.urbanity*.08:0));
+    });
     return {
       employmentIndex:bounded(traits.employmentBase),
       wageIndex:clamp(traits.wageBase,MIN_INDEX,MAX_INDEX),
@@ -49,17 +50,18 @@
   }
 
   function randomDelta(rng,amount){ return rng&&typeof rng.range==='function'?rng.range(-amount,amount):0; }
-  function national(context,key,fallback){
+  function nationalValue(context,keys,fallback){
     const modifiers=context&&context.national||{};
-    return Number.isFinite(Number(modifiers[key]))?Number(modifiers[key]):fallback;
+    for(const key of keys){ if(Number.isFinite(Number(modifiers[key]))) return Number(modifiers[key]); }
+    return fallback;
   }
 
   function tick(runtime,settlement,context){
-    const previous=runtime.economy;
+    const previous=runtime.economy||create(settlement);
     const traits=traitProfile(settlement);
     const rng=context&&context.random;
-    const nationalEmployment=national(context,'employment',0);
-    const nationalPrices=national(context,'prices',0);
+    const employmentSupport=nationalValue(context,['employmentSupport','employment'],0);
+    const pricePressure=nationalValue(context,['pricePressure','prices'],0);
     const population=runtime.demographics&&runtime.demographics.population||traits.population;
     const initial=runtime.demographics&&runtime.demographics.initialPopulation||traits.population||1;
     const populationPressure=clamp(population/initial-1,-.35,.35);
@@ -67,16 +69,16 @@
     const industryDemand={};
     Object.keys(previous.industryDemand||{}).forEach(type=>{
       const target=type==='agriculture'?traits.industryBase-traits.urbanity*.12:type==='manufacturing'?traits.industryBase+traits.urbanity*.08:traits.employmentBase;
-      industryDemand[type]=bounded(previous.industryDemand[type]*.82+target*.18+nationalEmployment*.08+randomDelta(rng,.018));
+      industryDemand[type]=bounded(previous.industryDemand[type]*.82+target*.18+employmentSupport*.08+randomDelta(rng,.018));
     });
     const industryAverage=Object.values(industryDemand).reduce((sum,value)=>sum+value,0)/Math.max(1,Object.keys(industryDemand).length);
-    const employmentTarget=clamp(traits.employmentBase*.62+industryAverage*.35+nationalEmployment+randomDelta(rng,.018),0,1);
+    const employmentTarget=clamp(traits.employmentBase*.62+industryAverage*.35+employmentSupport+randomDelta(rng,.018),0,1);
     const employmentIndex=bounded(previous.employmentIndex*.72+employmentTarget*.28);
-    const wageTarget=clamp(traits.wageBase+employmentIndex*.12+nationalEmployment*.08,MIN_INDEX,MAX_INDEX);
+    const wageTarget=clamp(traits.wageBase+employmentIndex*.12+employmentSupport*.08,MIN_INDEX,MAX_INDEX);
     const wageIndex=clamp(previous.wageIndex*.8+wageTarget*.2+randomDelta(rng,.012),MIN_INDEX,MAX_INDEX);
-    const foodTarget=clamp(traits.foodBase+(1-employmentIndex)*.08+nationalPrices*.12,MIN_INDEX,MAX_INDEX);
+    const foodTarget=clamp(traits.foodBase+(1-employmentIndex)*.08+pricePressure*.12,MIN_INDEX,MAX_INDEX);
     const foodPriceIndex=clamp(previous.foodPriceIndex*.82+foodTarget*.18+randomDelta(rng,.01),MIN_INDEX,MAX_INDEX);
-    const rentTarget=clamp(traits.rentBase+populationPressure*.38+migrationPressure*4+employmentIndex*.06+nationalPrices*.06,MIN_INDEX,MAX_INDEX);
+    const rentTarget=clamp(traits.rentBase+populationPressure*.38+migrationPressure*4+employmentIndex*.06+pricePressure*.06,MIN_INDEX,MAX_INDEX);
     const rentIndex=clamp(previous.rentIndex*.78+rentTarget*.22+randomDelta(rng,.012),MIN_INDEX,MAX_INDEX);
     runtime.economy={employmentIndex,wageIndex,foodPriceIndex,rentIndex,industryDemand};
     return runtime.economy;
