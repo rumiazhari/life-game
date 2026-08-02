@@ -27,6 +27,13 @@ test('clinic capacity reflects population coverage, not only clinic count',()=>{
   assert.ok(parsed.small-parsed.large>.2);
 });
 
+test('runtime population reduces target clinic capacity when clinic count is unchanged',()=>{
+  const context=createWorldContext();
+  const result=expose(context,`(function(){ const settlement={kind:'town',population:'2,000',buildings:[{type:'clinic'}]}; return JSON.stringify({small:PublicHealth.clinicCapacityTarget(settlement,2000,0,0),large:PublicHealth.clinicCapacityTarget(settlement,300000,0,0)}); })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.small>parsed.large);
+});
+
 test('public-health investment improves sanitation',()=>{
   const context=createWorldContext();
   const result=expose(context,`(function(){ Random.setSeed('investment'); newWorld(); const settlement=settlementById(World.activeSettlementId); const baseline=JSON.parse(JSON.stringify(World.settlements[World.activeSettlementId])); const invested=JSON.parse(JSON.stringify(baseline)); PublicHealth.triggerShock(invested,'investment',1,5,World.year); PublicHealth.tick(baseline,settlement,{year:World.year+1}); PublicHealth.tick(invested,settlement,{year:World.year+1}); return JSON.stringify({baseline:baseline.publicHealth.sanitation,invested:invested.publicHealth.sanitation}); })()`);

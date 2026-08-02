@@ -6,13 +6,35 @@
     ['publicHealth','sanitation'],['publicHealth','clinicCapacity'],['publicHealth','clinicDemand'],['publicHealth','outbreakRisk'],
     ['security','unrest'],['security','surveillance'],['security','checkpointPressure'],['education','capacityPressure']
   ];
+  const requiredGroups=['economy','publicHealth','education','security','demographics'];
+  const expectedNestedFields={
+    economy:['employmentIndex','wageIndex','foodPriceIndex','rentIndex'],
+    publicHealth:['sanitation','clinicCapacity','clinicDemand','outbreakRisk'],
+    education:['schoolCapacity','enrolledStudents','capacityPressure'],
+    security:['unrest','surveillance','checkpointPressure'],
+    demographics:['population','initialPopulation','populationBefore','naturalPopulation','populationAfter','births','deaths','internalIn','internalOut','externalMigration','netMigration']
+  };
+  function knownSettlementIds(world){
+    const ids=new Set();
+    if(typeof KARSEN_SETTLEMENTS!=='undefined'&&Array.isArray(KARSEN_SETTLEMENTS)) KARSEN_SETTLEMENTS.forEach(item=>{if(item&&item.id)ids.add(item.id);});
+    if(world&&Array.isArray(world.settlementDefinitions)) world.settlementDefinitions.forEach(item=>{if(item&&item.id)ids.add(item.id);});
+    return ids;
+  }
 
   function checkSettlementRuntimeState(world){
     const violations=[];
     const settlements=world&&world.settlements||{};
     if(world&&Object.keys(settlements).length&&world.simulationSchemaVersion!==2) violations.push('world simulation schema must be version 2');
+    const knownIds=knownSettlementIds(world);
+    if(world&&typeof KARSEN_SETTLEMENTS!=='undefined'&&Array.isArray(KARSEN_SETTLEMENTS)) KARSEN_SETTLEMENTS.forEach(item=>{
+      if(item&&item.id&&!Object.prototype.hasOwnProperty.call(settlements,item.id)) violations.push('missing runtime state for settlement '+item.id);
+    });
     Object.keys(settlements).forEach(id=>{
       const state=settlements[id]||{};
+      if(!knownIds.has(id)) violations.push('runtime settlement '+id+' is not a static or explicit settlement definition');
+      requiredGroups.forEach(group=>{
+        if(!state[group]||typeof state[group]!=='object'||Array.isArray(state[group])) violations.push('settlement '+id+' requires '+group+' runtime state');
+      });
       runtimeUnitFields.forEach(([group,key])=>{
         const value=state[group]&&state[group][key];
         if(!Number.isFinite(Number(value))||Number(value)<0||Number(value)>1) violations.push('settlement '+id+' '+group+'.'+key+' must be between 0 and 1');
@@ -27,13 +49,32 @@
       Object.values(economy.industryDemand||{}).forEach(value=>{
         if(!Number.isFinite(Number(value))||Number(value)<0||Number(value)>1) violations.push('settlement '+id+' industry demand must be between 0 and 1');
       });
+      ['agriculture','manufacturing','services'].forEach(key=>{
+        if(!Number.isFinite(Number(economy.industryDemand&&economy.industryDemand[key]))) violations.push('settlement '+id+' economy.industryDemand.'+key+' must be finite');
+      });
+      const shocks=state.publicHealth&&state.publicHealth.shocks||{};
+      const shockTypes=typeof PublicHealth!=='undefined'&&Array.isArray(PublicHealth.SHOCK_TYPES)?PublicHealth.SHOCK_TYPES:[];
+      shockTypes.forEach(key=>{
+        if(!Number.isFinite(Number(shocks[key]))||Number(shocks[key])<0||Number(shocks[key])>1) violations.push('settlement '+id+' publicHealth.shocks.'+key+' must be between 0 and 1');
+      });
       const education=state.education||{}, demographics=state.demographics||{};
-      ['population','initialPopulation','births','deaths','internalIn','internalOut','externalMigration','netMigration'].forEach(key=>{
-        if(!Number.isFinite(Number(demographics[key]))) violations.push('settlement '+id+' demographics.'+key+' must be finite');
+      Object.keys(expectedNestedFields).forEach(group=>{
+        const target=state[group]||{};
+        expectedNestedFields[group].forEach(key=>{
+          if(!Number.isFinite(Number(target[key]))) violations.push('settlement '+id+' '+group+'.'+key+' must be finite');
+        });
       });
       if(Number(demographics.population)<0||Number(demographics.initialPopulation)<0) violations.push('settlement '+id+' population must not be negative');
       if(Number(education.schoolCapacity)<0||Number(education.enrolledStudents)<0) violations.push('settlement '+id+' education counts must not be negative');
       if(Number(education.enrolledStudents)>Number(demographics.population)) violations.push('settlement '+id+' enrolled students cannot exceed population');
+      const hasAnnualAccounting=['populationBefore','naturalPopulation','populationAfter'].every(key=>Number.isFinite(Number(demographics[key])));
+      if(hasAnnualAccounting){
+        const expectedNatural=Number(demographics.populationBefore)+Number(demographics.births)-Number(demographics.deaths);
+        const expectedAfter=Number(demographics.naturalPopulation)+Number(demographics.internalIn)-Number(demographics.internalOut)+Number(demographics.externalMigration);
+        if(Number(demographics.naturalPopulation)!==expectedNatural) violations.push('settlement '+id+' natural population equation does not balance');
+        if(Number(demographics.populationAfter)!==expectedAfter||Number(demographics.population)!==Number(demographics.populationAfter)) violations.push('settlement '+id+' annual population equation does not balance');
+        if(Number(demographics.internalOut)>Number(demographics.naturalPopulation)) violations.push('settlement '+id+' internalOut exceeds available pre-migration population');
+      }
     });
     const accounting=world&&world.lastMigrationAccounting;
     if(accounting){

@@ -37,7 +37,7 @@
       publicHealth:root.PublicHealth.create(settlement),
       education:{schoolCapacity:integer(populationOf(settlement)*(settlement&&settlement.kind==='city'?.11:settlement&&settlement.kind==='town'?.09:.07)),enrolledStudents:integer(populationOf(settlement)*.055),capacityPressure:0},
       security:{unrest:bounded((settlement&&settlement.surveillance||0)/100*.22),surveillance:bounded((settlement&&settlement.surveillance||0)/100),checkpointPressure:0},
-      demographics:{population:populationOf(settlement),initialPopulation:populationOf(settlement),births:0,deaths:0,internalIn:0,internalOut:0,externalMigration:0,netMigration:0}
+      demographics:{population:populationOf(settlement),initialPopulation:populationOf(settlement),populationBefore:populationOf(settlement),naturalPopulation:populationOf(settlement),populationAfter:populationOf(settlement),births:0,deaths:0,internalIn:0,internalOut:0,externalMigration:0,netMigration:0}
     };
   }
   function repairRuntime(runtime,settlement){
@@ -63,12 +63,20 @@
     const sec=runtime.security, ds=defaults.security;
     ['unrest','surveillance','checkpointPressure'].forEach(key=>mergeField(sec,key,ds[key],v=>Number.isFinite(Number(v))&&Number(v)>=0&&Number(v)<=1));
     const d=runtime.demographics, dd=defaults.demographics;
-    ['population','initialPopulation','births','deaths','internalIn','internalOut','externalMigration','netMigration'].forEach(key=>mergeField(d,key,dd[key],v=>Number.isFinite(Number(v))&&Number(v)>=0||key==='netMigration'||key==='externalMigration'));
+    ['population','initialPopulation','populationBefore','naturalPopulation','populationAfter','births','deaths','internalIn','internalOut','externalMigration','netMigration'].forEach(key=>mergeField(d,key,dd[key],v=>Number.isFinite(Number(v))&&Number(v)>=0||key==='netMigration'||key==='externalMigration'));
     d.population=Math.max(0,finite(d.population,dd.population));
     d.initialPopulation=Math.max(0,finite(d.initialPopulation,dd.initialPopulation));
+    d.populationBefore=Math.max(0,finite(d.populationBefore,d.population));
+    d.naturalPopulation=Math.max(0,finite(d.naturalPopulation,d.population));
+    d.populationAfter=Math.max(0,finite(d.populationAfter,d.population));
     d.births=Math.max(0,finite(d.births,0)); d.deaths=Math.max(0,finite(d.deaths,0));
     d.internalIn=Math.max(0,finite(d.internalIn,0)); d.internalOut=Math.max(0,finite(d.internalOut,0));
     d.externalMigration=finite(d.externalMigration,0); d.netMigration=finite(d.netMigration,0);
+    const expectedNatural=d.populationBefore+d.births-d.deaths;
+    const expectedAfter=d.naturalPopulation+d.internalIn-d.internalOut+d.externalMigration;
+    if(d.naturalPopulation!==expectedNatural||d.populationAfter!==expectedAfter||d.populationAfter!==d.population){
+      d.populationBefore=d.population; d.naturalPopulation=d.population; d.populationAfter=d.population;
+    }
     ed.capacityPressure=bounded(ed.enrolledStudents/Math.max(1,ed.schoolCapacity));
     return runtime;
   }
@@ -129,6 +137,7 @@
     const previous=runtime.demographics, economy=runtime.economy, health=runtime.publicHealth;
     const rng=streamFor(world,year,settlement.id,'demography');
     const population=Math.max(0,previous.population);
+    previous.populationBefore=population;
     const rural=settlement&&settlement.kind==='village'?1:settlement&&settlement.kind==='town'?.55:0;
     const birthRate=clamp(.006+rural*.003+rng.range(-.00035,.00035),.002,.014);
     const deathRate=clamp(.008+(1-health.sanitation)*.006+health.outbreakRisk*.004-nationalValue(national,['healthSupport','health'],0)*.002,.002,.022);
@@ -136,7 +145,8 @@
     const deaths=Math.min(population,Math.round(population*deathRate));
     previous.births=births; previous.deaths=deaths;
     previous.internalIn=0; previous.internalOut=0; previous.externalMigration=0; previous.netMigration=0;
-    previous.population=Math.max(0,population+births-deaths);
+    previous.naturalPopulation=Math.max(0,population+births-deaths);
+    previous.population=previous.naturalPopulation;
     return previous;
   }
   function applyInternalMigration(world,defs,year){
@@ -219,6 +229,7 @@
       const external=requestedExternal<0?-Math.min(Math.abs(requestedExternal),runtime.demographics.population):requestedExternal;
       runtime.demographics.externalMigration=external;
       runtime.demographics.population=Math.max(0,runtime.demographics.population+external);
+      runtime.demographics.populationAfter=runtime.demographics.population;
       runtime.demographics.netMigration=runtime.demographics.internalIn-runtime.demographics.internalOut+external;
       externalNet+=external;
       updateEducation(runtime,settlement);

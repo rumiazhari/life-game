@@ -18,11 +18,12 @@
     const text=String(settlement&&settlement.population||'0').replace(/[^0-9]/g,'');
     return Math.max(0,Number(text)||0);
   }
-  function clinicCoverage(settlement){
-    return clamp(clinicCount(settlement)*50000/Math.max(1,populationOf(settlement)));
+  function clinicCoverage(settlement,runtimePopulation){
+    const population=Number.isFinite(Number(runtimePopulation))?Math.max(0,Number(runtimePopulation)):populationOf(settlement);
+    return clamp(clinicCount(settlement)*50000/Math.max(1,population));
   }
-  function clinicCapacityTarget(settlement,investment,clinicClosure){
-    return clamp(.12+clinicCoverage(settlement)*.38+(settlement&&settlement.kind==='city'?.08:0)+investment*.2-clinicClosure*.55);
+  function clinicCapacityTarget(settlement,runtimePopulation,investment=0,clinicClosure=0){
+    return clamp(.12+clinicCoverage(settlement,runtimePopulation)*.38+(settlement&&settlement.kind==='city'?.08:0)+investment*.2-clinicClosure*.55);
   }
   function emptyShocks(){
     const shocks={}; SHOCK_TYPES.forEach(type=>{shocks[type]=0;}); return shocks;
@@ -30,7 +31,7 @@
   function create(settlement){
     const clinics=clinicCount(settlement);
     const sanitation=clamp(kindBase(settlement)+clinics*.035);
-    const clinicCapacity=clinicCapacityTarget(settlement,0,0);
+    const clinicCapacity=clinicCapacityTarget(settlement,populationOf(settlement),0,0);
     return {sanitation,clinicCapacity,clinicDemand:clamp(.12+(1-sanitation)*.18),outbreakRisk:clamp((1-sanitation)*.3),shocks:emptyShocks(),lastShockYear:null};
   }
   function nationalValue(context,keys,fallback){
@@ -78,7 +79,7 @@
       .1+(1-previous.sanitation)*.2+Math.min(.12,population/1000000*.12)+influx*.2+medicineShortage*.04+
       nationalValue(context,['healthDemand'],0)+((rng&&rng.range)?rng.range(-.012,.012):0)
     )*.28);
-    const capacityTarget=clinicCapacityTarget(settlement,investment,clinicClosure);
+    const capacityTarget=clinicCapacityTarget(settlement,population,investment,clinicClosure);
     const clinicCapacity=clamp(previous.clinicCapacity*.86+capacityTarget*.14);
     const sanitationTarget=clamp(kindBase(settlement)+clinicCount(settlement)*.035-schoolCount(settlement)*.006+sanitationSupport+investment*.12-shocks.sanitationFailure*.55);
     const sanitation=clamp(previous.sanitation*.84+sanitationTarget*.16+((rng&&rng.range)?rng.range(-.01,.01):0));

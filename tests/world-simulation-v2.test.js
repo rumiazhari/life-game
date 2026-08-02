@@ -64,6 +64,16 @@ test('migration attractiveness responds to employment, wages, rent, health, and 
   assert.ok(parsed.high>parsed.low);
 });
 
+test('invariants reject missing, unknown, and unbalanced settlement runtime state',()=>{
+  const context=newContext('invariant-audit');
+  const result=expose(context,`(function(){ const missing=World.settlements.branec; delete World.settlements.branec; const missingViolations=Invariants.check(null,World).violations; World.settlements.branec=missing; World.settlements.ghost=JSON.parse(JSON.stringify(missing)); const unknownViolations=Invariants.check(null,World).violations; delete World.settlements.ghost; const d=World.settlements.branec.demographics; d.populationBefore=100; d.naturalPopulation=90; d.populationAfter=90; d.population=90; d.births=0; d.deaths=10; d.internalIn=0; d.internalOut=100; d.externalMigration=0; const equationViolations=Invariants.check(null,World).violations; return JSON.stringify({missing:missingViolations,unknown:unknownViolations,equation:equationViolations}); })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.missing.some(item=>item.includes('missing runtime state for settlement branec')));
+  assert.ok(parsed.unknown.some(item=>item.includes('not a static or explicit settlement definition')));
+  assert.ok(parsed.equation.some(item=>item.includes('internalOut exceeds available pre-migration population')));
+  assert.ok(parsed.equation.some(item=>item.includes('annual population equation does not balance')));
+});
+
 test('outbreak pressure reaches critical and decays during recovery',()=>{
   const context=newContext('outbreak-recovery');
   const result=expose(context,`(function(){ const id=World.activeSettlementId; const state=World.settlements[id]; PublicHealth.triggerShock(state,'outbreak',1,3,World.year); PublicHealth.triggerShock(state,'clinicClosure',.95,3,World.year); const peak=[]; for(let i=0;i<20;i++){ World.year++; WorldSimulation.tick(World,{year:World.year}); peak.push(WorldSimulation.getHealthcarePressure(World,id)); } return JSON.stringify({peak:Math.max(...peak),last:peak[peak.length-1],label:PublicHealth.pressureLabel(peak[peak.length-1])}); })()`);
