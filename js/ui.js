@@ -188,11 +188,13 @@ function renderInventory(){
   const house=currentHousing(), food=currentFood();
   const conditions=activeConditions();
   const location=currentSettlement(), building=currentBuilding(), travel=S.traveling?settlementById(S.traveling.to):null;
+  const settlementConditions=typeof WorldSimulation==='object'&&WorldSimulation&&World?WorldSimulation.getSettlementConditions(World,location.id):null;
   const standing='<div class="personal-ledger"><div class="sec-h">PERSONAL STANDING <span>LIVE FILE</span></div>'+ 
     '<div class="standing-grid"><div><b>FREEDOM</b><span>'+S.freedom+' · '+freedomLabel(S.freedom)+'</span></div><div><b>SCRUTINY</b><span>'+S.scrutiny+' · '+scrutinyLabel(S.scrutiny)+'</span></div>'+ 
     '<div><b>BUREAU FAVOR</b><span>'+S.bureauFavor+' / 3</span></div><div><b>SECURITY</b><span>'+securityLabel(Math.min(S.housingSecurity,S.financialSecurity))+'</span></div></div>'+ 
     '<div class="medical-line"><b>MEDICAL FILE</b><span>'+(conditions.length?conditions.map(c=>MEDICAL_CONDITIONS[c.id].name+(c.known?'':' · unexamined')).join(' · '):(S.medicalRecord?'no active condition':'not yet opened'))+'</span></div>'+ 
-    '<div class="location-line"><b>LOCATION</b><span>'+location.name+' · '+(building?building.name:'address pending')+(travel?' · travelling to '+travel.name:'')+'</span></div></div>';
+    '<div class="location-line"><b>LOCATION</b><span>'+location.name+' · '+(building?building.name:'address pending')+(travel?' · travelling to '+travel.name:'')+'</span></div>'+
+    (settlementConditions?'<div class="settlement-conditions"><div class="sec-h">SETTLEMENT CONDITIONS <span>SIMULATION</span></div><div class="condition-grid"><div><b>EMPLOYMENT</b><span>'+settlementConditions.employment+'</span></div><div><b>COST OF LIVING</b><span>'+settlementConditions.costOfLiving+'</span></div><div><b>HEALTHCARE PRESSURE</b><span>'+settlementConditions.healthcare+'</span></div><div><b>UNREST</b><span>'+settlementConditions.unrest+'</span></div><div><b>SURVEILLANCE</b><span>'+settlementConditions.surveillance+'</span></div></div></div>':'')+'</div>';
   if(S.age<16||S.livingAtHome){
     const famT=FAMILY_TIERS.find(f=>f.id===S.familyTier);
     let hc='<div class="aempty">'+(S.age<16?'Dependent on parents — the family provides. No ledger of their own until sixteen.':'Still living at home — rent-free, fed at the family table, for as long as that lasts.')+'</div>';
@@ -2213,7 +2215,12 @@ function advanceYear(suppressBurst,quiet){
   if(!S||!S.alive||slipOpen) return;
   if(S.age>0) evaluateYearStreak(quiet);
   yearLog=[]; collectingYear=true;
-  S.age++; World.year++; resolveTravel(); runHoldTick(); snd('stamp'); shake(); window.C={};
+  S.age++; World.year++;
+  // The world tick runs after the calendar advances and before travel, economy,
+  // and personal systems. It establishes this year's settlement conditions;
+  // every existing yearly call remains in its original order after this point.
+  if(typeof WorldSimulation==='object'&&WorldSimulation&&typeof WorldSimulation.tick==='function') WorldSimulation.tick(World,{random:Random,year:World.year});
+  resolveTravel(); runHoldTick(); snd('stamp'); shake(); window.C={};
   runFollowups(); runHistory(); runMilestones(); runEconomy(); runPersonalYearTick();
   if(S.jobTier===0&&S.age>=16&&S.age<65) rollJobVacancies();
   const __newStage=stageForAge(S.age);

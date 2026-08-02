@@ -2,6 +2,40 @@
 
 (function(root){
   const boundedStats=['health','happiness','smarts','looks','relations','vice','crime','scrutiny','freedom','housingSecurity','financialSecurity'];
+  const runtimeUnitFields=[
+    ['publicHealth','sanitation'],['publicHealth','clinicCapacity'],['publicHealth','clinicDemand'],['publicHealth','outbreakRisk'],
+    ['security','unrest'],['security','surveillance'],['security','checkpointPressure'],['education','capacityPressure']
+  ];
+
+  function checkSettlementRuntimeState(world){
+    const violations=[];
+    const settlements=world&&world.settlements||{};
+    Object.keys(settlements).forEach(id=>{
+      const state=settlements[id]||{};
+      runtimeUnitFields.forEach(([group,key])=>{
+        const value=state[group]&&state[group][key];
+        if(!Number.isFinite(Number(value))||Number(value)<0||Number(value)>1) violations.push('settlement '+id+' '+group+'.'+key+' must be between 0 and 1');
+      });
+      const economy=state.economy||{};
+      ['employmentIndex'].forEach(key=>{
+        if(!Number.isFinite(Number(economy[key]))||Number(economy[key])<0||Number(economy[key])>1) violations.push('settlement '+id+' economy.'+key+' must be between 0 and 1');
+      });
+      ['wageIndex','foodPriceIndex','rentIndex'].forEach(key=>{
+        if(!Number.isFinite(Number(economy[key]))||Number(economy[key])<.65||Number(economy[key])>1.55) violations.push('settlement '+id+' economy.'+key+' must be between 0.65 and 1.55');
+      });
+      Object.values(economy.industryDemand||{}).forEach(value=>{
+        if(!Number.isFinite(Number(value))||Number(value)<0||Number(value)>1) violations.push('settlement '+id+' industry demand must be between 0 and 1');
+      });
+      const education=state.education||{}, demographics=state.demographics||{};
+      ['population','initialPopulation','births','deaths','netMigration'].forEach(key=>{
+        if(!Number.isFinite(Number(demographics[key]))) violations.push('settlement '+id+' demographics.'+key+' must be finite');
+      });
+      if(Number(demographics.population)<0||Number(demographics.initialPopulation)<0) violations.push('settlement '+id+' population must not be negative');
+      if(Number(education.schoolCapacity)<0||Number(education.enrolledStudents)<0) violations.push('settlement '+id+' education counts must not be negative');
+      if(Number(education.enrolledStudents)>Number(demographics.population)) violations.push('settlement '+id+' enrolled students cannot exceed population');
+    });
+    return violations;
+  }
 
   function check(subject,world){
     const violations=[];
@@ -10,6 +44,7 @@
     if(s&&w&&Number.isFinite(s.dob)&&Number.isFinite(s.age)&&Number.isFinite(w.year)&&w.year!==s.dob+s.age){
       violations.push('world year must equal subject birth year plus age');
     }
+    violations.push(...checkSettlementRuntimeState(w));
     if(s&&s.assets!=null&&!Number.isFinite(Number(s.assets))) violations.push('assets must be finite');
     if(s){
       boundedStats.forEach(key=>{
@@ -36,5 +71,5 @@
     return result;
   }
 
-  root.Invariants={boundedStats,check,assertValid};
+  root.Invariants={boundedStats,check,assertValid,checkSettlementRuntimeState};
 })(typeof globalThis!=='undefined'?globalThis:this);

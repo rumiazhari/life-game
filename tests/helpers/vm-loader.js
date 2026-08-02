@@ -6,6 +6,7 @@ const vm=require('node:vm');
 
 const root=path.resolve(__dirname,'..','..');
 const coreFiles=['js/core/random.js','js/core/year-engine.js','js/core/effects.js','js/core/invariants.js'];
+const worldFiles=['js/lore.js','js/data.js','js/state.js','js/systems/settlement-economy.js','js/systems/public-health.js','js/systems/world-simulation.js'];
 
 function createGameContext(files=[]){
   const context={console,Math,Date,JSON,Set,Map,Object,Array,String,Number,Boolean,parseInt,parseFloat,isNaN};
@@ -25,8 +26,14 @@ function loadGameFiles(context,files){
   return context;
 }
 
+function createWorldContext(files=[]){
+  const context=createGameContext();
+  loadGameFiles(context,[...worldFiles,...files]);
+  return context;
+}
+
 function expose(context,code){
   return vm.runInContext(code,context);
 }
 
-module.exports={createGameContext,loadGameFiles,expose,root};
+module.exports={createGameContext,createWorldContext,loadGameFiles,expose,root,worldFiles};
