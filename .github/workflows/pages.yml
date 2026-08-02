@@ -1,8 +1,12 @@
-name: Deploy to GitHub Pages
+name: Deploy Life File to GitHub Pages
 
 on:
+  pull_request:
+    branches:
+      - master
   push:
-    branches: [master]
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
@@ -15,17 +19,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run test suite
+        run: npm test
+
   deploy:
+    needs: test
+    if: >
+      needs.test.result == 'success' &&
+      (
+        (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
+      )
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Check out repository
         uses: actions/checkout@v4
-      - name: Setup Pages
+      - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
-      - name: Upload site artifact
+      - name: Upload repository root
         uses: actions/upload-pages-artifact@v3
         with:
           path: .
