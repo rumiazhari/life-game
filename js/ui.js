@@ -14,7 +14,7 @@ function applyFx(fx){
 }
 function operationFailure(tier){
   const table=[[0.65,0.27,0.07,0.01],[0.40,0.35,0.18,0.07],[0.20,0.32,0.30,0.18]][tier];
-  const r=Math.random(); let acc=0;
+  const r=Random.next(); let acc=0;
   for(let i=0;i<table.length;i++){ acc+=table[i]; if(r<=acc) return i; }
   return table.length-1;
 }
@@ -1397,7 +1397,7 @@ function affairSeverityWeights(spouseContact,wasMarried){
 }
 function pickWeightedKey(weights){
   const total=Object.values(weights).reduce((a,b)=>a+b,0);
-  let r=Math.random()*total;
+  let r=Random.next()*total;
   for(const k in weights){ r-=weights[k]; if(r<=0) return k; }
   return Object.keys(weights)[0];
 }
@@ -1632,7 +1632,7 @@ function runRandomEvents(){
     const pool=EVENTS.filter(e=>S.age>=e.a[0]&&S.age<=e.a[1]&&(!e.if||e.if(S))&&(!S.cool[e.id]||S.age>=S.cool[e.id]));
     if(!pool.length) break;
     const weighted=pool.map(e=>{let w=e.w||2; if(e.dark)w*=(0.3+S.vice*0.4+(S.happiness<40?1.1:0))*darkMult; return {e,w:Math.max(w,0.05)};});
-    const tot=weighted.reduce((a,x)=>a+x.w,0); let r=Math.random()*tot, e=weighted[weighted.length-1].e;
+    const tot=weighted.reduce((a,x)=>a+x.w,0); let r=Random.next()*tot, e=weighted[weighted.length-1].e;
     for(const x of weighted){r-=x.w; if(r<=0){e=x.e;break;}}
     if(e.medical&&typeof medicalEventExposure==='function') medicalEventExposure(e.medical,S);
     if(e.side)e.side(S); logEv(vtext(e), typeof e.fx==='function'?e.fx(S):e.fx, undefined, undefined, !!e.once);
@@ -2209,7 +2209,7 @@ function runHoldTick(){
   const alive=livingHoldMembers();
   if(alive.length){ const avgLoy=alive.reduce((a,m)=>a+holdLoyalty(m),0)/alive.length; Hold.trust=clamp(Math.round(Hold.trust*0.95+avgLoy*0.05),0,100); }
 }
-function advance(suppressBurst,quiet){
+function advanceYear(suppressBurst,quiet){
   if(!S||!S.alive||slipOpen) return;
   if(S.age>0) evaluateYearStreak(quiet);
   yearLog=[]; collectingYear=true;
@@ -2244,6 +2244,8 @@ function advance(suppressBurst,quiet){
   }
   if(!S.alive) handleDeath();
 }
+YearEngine.configure((suppressBurst,quiet)=>advanceYear(suppressBurst,quiet));
+function advance(suppressBurst,quiet){ return YearEngine.advance({suppressBurst,quiet}); }
 function fastForward(){
   if(!S||!S.alive||slipOpen) return;
   let years=0; quietMode=true;
