@@ -265,16 +265,35 @@ const CAREERS=[
 ];
 const CAREER_EXP=[2,3,4,6];
 function careerStageQualifies(track,stageIdx){ const st=track.stages[stageIdx]; if(!st) return false;
-  if(track.minEdu && eduRank()<EDU_RANK[track.minEdu]) return false;
+  const requiredEdu=typeof educationCareerEducationRequirement==='function'?educationCareerEducationRequirement(track,stageIdx):track.minEdu;
+  if(requiredEdu && eduRank()<EDU_RANK[requiredEdu]) return false;
+  if(typeof educationCareerMajorAllowed==='function'&&!educationCareerMajorAllowed(track,stageIdx)) return false;
   return S.age>=TIER_MINAGE[stageIdx+1] && Object.keys(st.req).every(k=>(S.skills[k]||0)>=st.req[k]); }
 function careerMissingSkills(track,stageIdx){ const st=track.stages[stageIdx]; if(!st) return [];
   return Object.keys(st.req).filter(k=>(S.skills[k]||0)<st.req[k]).map(k=>SKILLS[k].name.toLowerCase()); }
+function careerMissingRequirements(track,stageIdx){
+  const missing=[];
+  const requiredEdu=typeof educationCareerEducationRequirement==='function'?educationCareerEducationRequirement(track,stageIdx):track.minEdu;
+  if(requiredEdu&&eduRank()<EDU_RANK[requiredEdu]) missing.push(SCHOOL_STAGES.find(x=>x.id===requiredEdu).name+' completed');
+  if(typeof educationCareerMajorAllowed==='function'&&!educationCareerMajorAllowed(track,stageIdx)){
+    const major=typeof educationCareerRequirement==='function'?educationCareerRequirement(track,stageIdx):'required degree';
+    if(major) missing.push('degree in '+major);
+  }
+  if(S.age<TIER_MINAGE[stageIdx+1]) missing.push('age '+TIER_MINAGE[stageIdx+1]);
+  return missing.concat(careerMissingSkills(track,stageIdx));
+}
 function readyForPromotion(track){ if(S.jobTier<1||S.jobTier>=5) return false;
-  const need=track.minEdu?EDU_RANK[track.minEdu]:0;
+  const requiredEdu=typeof educationCareerEducationRequirement==='function'?educationCareerEducationRequirement(track,S.jobTier):track.minEdu;
+  const need=requiredEdu?EDU_RANK[requiredEdu]:0;
   const fast=eduRank()>need?1:0;
-  return careerStageQualifies(track,S.jobTier) && S.careerYears>=Math.max(1,CAREER_EXP[S.jobTier-1]-fast); }
+  const educationFast=typeof careerYearsRequired==='function'?careerYearsRequired(track,S.jobTier):CAREER_EXP[S.jobTier-1];
+  return careerStageQualifies(track,S.jobTier) && S.careerYears>=Math.max(1,educationFast-fast); }
 function rollJobVacancies(){
-  S.vacancies=CAREERS.map(track=>({track:track.id, stage: (chance(0.6)&&careerStageQualifies(track,0))?0:-1}));
+  S.vacancies=CAREERS.map(track=>{
+    const advantage=typeof educationCareerAdvantage==='function'?educationCareerAdvantage(track):{hiringBonus:0};
+    const openingChance=clamp(0.6+(advantage.hiringBonus||0),0.1,0.95);
+    return {track:track.id, stage:(chance(openingChance)&&careerStageQualifies(track,0))?0:-1};
+  });
 }
 const STATKEYS={health:'HEALTH',happiness:'HAPPINESS',smarts:'SMARTS',looks:'LOOKS',relations:'RELATIONS'};
 function lastAncestor(){ return (typeof Lineage!=='undefined'&&Lineage&&Lineage.pastSubjects&&Lineage.pastSubjects.length)?Lineage.pastSubjects[Lineage.pastSubjects.length-1]:null; }
@@ -497,16 +516,16 @@ function askParentDebtOption(severity){
 
 /* ================= SCHOOLING (parent-gated education ladder) ================= */
 const SCHOOL_STAGES=[
- {id:'lower',name:'Lower School',pupilTitle:'Pupil, Lower School',startAge:6,years:6,smartsPerYear:2,scholarSmarts:50,requireWealth:false,
+  {id:'lower',name:'Lower School',pupilTitle:'Pupil, Lower School',startAge:6,endAge:11,years:6,smartsPerYear:2,scholarSmarts:50,requireWealth:false,
    declineNote:'stay home instead',
    completeText:'Subject completed Lower School — sums, letters, and the first taste of sitting still.',completeFx:{smarts:4,happiness:2}},
- {id:'middle',name:'Middle School',pupilTitle:'Pupil, Middle School',startAge:12,years:3,smartsPerYear:3,scholarSmarts:52,requireWealth:false,
+  {id:'middle',name:'Middle School',pupilTitle:'Pupil, Middle School',startAge:12,endAge:15,years:3,smartsPerYear:3,scholarSmarts:52,requireWealth:false,
    declineNote:'go to work instead',
    completeText:'Subject completed Middle School, marks middling to fair.',completeFx:{smarts:5,happiness:2}},
- {id:'upper',name:'Upper School',pupilTitle:'Student, Upper School',startAge:15,years:3,smartsPerYear:3,scholarSmarts:56,requireWealth:false,
+  {id:'upper',name:'Upper School',pupilTitle:'Student, Upper School',startAge:15,endAge:18,years:3,smartsPerYear:3,scholarSmarts:56,requireWealth:false,
    declineNote:'go to work instead',
    completeText:'Subject completed Upper School — the leaving certificate, framed or not.',completeFx:{smarts:6,happiness:3}},
- {id:'university',name:'University',pupilTitle:'University Student',startAge:18,years:4,smartsPerYear:4,scholarSmarts:62,requireWealth:true,
+  {id:'university',name:'University',pupilTitle:'University Student',startAge:18,endAge:25,years:4,smartsPerYear:4,scholarSmarts:62,requireWealth:true,
    declineNote:'go straight to work instead',
    completeText:'Subject graduated from the University with a bachelor’s degree — the certificate framed, eventually, and hung a little crooked.',completeFx:{smarts:10,happiness:5}},
 ];
@@ -605,7 +624,7 @@ const EVENTS=[
  {id:'ancestortale',a:[4,10],once:1,if:s=>!!lastAncestor(),v:loreV('ancestortale'),fx:{smarts:1,happiness:1}},
  {id:'firstword',a:[0,3],once:1,v:loreV('firstword'),fx:{smarts:2}},
  {id:'steps',a:[0,3],once:1,v:loreV('steps'),fx:{health:2}},
- {id:'measles',a:[0,5],cd:9,v:loreV('measles'),fx:{health:-4}},
+ {id:'measles',a:[0,5],cd:9,v:loreV('measles'),fx:{health:-4},medical:{conditionId:'infection',source:'childhood measles',severity:3}},
  {id:'argument',a:[1,5],v:loreV('argument'),fx:{happiness:-3}},
  {id:'crayon',a:[2,4],v:loreV('crayon'),fx:{smarts:1,happiness:1}},
  {id:'coin',a:[1,5],v:loreV('coin'),fx:{assets:5,relations:2}},
@@ -628,8 +647,8 @@ const EVENTS=[
    follow:s=>chance(.28)?{in:1,t:'The motorcycle met a parked cart. The cart won.',fx:{health:-14,happiness:-3}}:null},
  {id:'rentroom',a:[18,29],once:1,v:loreV('rentroom'),fx:{assets:-100,happiness:-1}},
  {id:'books',a:[18,29],cd:8,v:loreV('books'),fx:{smarts:4}},
- {id:'cough',a:[30,52],cd:7,v:loreV('cough'),fx:{health:-4}},
- {id:'back',a:[30,58],cd:7,v:loreV('back'),fx:{health:-5,happiness:-2}},
+ {id:'cough',a:[30,52],cd:7,v:loreV('cough'),fx:{health:-4},medical:{conditionId:'respiratory',source:'persistent cough',severity:2}},
+ {id:'back',a:[30,58],cd:7,v:loreV('back'),fx:{health:-5,happiness:-2},medical:{conditionId:'injury',source:'back injury',severity:3}},
  {id:'audit',a:[28,60],cd:9,v:loreV('audit'),fx:{happiness:-3}},
  {id:'uncle',a:[30,60],once:1,v:loreV('uncle'),fx:{assets:600}},
  {id:'hair',a:[35,55],once:1,v:loreV('hair'),fx:{looks:-4}},
@@ -641,7 +660,7 @@ const EVENTS=[
  {id:'hip',a:[68,110],cd:9,v:loreV('hip'),fx:{health:-16,happiness:-4}},
  {id:'grandvisit',a:[65,110],cd:6,if:s=>s.kids>0,v:loreV('grandvisit'),fx:{happiness:5,relations:3}},
  {id:'stories',a:[65,110],cd:8,v:loreV('stories'),fx:{happiness:2}},
- {id:'flu',a:[5,110],cd:6,v:loreV('flu'),fx:{health:-3}},
+ {id:'flu',a:[5,110],cd:6,v:loreV('flu'),fx:{health:-3},medical:{conditionId:'infection',source:'seasonal influenza',severity:2}},
  {id:'pickpocket',a:[12,110],cd:8,v:loreV('pickpocket'),fx:{assets:-80,happiness:-2}},
  {id:'lottery',a:[18,110],cd:9,v:loreV('lottery'),fx:{assets:250,happiness:3}},
  {id:'drinkalone',a:[16,110],dark:1,cd:5,v:loreV('drinkalone'),fx:{health:-4,happiness:-4},side:s=>{s.vice=Math.min(10,s.vice+1);}},
@@ -653,7 +672,7 @@ const EVENTS=[
    follow:s=>chance(.25)?{in:2,t:'Subject was sentenced to eighteen months. The file was moved to a different shelf, alphabetically.',fx:{happiness:-10,health:-6,relations:-8},side:s2=>{s2.jobTier=0;s2.jobName='Unemployed';s2.career=null;s2.record=true;s2.jailUntil=s2.age+2;}}:null},
  {id:'shark',a:[22,60],dark:1,cd:8,v:loreV('shark'),fx:{assets:400},side:s=>{s.vice=Math.min(10,s.vice+1);},
    follow:()=>({in:2,t:'The man came to collect. He brought a friend and an abacus.',fx:{assets:-600,happiness:-4}})},
- {id:'scuffle',a:[16,50],dark:1,cd:7,v:loreV('scuffle'),fx:{health:-7,happiness:-3}},
+ {id:'scuffle',a:[16,50],dark:1,cd:7,v:loreV('scuffle'),fx:{health:-7,happiness:-3},medical:{conditionId:'injury',source:'street scuffle',severity:3}},
  {id:'backroom',a:[16,70],dark:1,cd:6,v:loreV('backroom'),fx:{health:-6,happiness:-2,assets:-150},side:s=>{s.vice=Math.min(10,s.vice+2);}},
  {id:'disturbance',a:[22,60],dark:1,once:1,if:s=>s.married,v:loreV('disturbance'),fx:{happiness:-6,relations:-5},side:s=>{const p=activePartnerContact();if(p){p.mood=Math.max(0,p.mood-18);syncPartnerMirror();}}},
  {id:'bridge',a:[16,110],once:1,if:s=>s.happiness<25,v:loreV('bridge'),fx:{happiness:5,relations:2}},
@@ -699,7 +718,11 @@ const EVENTS=[
 function studyGain(){return Math.max(1,Math.round((100-S.smarts)/14));}
 function skillSpeedMult(smarts){return clamp(0.6+(smarts!=null?smarts:S.smarts)/125,0.6,1.4);}
 function skillBaseGain(level){return level>=8?1:level>=4?2:3;}
-function skillGainFor(level,smarts){return Math.max(1,Math.round(skillBaseGain(level)*skillSpeedMult(smarts)));}
+function skillCapFor(){return typeof educationSkillCapFor==='function'?educationSkillCapFor():10;}
+function skillGainFor(level,smarts){
+  const room=Math.max(0,skillCapFor()-(level||0));
+  return room?Math.min(room,Math.max(1,Math.round(skillBaseGain(level)*skillSpeedMult(smarts)))):0;
+}
 function promoP(){return clamp(0.22+S.smarts*0.003+S.relations*0.003,0.05,0.8);}
 function proposeP(){return clamp(0.25+S.partnerMood*0.005+S.relations*0.002+S.looks*0.001,0.08,0.92);}
 function childP(){return S.married&&S.age>=20&&S.age<=43?clamp(0.55-(S.age>38?0.2:0),0.1,0.7):0;}
@@ -718,7 +741,8 @@ const PURSUITS=[
  {id:'practice',cat:'work',icon:'🎓',cost:1,avail:s=>s.age>=6,note:()=>`choose a skill to train · SMARTS sets the pace · practice keeps it, idle lets it fade`,
    apply:(S2,item)=>{const id=item&&item.skill; if(!id||!SKILLS[id]) return{fx:{},text:'Subject meant to practice something. The year passed anyway.'};
      const before=S.skills[id]||0, gain=skillGainFor(before);
-     S.skills[id]=Math.min(10,before+gain); S.practicedSkill=id;
+     if(!gain) return{fx:{},text:'Subject practiced '+SKILLS[id].name.toLowerCase()+', but the current education ceiling held at '+skillCapFor()+'/10. Further schooling would open the next bars.'};
+     S.skills[id]=Math.min(skillCapFor(),before+gain); S.practicedSkill=id;
      return{fx:SKILL_PRACTICE_FX[id]||{happiness:1},text:'Subject spent the year deliberately building a skill: '+SKILLS[id].name.toLowerCase()+'.'};}},
  {id:'lookwork',cat:'work',icon:'🚪',cost:1,avail:s=>!s.eduStage&&s.age>=16&&s.age<65&&s.jailUntil<=s.age&&!s.jobName.startsWith('Pensioner'),
    note:s=>s.jobTier>0?'browse other careers · switching costs the year’s momentum':'browse this year’s openings · the portal',
@@ -726,8 +750,10 @@ const PURSUITS=[
      if(!track||stageIdx<0) return{fx:{happiness:-2},text:'Subject visited the job portal and found nothing worth the walk this year.'};
      const st=track.stages[stageIdx];
      S.jobTier=stageIdx+1; S.jobName=st.name; S.career=track.id; S.careerYears=0;
-     const bonus=(stageIdx===0&&track.minEdu&&eduRank()>=EDU_RANK[track.minEdu])?{lower:100,middle:150,upper:250,university:500}[track.minEdu]:0;
-     return{fx:{happiness:4,assets:bonus-100},text:'Subject applied through the portal and was taken on as '+st.name+', '+track.name+'. '+money(st.salary)+' a year, and somewhere new to be on Mondays.'+(bonus?' A signing bonus came with the diploma.':'')};
+     const baseBonus=(stageIdx===0&&track.minEdu&&eduRank()>=EDU_RANK[track.minEdu])?{lower:100,middle:150,upper:250,university:500}[track.minEdu]:0;
+     const advantage=typeof educationCareerAdvantage==='function'?educationCareerAdvantage(track):{signingBonus:0,label:''};
+     const bonus=baseBonus+(stageIdx===0?(advantage.signingBonus||0):0);
+     return{fx:{happiness:4,assets:bonus-100},text:'Subject applied through the portal and was taken on as '+st.name+', '+track.name+'. '+money(st.salary)+' a year, and somewhere new to be on Mondays.'+(bonus?' A signing bonus of '+money(bonus)+' reflected the subject’s credentials.':'')};
    }},
  {id:'overtime',cat:'work',icon:'💼',cost:1,avail:s=>s.jobTier>0&&s.jobName!=='Unemployed'&&s.age<65&&s.jailUntil<=s.age,note:()=>`+~$${200+S.jobTier*120} · −HEALTH/HAPPINESS`,
    apply:()=>({fx:{assets:200+S.jobTier*120,health:-3,happiness:-3},text:pick(['Subject worked the overtime. The pay arrived. So did the exhaustion.','Subject took every extra shift. The coin stack grew; the subject shrank.'])})},
@@ -980,10 +1006,11 @@ const DECISIONS=[
      return{fx:{happiness:-4},text:'Subject hoped for a child. The year passed without news. The Bureau files the silence gently.'}}},
  {id:'presspromo',cost:1,cat:'work',avail:s=>s.jobTier>=1&&s.jobTier<5,note:()=>`climb the ladder ${P(promoP())}`,
    apply:()=>{
-     if(S.career){ const track=CAREERS.find(c=>c.id===S.career);
-       if(!careerStageQualifies(track,S.jobTier)){ const missing=careerMissingSkills(track,S.jobTier);
+    if(S.career){ const track=CAREERS.find(c=>c.id===S.career);
+      if(!careerStageQualifies(track,S.jobTier)){ const missing=careerMissingRequirements(track,S.jobTier);
          return{fx:{happiness:-2},text:'Subject pressed for the promotion. Not without more '+(missing.length?missing.join(' and '):'time')+', they said.'}; }
-       if(S.careerYears<CAREER_EXP[S.jobTier-1]) return{fx:{happiness:-2},text:'Subject pressed for the promotion. “You have not been here long enough,” said the man with the stamps.'};
+       const yearsNeeded=typeof careerYearsRequired==='function'?careerYearsRequired(track,S.jobTier):CAREER_EXP[S.jobTier-1];
+       if(S.careerYears<yearsNeeded) return{fx:{happiness:-2},text:'Subject pressed for the promotion. “You have not been here long enough,” said the man with the stamps. '+yearsNeeded+' year'+(yearsNeeded===1?'':'s')+' in the current rung is the usual measure.'};
        if(chance(promoP())){ const next=track.stages[S.jobTier]; S.jobTier++; S.jobName=next.name; S.careerYears=0;
          return{fx:{happiness:5,assets:150},text:'Subject pressed for the promotion — and got it: '+next.name+'. '+money(next.salary)+' now, on paper.'}; }
        return{fx:{happiness:-4},text:'Subject pressed for the promotion. The promotion pressed back, downward. Subject said it was fine. It was not.'};
@@ -992,7 +1019,7 @@ const DECISIONS=[
        if(job){S.jobTier++;S.jobName=job.name;return{fx:{happiness:5,assets:150},text:'Subject pressed for the promotion — and got it. New office. Same clock, somehow louder.'};}
        return{fx:{happiness:-3},text:'Subject pressed for the promotion. The answer was “when you’re ready” — a polite no, dressed as patience.'};}
      return{fx:{happiness:-4},text:'Subject pressed for the promotion. The promotion pressed back, downward. Subject said it was fine. It was not.'}}},
- {id:'learntrade',cost:2,cat:'work',avail:s=>s.age>=16&&s.smarts<82,note:()=>`+SMARTS · unlocks better work`,
+ {id:'learntrade',cost:2,cat:'work',avail:s=>s.age>=16&&typeof educationProgramOptions==='function'&&educationProgramOptions().length>0,note:()=>`choose a vocational course · certificate, skill, and a clearer work route`,
    apply:()=>({fx:{smarts:6,assets:-150,happiness:1},text:pick(['Subject took night classes. The daytime self was tired; the nighttime self was sharper.','Subject learned a trade by lamplight. The certificate, when it came, was worth the squint.'])})},
  {id:'nightshift',cost:1,cat:'work',avail:s=>s.jobTier>0&&s.jobName!=='Unemployed',note:()=>`+overtime pay · −HEALTH`,
    apply:()=>({fx:{assets:400,health:-3},text:'Subject took the night shift. The overtime was real. So was the permanent shadow under the eyes.'})},
@@ -1002,8 +1029,8 @@ const DECISIONS=[
    apply:()=>{S.didCoast=true;return{fx:{assets:-500,happiness:6,health:2},text:'Subject relocated to the coastal district. The sea did not fix everything. It fixed some, which was the deal.'}}},
  {id:'leave',cost:1,cat:'personal',avail:s=>s.age>=20&&s.age<55&&s.freedom>=50,note:()=>`a year to wander · freedom 50+ · +HAPPINESS −$`,
    apply:()=>{S.didLeave=true;return{fx:{assets:-300,happiness:8},text:'Subject took a year off to “find themselves.” They returned with a beard and a theory about rivers.'}}},
- {id:'leaveschool',cost:0,cat:'personal',avail:s=>!!s.eduStage,note:()=>{const st=SCHOOL_STAGES.find(x=>x.id===S.eduStage);return `leave ${st?st.name:'school'} now · +HAPPINESS · stunts SMARTS growth`;},
-   apply:()=>{const st=SCHOOL_STAGES.find(x=>x.id===S.eduStage); S.eduDropped=true; S.eduStage=null; S.pendingSchoolStage=null; syncEduJobTitle();
+  {id:'leaveschool',cost:0,cat:'personal',avail:s=>!!s.eduStage,note:()=>{const st=SCHOOL_STAGES.find(x=>x.id===S.eduStage);return `leave ${st?st.name:'school'} now · +HAPPINESS · stunts SMARTS growth`;},
+    apply:()=>{const st=SCHOOL_STAGES.find(x=>x.id===S.eduStage); S.eduDropped=true; S.eduStage=null; if(typeof ensureEducationState==='function'){ensureEducationState(S);S.education.withdrawn=true;S.education.stageId=null;S.education.status='withdrawn';if(typeof educationSyncLegacy==='function')educationSyncLegacy(S);} S.pendingSchoolStage=null; syncEduJobTitle();
      return{fx:{smarts:-5,happiness:3},text:'Subject walked out of '+(st?st.name:'school')+' for good. No ceremony, no diploma, and — for now — no regrets.'};}},
  {id:'loan',cost:1,cat:'work',avail:s=>s.jobTier>0,note:()=>`+$2,000 now · a venture (risky)`,
    apply:()=>{const ok=chance(.55);pushFollow({at:S.age+3,t:ok?'The venture turned a profit. The subject bought new shoes and a better mood.':'The venture failed in the manner of most ventures.',fx:ok?{assets:3800,happiness:6}:{assets:-600,happiness:-7}});return{fx:{assets:2000,happiness:3},text:'Subject took the loan and signed four times, in slightly different handwriting. The venture began.'}}},
@@ -1012,7 +1039,7 @@ const DECISIONS=[
  {id:'expunge',cost:1,cat:'personal',avail:s=>!!s.record,note:()=>`clear the record · −$`,
    apply:()=>{S.record=false;return{fx:{assets:-200},text:'Subject paid to have the record expunged. The file remembers, but the file is professional.'}}},
  {id:'treatment',cost:1,cat:'personal',avail:s=>activeConditions().some(c=>c.known),note:()=>`treat a condition on file · −$`,
-   apply:()=>{const c=activeConditions().filter(x=>x.known).sort((a,b)=>b.severity-a.severity)[0]; const r=treatCondition(c.id); return {fx:{health:5,happiness:1,assets:-r.cost},text:r.text};}},
+   apply:(S2,item)=>{const c=(item&&item.condition?conditionById(item.condition):activeConditions().filter(x=>x.known).sort((a,b)=>b.severity-a.severity)[0]); const r=c&&treatCondition(c.id,item&&item.treatment); if(!r) return {fx:{},text:'The treatment order could not be matched to an active medical file.'}; if(r.blocked) return {fx:{happiness:-1},text:r.text}; return {fx:{health:r.health,happiness:1,assets:-r.cost},text:r.text};}},
  {id:'usefavor',cost:1,cat:'personal',avail:s=>s.bureauFavor>0&&(s.scrutiny>0||s.record),note:()=>`spend 1 Bureau Favor · lower scrutiny`,
    apply:()=>{S.bureauFavor--; S.scrutiny=Math.max(0,S.scrutiny-30); if(S.record&&chance(.35)) S.record=false; updatePersonalStanding(); return {fx:{happiness:2},text:'Subject spent a Bureau Favor on an administrative correction. The red ink lightened, though the paper remembers.'};}},
  {id:'earlyret',cost:1,cat:'work',avail:s=>s.age>=55&&s.age<=64&&s.jobTier>0,note:()=>`retire early · +HAPPINESS, pension`,
@@ -1552,7 +1579,7 @@ const HISTORY=[
  {y:1914,if:s=>s.age>=3,t:'Archduke Franz Ferdinand was shot in a faraway motorcade. In {place}, the bread noticed first.',fx:{assets:-15}},
  {y:1916,if:s=>s.sex==='M'&&s.age>=18&&s.age<=42,t:'Conscription notice. Subject was issued a uniform two sizes wrong and a rifle with opinions.',fx:{happiness:-6,health:-3},
    side:s=>{s.jobTier=0;s.jobName='Conscript';s.career=null;pushFollow({at:s.age+2,t:chance(.35)?'Subject returned with a limp and a medal that did not match the limp.':'Subject returned with fewer words and all limbs. The Bureau counts this as a win.',fx:chance(.5)?{health:-16,happiness:-4}:{happiness:-2},side:s2=>{s2.jobTier=0;s2.jobName='Unemployed';s2.career=null;}});}},
- {y:1918,if:s=>s.age>=4,t:'The Spanish Lady arrived by train and left by coffin. Subject was ill a month and quiet a year after.',fx:{health:-9}},
+ {y:1918,if:s=>s.age>=4,t:'The Spanish Lady arrived by train and left by coffin. Subject was ill a month and quiet a year after.',fx:{health:-9},medical:{conditionId:'infection',source:'Spanish Lady',severity:4},outbreak:{id:'influenza',severity:3,years:2}},
  {y:1919,if:s=>s.age>=8,t:'The war ended. Bells, mostly. Subject’s street drank for two days; the Bureau deducted them, then returned them.',fx:{happiness:3}},
  {y:1923,if:s=>s.age>=10,t:'A wheelbarrow of money bought a loaf of bread, and the loaf was the better investment.',fx:{happiness:-3},side:s=>{s.assets=Math.floor(s.assets*0.2);}},
  {y:1929,if:s=>s.age>=12,t:'Black Thursday. The subject’s bank failed on a Tuesday, which the subject felt was unfair to Thursdays.',fx:{happiness:-6},side:s=>{s.assets=Math.floor(s.assets*0.45);if(s.jobTier>1&&chance(.5)){s.jobTier=0;s.jobName='Unemployed';s.career=null;}}},
@@ -1582,5 +1609,5 @@ const HISTORY=[
  {y:1991,if:s=>s.age>=14,t:'An empire dissolved itself quietly, like an aspirin in water.',fx:{}},
  {y:2001,if:s=>s.age>=10,t:'Planes, towers, a Tuesday that stopped. Subject called everyone they had not called in years.',fx:{happiness:-3,relations:4}},
  {y:2008,if:s=>s.age>=18,t:'The banks fell like dominoes in expensive suits. Subject’s pension looked away.',fx:{happiness:-5},side:s=>{s.assets=Math.floor(s.assets*0.65);if(s.jobTier>1&&chance(.4)){s.jobTier=0;s.jobName='Unemployed';s.career=null;}}},
- {y:2020,t:'A sickness went around the world in a suitcase. Subject was instructed to stay indoors. Subject complied, loudly.',fx:s=>({health:s.age>=65?-6:-2,happiness:-3})},
+ {y:2020,t:'A sickness went around the world in a suitcase. Subject was instructed to stay indoors. Subject complied, loudly.',fx:s=>({health:s.age>=65?-6:-2,happiness:-3}),medical:{conditionId:'infection',source:'2020 outbreak',severity:3},outbreak:{id:'influenza',severity:2,years:1}},
 ];

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=Special+Elite&family=Stardos+Stencil:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/style.css?v=20260802-map-fullscreen">
 </head>
 <body>
 <div class="desk">
@@ -71,6 +71,7 @@
             <div class="frow hotspot" data-hotspot="vice"><span class="flabel">VICE NOTES</span><span class="fval" id="val-vice">none on record</span></div>
             <div class="frow"><span class="flabel">MARKED</span><span class="fval" id="val-marked">none</span></div>
             <div class="frow hotspot" data-hotspot="skills"><span class="flabel">SKILLS</span><span class="fval" id="val-skills">none developed</span></div>
+            <div class="frow hotspot" data-hotspot="education"><span class="flabel">EDUCATION</span><span class="fval" id="val-education">no formal record</span></div>
           </div>
         </div>
         <div class="sec-h">KIN &amp; ASSOCIATES <span>TENDED ANNUALLY</span></div>
@@ -126,9 +127,11 @@
     <div class="ps-foot"><button class="btn" id="logClose">Close the File ▸</button></div>
   </div></div>
   <div id="skillWrap" class="overlay hidden"><div class="plansheet" id="skillSheet"></div></div>
+  <div id="educationWrap" class="overlay hidden"><div class="plansheet" id="educationSheet"></div></div>
   <div id="jobWrap" class="overlay hidden"><div class="plansheet" id="jobSheet"></div></div>
   <div id="jobDetailWrap" class="overlay hidden"><div class="plansheet" id="jobDetailSheet"></div></div>
   <div id="householdWrap" class="overlay hidden"><div class="plansheet" id="householdSheet"></div></div>
+  <div id="medicalWrap" class="overlay hidden"><div class="plansheet" id="medicalSheet"></div></div>
   <div id="mapWrap" class="overlay hidden"><div class="plansheet map-sheet" id="mapSheet"></div></div>
   <div id="intentWrap" class="overlay hidden"><div class="intentslip" id="intentSlip"></div></div>
   <div id="planWrap" class="overlay hidden"><div class="plansheet" id="planSheet"></div></div>
@@ -194,8 +197,10 @@
 
 <script src="js/lore.js"></script>
 <script src="js/data.js"></script>
-<script src="js/state.js"></script>
-<script src="js/ui.js"></script>
+<script src="js/state.js?v=20260802-map"></script>
+<script src="js/medical.js?v=20260802-medical-file"></script>
+<script src="js/education.js?v=20260802-education-pacing2"></script>
+<script src="js/ui.js?v=20260802-education-dossier2"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

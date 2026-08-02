@@ -5,7 +5,9 @@ function applyFx(fx){
   for(const k in fx){const v=fx[k]; if(!v) continue;
     if(k==='assets'){S.assets+=v; out.push({txt:(v>0?'+':'−')+'$'+Math.abs(v).toLocaleString('en-US'),plus:v>0});}
     else{ const cap=(k==='health'&&S.healthCap!=null)?S.healthCap:(k==='looks'&&S.looksCap!=null)?S.looksCap:100;
-      S[k]=clamp(S[k]+v,0,cap); window.C[k]=(window.C[k]||0)+v;
+      if(k==='health'&&typeof medicalApplyHealthDelta==='function') medicalApplyHealthDelta(S,v,'game effect');
+      else S[k]=clamp(S[k]+v,0,cap);
+      window.C[k]=(window.C[k]||0)+v;
       if(S.yearAccum) S.yearAccum[k]=(S.yearAccum[k]||0)+v;
       out.push({txt:(v>0?'+':'−')+Math.abs(v)+' '+STATKEYS[k],plus:v>0});}}
   return out;
@@ -172,6 +174,7 @@ function renderStats(changed){
   $('#val-status').textContent=S.status+(S.kids?' · '+S.kids+(S.kids>1?' children':' child'):'');
   $('#val-vice').textContent=viceText(S.vice);
   $('#val-marked').textContent=S.marked?S.markedNote:'none';
+  renderEducationSummary();
   renderSkills();
   renderKin(changed);
   renderIntent();
@@ -219,9 +222,45 @@ function renderInventory(){
     h+='<div class="aempty">No debts on file.</div>';
   }
   h+='<div class="frow moneyrow hotspot" data-hotspot="outlay"><span class="flabel">ANNUAL OUTLAY</span><span class="fval big">'+money(totalOutlay)+'</span></div>';
+  h+='<button class="btn small" id="invOpenMedical" style="width:100%;margin-top:8px">Open Medical File ▸</button>';
   h+='<button class="btn small" id="invOpenHousehold" style="width:100%;margin-top:8px">Manage the Household ▸</button>';
   el.innerHTML=standing+h;
 }
+function openMedicalTreatmentPicker(conditionId){
+  const condition=conditionById(conditionId||((activeConditions()[0]||{}).id));
+  if(!condition||!condition.known) return;
+  const options=medicalTreatmentOptions(condition.id);
+  const access=medicalAccessFor(S,medicalContext(S));
+  const rows=options.length?options.map(option=>'<button class="chipbtn" data-medical-treatment="'+option.id+'"><b>'+option.name+'</b><span>'+money(option.cost)+' · '+Math.round(option.success*100)+'% course success</span></button>').join(''):'<div class="qempty">No treatment is available through '+access.facility+'.</div>';
+  $('#skillSheet').innerHTML='<div class="ps-head"><span>TREATMENT ORDER</span><span>'+medicalInfo(condition.id).name.toUpperCase()+'</span></div>'+
+    '<div class="aempty" style="margin:6px 2px 10px">'+medicalSeverityLabel(condition.severity)+' · '+medicalStateLabel(condition)+' · care through '+access.facility+'. Filing treatment reserves one plan hour this year.</div>'+
+    '<div class="chips">'+rows+'</div><div class="ps-foot"><button class="btn" id="medicalTreatmentCancel">Back ▸</button></div>';
+  $('#skillSheet').onclick=e=>{
+    const choice=e.target.closest('[data-medical-treatment]');
+    if(choice){ queueAdd('d','treatment',{condition:condition.id,treatment:choice.dataset.medicalTreatment}); $('#skillWrap').classList.add('hidden'); return; }
+    if(e.target.id==='medicalTreatmentCancel') $('#skillWrap').classList.add('hidden');
+  };
+  $('#skillWrap').classList.remove('hidden');
+}
+function openMedicalFile(){
+  if(!S) return;
+  const summary=medicalSummary(S), conditions=summary.conditions, access=summary.access;
+  const rows=conditions.length?conditions.map(c=>{
+    const treatment=c.known?'<button class="btn small" data-medical-treat="'+c.id+'">File treatment · 1h ▸</button>':'<span class="ar-meta">Diagnosis required before treatment.</span>';
+    return '<div class="medical-card"><div class="arow"><div class="ar-grade">'+c.severity+'</div><div style="flex:1"><div class="ar-name">'+medicalInfo(c.id).name+'</div><div class="ar-meta">'+medicalSeverityLabel(c.severity)+' · '+medicalStateLabel(c)+' · since age '+c.onsetAge+'</div><div class="ar-meta">'+(c.source||'unclassified')+(c.treatment?' · last care: '+(MEDICAL_TREATMENTS[c.treatment]||{}).name:'')+'</div></div></div>'+treatment+'</div>';
+  }).join(''):'<div class="aempty">No active condition is recorded. A healthy-looking file is still only a file; use a doctor visit when something feels wrong.</div>';
+  $('#medicalSheet').innerHTML='<div class="ps-head"><span>MEDICAL FILE</span><span>FORM M-2</span></div>'+
+    '<div class="medical-overview"><b>WELLNESS '+S.health+'/'+(S.healthCap||100)+'</b><span>resilience '+Math.round(summary.resilience)+' · '+access.facility+' · care quality '+Math.round(access.quality*100)+'%</span></div>'+
+    '<div class="ps-sub"><span>ACTIVE CONDITIONS</span><span>'+conditions.length+'</span></div>'+rows+
+    '<div class="ps-sub"><span>RECENT RECORD</span></div><div class="medical-history">'+(S.medical.history.slice(-4).reverse().map(h=>'AGE '+h.age+' · '+h.kind.toUpperCase()+(h.note?' · '+h.note:'')).join('<br>')||'No medical entry has been filed yet.')+'</div>'+
+    '<div class="ps-foot"><button class="btn" id="medicalClose">Close the File ▸</button></div>';
+  $('#medicalWrap').classList.remove('hidden');
+}
+$('#medicalSheet').addEventListener('click',e=>{
+  const treatment=e.target.closest('[data-medical-treat]');
+  if(treatment){ openMedicalTreatmentPicker(treatment.dataset.medicalTreat); return; }
+  if(e.target.id==='medicalClose') $('#medicalWrap').classList.add('hidden');
+});
 function setLifestyle(cat,id){
   if(!S||!S.lifestyle) return;
   const prev=S.lifestyle[cat]; if(prev===id) return;
@@ -262,7 +301,27 @@ $('#householdWrap').addEventListener('click',e=>{
   const carebd=e.target.closest('[data-childcare]'); if(carebd){ snd('stamp'); setLifestyle('childcare',carebd.dataset.childcare); return; }
 });
 /* ================= KARSEN MAP ================= */
-let mapViewport={x:0,y:0,scale:1}, mapDragging=null;
+const MAP_ZOOM_MIN=1, MAP_ZOOM_MAX=2.2;
+let mapViewport={x:0,y:0,scale:1}, mapDragging=null, mapPointers=new Map(), mapTouchState=null;
+function applyMapTransform(){
+  const plane=$('#mapPlane');
+  if(plane) plane.setAttribute('transform','translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')');
+}
+function mapPoint(e,svg){
+  const r=svg.getBoundingClientRect();
+  const view=svg.viewBox?.baseVal||{width:100,height:82};
+  return {x:(e.clientX-r.left)/r.width*view.width,y:(e.clientY-r.top)/r.height*view.height};
+}
+function mapViewSize(svg){
+  const view=svg.viewBox?.baseVal||{width:100,height:82};
+  return {width:view.width||100,height:view.height||82};
+}
+function mapPinchState(){
+  const pts=Array.from(mapPointers.values());
+  if(pts.length<2) return null;
+  const a=pts[0],b=pts[1],dx=b.x-a.x,dy=b.y-a.y;
+  return {center:{x:(a.x+b.x)/2,y:(a.y+b.y)/2},distance:Math.max(1,Math.hypot(dx,dy))};
+}
 function mapSettlementBadge(s){ return s.kind==='village'?'VILLAGE':s.kind==='town'?'TOWN':'CITY'; }
 function mapNodeClass(s){
   const current=World&&World.activeSettlementId===s.id, known=World&&World.map&&World.map.discoveredSettlementIds.includes(s.id);
@@ -299,14 +358,31 @@ function renderSettlementMap(){
     '<div class="map-selection building-selection"><div class="map-selection-copy"><small>'+currentLabel+'</small><b>'+selected.name+'</b><span>'+selected.type.toUpperCase()+' · '+selected.district+'</span><em>'+selected.description+'</em></div><div class="map-actions">'+travelButton+'<span class="map-travel-note">'+travelNote+'</span></div></div>';
 }
 const KARSEN_MAP_LABELS={
- branec:{dx:3,dy:1,anchor:'start'},veskar:{dx:3,dy:1,anchor:'start'},eisenmark:{dx:3,dy:1,anchor:'start'},kostrin:{dx:3,dy:1,anchor:'start'},
- rudava:{dx:3,dy:1,anchor:'start'},dobraven:{dx:3,dy:1,anchor:'start'},krasnava:{dx:3,dy:1,anchor:'start'},brezin:{dx:3,dy:1,anchor:'start'},
- lindava:{dx:3,dy:1,anchor:'start'},sundervik:{dx:0,dy:-3,anchor:'middle'},oberhain:{dx:-3,dy:1,anchor:'end'},marec:{dx:-3,dy:1,anchor:'end'},
- kamenor:{dx:3,dy:1,anchor:'start'},svetlin:{dx:-3,dy:-3,anchor:'end'}
+ branec:{x:86,y:49,anchor:'start',leader:true},
+ veskar:{x:29,y:64,anchor:'start',leader:true},
+ eisenmark:{x:112,y:73,anchor:'start',leader:true},
+ kostrin:{x:72,y:73,anchor:'start',leader:true},
+ rudava:{x:126,y:57,anchor:'start'},
+ dobraven:{x:45,y:35,anchor:'start',leader:true},
+ krasnava:{x:83,y:86,anchor:'start'},
+ brezin:{x:60,y:25,anchor:'start'},
+ lindava:{x:27,y:38,anchor:'middle'},
+ sundervik:{x:117,y:23,anchor:'middle'},
+ oberhain:{x:129,y:84,anchor:'middle'},
+ marec:{x:134,y:37,anchor:'middle'},
+ kamenor:{x:48,y:62,anchor:'start'},
+ svetlin:{x:104,y:86,anchor:'start'}
 };
-function mapRouteClean(r,i){
-  const a=settlementById(r.from),b=settlementById(r.to),dx=b.x-a.x,dy=b.y-a.y,len=Math.max(1,Math.sqrt(dx*dx+dy*dy)),bend=(i%2?2.4:-2.4),cx=(a.x+b.x)/2+(-dy/len*bend),cy=(a.y+b.y)/2+(dx/len*bend);
-  return '<path class="map-route '+r.mode+'" d="M '+a.x+' '+a.y+' Q '+cx+' '+cy+' '+b.x+' '+b.y+'"></path>';
+function nationalMapLayout(){
+  const tall=window.matchMedia?.('(max-width: 700px)').matches;
+  const compact=window.matchMedia?.('(max-width: 520px)').matches;
+  const stretch=tall?(compact?2.32:3.15):1;
+  const height=tall?(compact?190:260):100;
+  return {height,tall,y:y=>tall?8+(y-20)*stretch:y,geoTransform:tall?'translate(0 '+(8-20*stretch)+') scale(1 '+stretch+')':''};
+}
+function mapRouteClean(r,i,layout=nationalMapLayout()){
+  const a=settlementById(r.from),b=settlementById(r.to),ay=layout.y(a.y),by=layout.y(b.y),dx=b.x-a.x,dy=by-ay,len=Math.max(1,Math.sqrt(dx*dx+dy*dy)),bend=(i%2?2.4:-2.4),cx=(a.x+b.x)/2+(-dy/len*bend),cy=(ay+by)/2+(dx/len*bend);
+  return '<path class="map-route '+r.mode+'" d="M '+a.x+' '+ay+' Q '+cx+' '+cy+' '+b.x+' '+by+'"></path>';
 }
 function renderNationalMapClean(){
   const selected=settlementById(World.map.selectedSettlementId)||currentSettlement();
@@ -323,42 +399,158 @@ function renderNationalMapClean(){
 function cleanNationalMapMarkup(markup){return markup.replace(/(?:Ã‚Â·|Â·)/g,' - ').replace(/(?:Ã¢â€“Â¸|â€“Â¸|â–¸|▸)/g,' > ');}
 function mapMinorRoadsSvg(){
   const roads=[
-    'M 11 34 C 18 31 23 28 31 25 C 36 23 40 22 45 18',
-    'M 16 50 C 22 48 28 47 34 48 C 40 49 44 46 49 42',
-    'M 25 56 C 31 59 37 63 43 66 C 46 68 49 70 51 71',
-    'M 49 42 C 54 39 59 35 64 29 C 66 25 68 20 72 11',
-    'M 64 29 C 72 27 80 27 90 27',
-    'M 66 55 C 72 57 78 61 84 69',
-    'M 83 44 C 85 39 88 33 90 27',
-    'M 72 11 C 76 13 79 15 82 17'
+    'M 18 49 C 24 45 30 42 38 40 C 43 38 45 38 48 37',
+    'M 22 59 C 29 58 36 57 43 58 C 54 57 68 53 82 52',
+    'M 43 58 C 53 64 64 73 78 81',
+    'M 82 52 C 77 45 70 37 68 31 C 64 28 60 28 56 28',
+    'M 68 31 C 81 28 98 28 117 29',
+    'M 108 69 C 115 70 122 74 128 78',
+    'M 122 57 C 127 52 131 47 134 43',
+    'M 122 57 C 122 47 119 37 117 29'
   ];
   return roads.map(d=>'<path class="map-minor-road" d="'+d+'"></path>').join('');
 }
-function mapGreenerySvg(){
-  return '<g class="map-greenery" aria-hidden="true"><path class="map-forest" d="M 14 27 C 19 22 26 21 32 24 C 35 28 31 34 24 35 C 18 34 14 32 14 27 Z"></path><path class="map-forest" d="M 25 62 C 30 57 37 58 41 62 C 43 67 39 70 33 70 C 28 69 25 66 25 62 Z"></path><path class="map-forest" d="M 73 15 C 77 12 84 12 87 16 C 88 20 84 23 79 22 C 74 21 72 18 73 15 Z"></path><path class="map-meadow" d="M 43 17 C 49 14 56 15 59 19 C 58 23 51 25 45 23 C 42 21 41 19 43 17 Z"></path><path class="map-meadow" d="M 57 64 C 63 60 71 61 75 65 C 73 69 65 71 59 69 C 57 68 56 66 57 64 Z"></path><path class="map-wetland" d="M 83 48 C 87 45 91 46 94 49 C 93 53 89 55 85 54 C 82 53 81 50 83 48 Z"></path></g>';
+function mapSeaSvg(showLabels=true){
+  return '<g class="map-sea-details" aria-hidden="true">'+
+    '<path class="map-shore" d="M 18 49 C 11 52 11 57 14 61 C 20 66 16 74 24 78"></path>'+
+    '<path class="map-sea-line" d="M 3 12 C 22 7 39 13 57 9 S 92 6 110 11 S 137 8 148 14"></path>'+
+    '<path class="map-sea-line" d="M 1 88 C 20 83 35 91 53 88 S 91 88 108 93 S 136 91 149 86"></path>'+
+    '<path class="map-sea-line" d="M 6 23 C 14 19 22 20 29 17 M 5 28 C 14 24 21 25 28 22"></path>'+
+    '<path class="map-sea-line" d="M 122 15 C 132 12 140 15 147 20 M 124 19 C 133 16 141 19 147 24"></path>'+
+    '<path class="map-sea-island" d="M 8 73 C 11 69 17 69 19 73 C 18 77 13 79 9 77 Z"></path>'+
+    '<path class="map-sea-island" d="M 136 72 C 139 68 145 69 146 73 C 144 77 139 78 136 76 Z"></path>'+
+    (showLabels?'<text class="map-sea-label" x="8" y="17" text-anchor="start">WESTERN SEA</text><text class="map-sea-label" x="107" y="96" text-anchor="middle">SOUTHERN SEA</text>':'')+
+    '</g>';
+}
+function mapGreenerySvg(showSeaLabels=true){
+  return mapSeaSvg(showSeaLabels)+'<g class="map-greenery" aria-hidden="true">'+
+    '<path class="map-forest" d="M 35 27 C 41 20 52 19 62 23 C 67 28 64 37 56 41 C 47 42 38 38 35 32 Z"></path>'+
+    '<path class="map-forest" d="M 99 31 C 107 26 119 27 126 34 C 128 41 123 48 114 50 C 105 48 100 42 99 31 Z"></path>'+
+    '<path class="map-meadow" d="M 55 45 C 64 40 75 41 84 46 C 87 52 79 58 69 59 C 60 57 54 52 55 45 Z"></path>'+
+    '<path class="map-meadow" d="M 60 68 C 70 62 83 64 91 70 C 91 77 82 81 72 80 C 64 78 59 74 60 68 Z"></path>'+
+    '<path class="map-wetland" d="M 112 52 C 120 49 129 51 134 57 C 133 64 125 68 117 66 C 112 63 110 58 112 52 Z"></path>'+
+    '<path class="map-industrial" d="M 97 61 C 104 58 114 60 119 66 C 118 73 110 76 102 73 C 98 70 96 66 97 61 Z"></path>'+
+    '</g>';
 }
 function renderNationalMapNatural(){
   const selected=settlementById(World.map.selectedSettlementId)||currentSettlement();
   World.map.discoveredSettlementIds=KARSEN_SETTLEMENTS.map(s=>s.id);
-  const nodes=KARSEN_SETTLEMENTS.map(s=>{const p=KARSEN_MAP_LABELS[s.id]||{dx:3,dy:1,anchor:'start'},radius=s.kind==='city'?2.35:s.kind==='town'?1.85:1.35,current=World.activeSettlementId===s.id;return '<g class="map-node '+s.kind+(current?' current':'')+'" data-map-settlement="'+s.id+'" tabindex="0" role="button" aria-label="'+s.name+'"><circle class="map-node-hit" cx="'+s.x+'" cy="'+s.y+'" r="4.2"></circle><circle class="map-node-dot" cx="'+s.x+'" cy="'+s.y+'" r="'+radius+'"></circle><text x="'+(s.x+p.dx)+'" y="'+(s.y+p.dy)+'" text-anchor="'+p.anchor+'">'+s.name+'</text></g>';}).join('');
-  const regionLabels='<g class="map-region-labels" aria-hidden="true"><text x="23" y="32">WESTERN FOREST</text><text x="51" y="22">CENTRAL LOWLAND</text><text x="72" y="52">IRON HILLS</text><text x="51" y="66">SOUTHERN FARMLAND</text><text x="87" y="39">EASTERN MARSH</text></g>';
-  const routes=KARSEN_ROUTES.map(mapRouteClean).join('');
-  const border='M 12 18 C 18 13 25 10 32 11 C 38 8 44 9 49 11 C 57 8 66 8 73 11 C 80 9 87 13 91 20 C 88 25 91 29 94 33 C 92 39 95 43 93 48 C 96 53 93 58 90 62 C 87 68 80 70 74 72 C 67 70 61 75 55 73 C 48 76 42 73 36 75 C 30 73 24 76 19 72 C 13 72 10 66 11 60 C 8 55 9 49 7 44 C 9 38 7 32 9 27 C 7 23 9 20 12 18 Z';
+  const layout=nationalMapLayout();
+  // Phones receive a true portrait survey sheet: geography and routes spread
+  // vertically, while settlement dots and type remain circular and readable.
+  const mapPreserve='xMidYMid meet';
+  const labelLeaders=KARSEN_SETTLEMENTS.map(s=>{const p=KARSEN_MAP_LABELS[s.id];return p?.leader?'<path class="map-label-leader" d="M '+s.x+' '+layout.y(s.y)+' L '+p.x+' '+layout.y(p.y-.9)+'"></path>':'';}).join('');
+  const nodes=KARSEN_SETTLEMENTS.map(s=>{const p=KARSEN_MAP_LABELS[s.id]||{x:s.x+4,y:s.y+1,anchor:'start'},radius=s.kind==='city'?2.65:s.kind==='town'?2.05:1.55,current=World.activeSettlementId===s.id;return '<g class="map-node '+s.kind+(current?' current':'')+'" data-map-settlement="'+s.id+'" tabindex="0" role="button" aria-label="'+s.name+'"><circle class="map-node-hit" cx="'+s.x+'" cy="'+layout.y(s.y)+'" r="5.2"></circle><circle class="map-node-dot" cx="'+s.x+'" cy="'+layout.y(s.y)+'" r="'+radius+'"></circle><text x="'+p.x+'" y="'+layout.y(p.y)+'" text-anchor="'+p.anchor+'">'+s.name+'</text></g>';}).join('');
+  const regionLabels='<g class="map-region-labels" aria-hidden="true"><text x="30" y="'+layout.y(69)+'">WESTERN COAST</text><text x="52" y="'+layout.y(22)+'">NORTH WOODS</text><text x="82" y="'+layout.y(46)+'">CENTRAL LOWLAND</text><text x="111" y="'+layout.y(61)+'">IRON COUNTRY</text><text x="75" y="'+layout.y(77)+'">SOUTHERN FARMLAND</text><text x="126" y="'+layout.y(49)+'">EASTERN GRAIN PLAIN</text></g>';
+  const seaLabels='<g class="map-sea-details" aria-hidden="true"><text class="map-sea-label" x="8" y="'+layout.y(17)+'" text-anchor="start">WESTERN SEA</text><text class="map-sea-label" x="107" y="'+layout.y(96)+'" text-anchor="middle">SOUTHERN SEA</text></g>';
+  const routes=KARSEN_ROUTES.map((r,i)=>mapRouteClean(r,i,layout)).join('');
+  const border='M 18 49 C 14 41 22 31 38 29 C 52 27 58 18 75 20 C 91 21 99 30 111 27 C 125 23 138 28 145 38 C 150 46 147 55 139 60 C 147 68 141 78 130 82 C 116 86 105 78 93 84 C 81 91 69 82 56 86 C 43 91 30 86 24 78 C 16 74 20 66 14 61 C 9 57 11 52 18 49 Z';
   return '<div class="map-kicker"><span>COMMONWEALTH OF KARSEN</span><span>OFFICIAL SURVEY - '+currentYear()+'</span></div>'+ 
-    '<div class="map-toolbar"><button class="map-tool active" data-map-mode="national">NATIONAL</button><span>'+KARSEN_SETTLEMENTS.length+' SETTLEMENTS - '+World.map.visitedSettlementIds.length+' VISITED</span></div>'+ 
-    '<div class="map-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 100 82" aria-label="National map of Karsen"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')"><path class="map-border" d="'+border+'"></path><path class="map-shore" d="M 91 20 C 88 25 91 29 94 33 C 92 39 95 43 93 48 C 96 53 93 58 90 62"></path>'+mapGreenerySvg()+'<path class="map-river-main" d="M 35 11 C 36 19 42 24 43 31 C 44 37 40 41 45 47 C 50 53 55 57 63 60 C 72 63 80 59 92 51"></path><path class="map-river" d="M 21 22 C 27 27 31 31 34 37 C 37 42 41 45 45 47 M 57 12 C 57 19 55 24 52 29 C 50 34 49 39 45 47 M 18 52 C 24 49 29 49 34 48 M 70 21 C 75 26 79 30 82 35 C 85 40 88 45 92 51"></path><path class="map-river-small" d="M 60 61 C 65 58 69 57 73 56 M 36 60 C 40 56 43 52 45 47 M 83 55 C 86 53 89 52 92 51"></path>'+regionLabels+mapMinorRoadsSvg()+routes+nodes+'</g></svg><div class="map-compass">N</div></div>'+ 
-    '<div class="map-legend"><span><i class="legend-city"></i> city</span><span><i class="legend-town"></i> town</span><span><i class="legend-village"></i> village</span><span><i class="legend-road"></i> road</span><span><i class="legend-rail"></i> rail</span><span><i class="legend-river"></i> river</span><span><i class="legend-green"></i> greenery</span></div>'+ 
+    '<div class="map-toolbar"><button class="map-tool active" data-map-mode="national">NATIONAL</button><span>'+KARSEN_SETTLEMENTS.length+' SETTLEMENTS - '+World.map.visitedSettlementIds.length+' VISITED</span></div>'+
+    '<div class="map-canvas national-map-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 150 '+layout.height+'" preserveAspectRatio="'+mapPreserve+'" aria-label="National map of Karsen"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')"><g transform="'+layout.geoTransform+'"><path class="map-border" d="'+border+'"></path><path class="map-shore" d="M 18 49 C 14 41 22 31 38 29"></path>'+mapGreenerySvg(!layout.tall)+'<path class="map-river-main" d="M 56 28 C 61 36 68 43 76 48 C 83 53 91 58 102 60 C 112 62 121 59 132 54"></path><path class="map-river" d="M 43 58 C 53 54 62 51 76 48 M 68 68 C 73 60 77 54 76 48 M 117 29 C 111 37 106 45 102 60 M 108 69 C 113 66 119 62 124 58"></path><path class="map-river-small" d="M 24 62 C 31 61 37 59 43 58 M 78 81 C 84 73 91 67 102 60 M 126 78 C 123 71 123 64 124 58"></path>'+mapMinorRoadsSvg()+'</g>'+(layout.tall?seaLabels:'')+regionLabels+routes+labelLeaders+nodes+'</g></svg><div class="map-compass">N</div></div>'+
+    '<div class="map-legend"><span><i class="legend-city"></i> city</span><span><i class="legend-town"></i> town</span><span><i class="legend-village"></i> village</span><span><i class="legend-road"></i> road</span><span><i class="legend-rail"></i> rail</span><span><i class="legend-river"></i> river</span><span><i class="legend-green"></i> terrain</span></div>'+
     '<div class="map-selection"><div class="map-selection-copy"><b>'+selected.name+'</b><span>'+mapSettlementBadge(selected)+' - '+selected.region+' - population '+selected.population+'</span><em>'+selected.description+'</em></div><button class="btn small" data-map-open="'+selected.id+'">Open Settlement Map &gt;</button></div>';
 }
 renderNationalMap=renderNationalMapNatural;
 function renderMap(){
   const sheet=$('#mapSheet'); if(!sheet||!World||!World.map) return;
+  mapViewport.scale=clamp(mapViewport.scale,MAP_ZOOM_MIN,MAP_ZOOM_MAX);
   sheet.innerHTML=(World.map.mode==='settlement'?renderSettlementMap():renderNationalMap())+'<div class="ps-foot"><button class="btn" id="mapClose">Close the Map ▸</button></div>';
   const svg=$('#mapSvg'); if(!svg) return;
-  svg.addEventListener('wheel',e=>{e.preventDefault();mapViewport.scale=clamp(mapViewport.scale+(e.deltaY<0?.12:-.12),.72,2.2);const plane=$('#mapPlane'); if(plane) plane.setAttribute('transform','translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')');},{passive:false});
-  svg.addEventListener('pointerdown',e=>{if(e.target.closest('[data-map-settlement],[data-map-building]'))return;mapDragging={x:e.clientX,y:e.clientY,ox:mapViewport.x,oy:mapViewport.y};svg.setPointerCapture?.(e.pointerId);});
-  svg.addEventListener('pointermove',e=>{if(!mapDragging)return;mapViewport.x=mapDragging.ox+(e.clientX-mapDragging.x)/svg.clientWidth*100;mapViewport.y=mapDragging.oy+(e.clientY-mapDragging.y)/svg.clientHeight*82;const plane=$('#mapPlane');if(plane)plane.setAttribute('transform','translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')');});
-  svg.addEventListener('pointerup',()=>{mapDragging=null;});
+  const viewSize=mapViewSize(svg);
+  svg.addEventListener('wheel',e=>{e.preventDefault();mapViewport.scale=clamp(mapViewport.scale+(e.deltaY<0?.12:-.12),MAP_ZOOM_MIN,MAP_ZOOM_MAX);applyMapTransform();},{passive:false});
+  svg.addEventListener('pointerdown',e=>{
+    if(e.pointerType==='touch') return;
+    const interactive=!!e.target.closest?.('[data-map-settlement],[data-map-building]');
+    const point=mapPoint(e,svg);
+    mapPointers.set(e.pointerId,{x:point.x,y:point.y,cx:e.clientX,cy:e.clientY,interactive});
+    svg.setPointerCapture?.(e.pointerId);
+    if(mapPointers.size===1){ mapDragging=interactive?null:{x:e.clientX,y:e.clientY,ox:mapViewport.x,oy:mapViewport.y}; }
+    else if(mapPointers.size===2){
+      const pinch=mapPinchState();
+      mapDragging={pinch,scale:mapViewport.scale,x:mapViewport.x,y:mapViewport.y};
+    }
+  });
+  svg.addEventListener('pointermove',e=>{
+    if(e.pointerType==='touch') return;
+    if(!mapPointers.has(e.pointerId)) return;
+    e.preventDefault();
+    const previous=mapPointers.get(e.pointerId), point=mapPoint(e,svg);
+    mapPointers.set(e.pointerId,{x:point.x,y:point.y,cx:e.clientX,cy:e.clientY,interactive:previous?.interactive});
+    if(mapPointers.size>=2){
+      const pinch=mapPinchState(); if(!pinch||!mapDragging?.pinch) return;
+      const oldScale=mapDragging.scale, newScale=clamp(oldScale*(pinch.distance/mapDragging.pinch.distance),MAP_ZOOM_MIN,MAP_ZOOM_MAX);
+      const focal=mapDragging.pinch.center;
+      mapViewport.scale=newScale;
+      mapViewport.x=focal.x-(focal.x-mapDragging.x)*newScale/oldScale+(pinch.center.x-focal.x);
+      mapViewport.y=focal.y-(focal.y-mapDragging.y)*newScale/oldScale+(pinch.center.y-focal.y);
+      applyMapTransform(); return;
+    }
+    if(!mapDragging) return;
+    mapViewport.x=mapDragging.ox+(e.clientX-mapDragging.x)/svg.clientWidth*viewSize.width;
+    mapViewport.y=mapDragging.oy+(e.clientY-mapDragging.y)/svg.clientHeight*viewSize.height;
+    applyMapTransform();
+  });
+  function endMapPointer(e){
+    if(e.pointerType==='touch') return;
+    mapPointers.delete(e.pointerId);
+    if(mapPointers.size===1){
+      const [point]=mapPointers.values();
+      mapDragging=point.interactive?null:{x:point.cx,y:point.cy,ox:mapViewport.x,oy:mapViewport.y};
+    } else if(!mapPointers.size) mapDragging=null;
+  }
+  svg.addEventListener('pointerup',endMapPointer);
+  svg.addEventListener('pointercancel',endMapPointer);
+
+  // Mobile browsers can retarget pointer events to SVG objects during a pinch.
+  // Handle native touch events separately so dots/buildings never block zoom.
+  function touchCenter(touches){
+    const a=touches[0],b=touches[1]||touches[0];
+    return {x:(a.clientX+b.clientX)/2,y:(a.clientY+b.clientY)/2};
+  }
+  function touchDistance(touches){
+    if(touches.length<2) return 1;
+    return Math.max(1,Math.hypot(touches[1].clientX-touches[0].clientX,touches[1].clientY-touches[0].clientY));
+  }
+  svg.addEventListener('touchstart',e=>{
+    const center=touchCenter(e.touches);
+    if(e.touches.length>=2){
+      e.preventDefault();
+      const p=mapPoint({clientX:center.x,clientY:center.y},svg);
+      mapTouchState={mode:'pinch',center:p,distance:touchDistance(e.touches),scale:mapViewport.scale,x:mapViewport.x,y:mapViewport.y};
+    } else if(e.touches.length===1){
+      mapTouchState={mode:'pan',x:e.touches[0].clientX,y:e.touches[0].clientY,ox:mapViewport.x,oy:mapViewport.y};
+    }
+  },{passive:false});
+  svg.addEventListener('touchmove',e=>{
+    e.preventDefault();
+    if(e.touches.length>=2){
+      const center=touchCenter(e.touches), current=mapPoint({clientX:center.x,clientY:center.y},svg);
+      if(!mapTouchState||mapTouchState.mode!=='pinch'){
+        mapTouchState={mode:'pinch',center:current,distance:touchDistance(e.touches),scale:mapViewport.scale,x:mapViewport.x,y:mapViewport.y};
+        return;
+      }
+      const oldScale=mapTouchState.scale;
+      const newScale=clamp(oldScale*(touchDistance(e.touches)/mapTouchState.distance),MAP_ZOOM_MIN,MAP_ZOOM_MAX);
+      mapViewport.scale=newScale;
+      mapViewport.x=mapTouchState.center.x-(mapTouchState.center.x-mapTouchState.x)*newScale/oldScale+(current.x-mapTouchState.center.x);
+      mapViewport.y=mapTouchState.center.y-(mapTouchState.center.y-mapTouchState.y)*newScale/oldScale+(current.y-mapTouchState.center.y);
+      applyMapTransform();
+    } else if(e.touches.length===1&&mapTouchState?.mode==='pan'){
+      const t=e.touches[0];
+      mapViewport.x=mapTouchState.ox+(t.clientX-mapTouchState.x)/svg.clientWidth*viewSize.width;
+      mapViewport.y=mapTouchState.oy+(t.clientY-mapTouchState.y)/svg.clientHeight*viewSize.height;
+      applyMapTransform();
+    }
+  },{passive:false});
+  function endMapTouch(e){
+    if(e.touches.length===0){ mapTouchState=null; return; }
+    if(e.touches.length===1){
+      mapTouchState={mode:'pan',x:e.touches[0].clientX,y:e.touches[0].clientY,ox:mapViewport.x,oy:mapViewport.y};
+    }
+  }
+  svg.addEventListener('touchend',endMapTouch,{passive:false});
+  svg.addEventListener('touchcancel',endMapTouch,{passive:false});
 }
 function openMap(){
   if(!S||!World) return; if(!World.map) World.map={discoveredSettlementIds:[World.activeSettlementId],visitedSettlementIds:[World.activeSettlementId],selectedSettlementId:World.activeSettlementId,selectedBuildingId:World.activeBuildingId,mode:'national'};
@@ -380,7 +572,22 @@ $('#mapWrap').addEventListener('keydown',e=>{
 });
 function renderSkills(){
   const top=Object.entries(S.skills).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,3);
-  $('#val-skills').textContent = top.length ? top.map(([id,v])=>SKILLS[id].icon+' '+SKILLS[id].name+' '+v).join(' · ') : 'none developed';
+  const cap=typeof skillCapFor==='function'?skillCapFor():10;
+  $('#val-skills').textContent = top.length ? top.map(([id,v])=>SKILLS[id].icon+' '+SKILLS[id].name+' '+Math.min(v,cap)+'/'+cap).join(' · ') : 'none developed';
+}
+function renderEducationSummary(){
+  const el=$('#val-education'); if(!el||!S) return;
+  if(!S.education&&typeof ensureEducationState==='function') ensureEducationState(S);
+  if(S.eduStage){
+    const stage=SCHOOL_STAGES.find(x=>x.id===S.eduStage), inst=typeof institutionById==='function'?institutionById(S.education.institutionId):null;
+    el.textContent=(stage?stage.name:'Enrolled')+' · year '+((S.eduYearsIn||0)+1)+'/'+(stage?stage.years:'?')+(inst?' · '+inst.name:'');
+    return;
+  }
+  const completed=SCHOOL_STAGES.filter(st=>S.eduCompleted&&S.eduCompleted[st.id]);
+  const debt=S.education?Math.round((S.education.tuitionDebt||0)+(S.education.travelDebt||0)):0;
+  const next=S.pendingSchoolStage&&SCHOOL_STAGES.find(st=>st.id===S.pendingSchoolStage);
+  const major=S.education&&S.education.majorId?educationMajorLabel(S.education.majorId):'';
+  el.textContent=completed.length?(completed[completed.length-1].name+(major?' · '+major:'')+' completed'+(debt?' · debt '+money(debt):'')):(next?next.name+' available':'no formal record');
 }
 function renderIntent(){
   if(!readableYet(S)){ $('#d-intent').textContent='undetermined — too soon to tell'; return; }
@@ -440,6 +647,7 @@ function computeHours(){
   if(S.age<6||S.jailUntil>S.age) return 0;
   let h=S.age<14?2:S.age<65?3:2;
   if(S.health>72)h++; if(S.health<30)h--;
+  if(typeof medicalHoursPenalty==='function') h-=medicalHoursPenalty(S);
   return clamp(h,0,4);
 }
 function planHours(){ const total=computeHours(); return Math.max(0,total-(S.autoTrain&&total>=1?1:0)); }
@@ -538,6 +746,7 @@ function lifeToggle(items,current,dataAttr,priceFn){
     '<i class="lifedesc">'+it.desc+'</i><i class="liferisk">'+fxSummary(it.fx)+' · '+it.risk+'</i></button>').join('');
 }
 function labelOf(q){if(q.id==='practice'&&q.skill&&SKILLS[q.skill])return 'Practice: '+SKILLS[q.skill].name;
+  if(q.id==='learntrade'&&q.program&&typeof vocationalProgramById==='function'){const program=vocationalProgramById(q.program);if(program)return 'Training: '+program.name;}
   if(q.id==='tendmember'&&q.member){const m=findHoldMember(q.member); if(m) return 'Look after: '+m.first+' '+m.last;}
   if(q.id==='lookwork'&&q.track){const t=CAREERS.find(c=>c.id===q.track); return t?'Apply: '+t.stages[q.stage].name:'Apply for work';}
   if(q.id==='gig'&&q.gig){const g=GIGS.find(x=>x.id===q.gig); if(g) return 'Off the Books: '+g.name;}
@@ -546,7 +755,7 @@ function labelOf(q){if(q.id==='practice'&&q.skill&&SKILLS[q.skill])return 'Pract
   if(q.id==='meetsomeone'&&q.venue){const v=MEETING_VENUES.find(x=>x.id===q.venue); if(v) return 'Meet Someone: '+v.name;}
   const d=PUR_MAP[q.id]||DEC_MAP[q.id];return (PUR_MAP[q.id]?pursuitLabel(d):decisionLabel(d));}
 function pursuitLabel(p){return {study:'Hit the books',lookwork:'Look for work',overtime:'Work overtime',court:'Court {partner}',tendspouse:'Tend the marriage',family:'Visit the children',writemother:'Write to {mother}',writefather:'Write to {father}',doctor:'See the doctor',walk:'Walk it off',bottle:'The bottle',track:'The racetrack',backroom2:'The back room',rest:'Do nothing',favor:'Call in a favor',practice:'Practice a skill',tendmember:'Look after a member',gig:'Off the books',meetsomeone:'Meet someone new',flirt:'Flirt',flirtsecret:'See them, secretly',tendcontact:'Spend time together',covertracks:'Cover your tracks'}[p.id]||p.id;}
-function decisionLabel(d){if(d.id==='crime'){return ['Lift a wallet','Run the numbers','Fence the goods','The big score','Lie low'][S.crime]||'Crime';}return {propose:'Propose to {partner}',trychild:'Try for a child',presspromo:'Press for promotion',learntrade:'Night school',nightshift:'Take night shift',quitjob:'Quit the job',relocate:'Move to the coast',leave:'Take a year off',leaveschool:'Leave school now',loan:'Take the loan',gamblelic:'Open a gambling hall',expunge:'Expunge record',earlyret:'Retire early',namechange:'Change name',breakup:'End it with {partner}',divorce:'File for divorce',estrangemother:'Go no-contact with {mother}',estrangefather:'Go no-contact with {father}',recruit:'Bring someone into the fold',bankloan:'Take out a bank loan',storecredit:'Buy on store credit',payoffdebt:'Pay off a debt early',endaffair:'End it, quietly',cutcontact:'Cut them off'}[d.id]||d.id;}
+function decisionLabel(d){if(d.id==='crime'){return ['Lift a wallet','Run the numbers','Fence the goods','The big score','Lie low'][S.crime]||'Crime';}return {propose:'Propose to {partner}',trychild:'Try for a child',presspromo:'Press for promotion',learntrade:'Take vocational training',nightshift:'Take night shift',quitjob:'Quit the job',relocate:'Move to the coast',leave:'Take a year off',leaveschool:'Leave school now',loan:'Take the loan',gamblelic:'Open a gambling hall',expunge:'Expunge record',treatment:'File treatment',earlyret:'Retire early',namechange:'Change name',breakup:'End it with {partner}',divorce:'File for divorce',estrangemother:'Go no-contact with {mother}',estrangefather:'Go no-contact with {father}',recruit:'Bring someone into the fold',bankloan:'Take out a bank loan',storecredit:'Buy on store credit',payoffdebt:'Pay off a debt early',endaffair:'End it, quietly',cutcontact:'Cut them off'}[d.id]||d.id;}
 function fillLabel(t){return t.replace(/\{partner\}/g,S.partner||S.__partnerNameSnapshot||'—').replace(/\{other\}/g,S.__affairName||'—').replace(/\{mother\}/g,S.mother?S.mother.name:'—').replace(/\{father\}/g,S.father?S.father.name:'—');}
 let pressTimer=null, longPressActive=false, pressedBtn=null;
 function startPress(btn){ pressedBtn=btn; longPressActive=false; clearTimeout(pressTimer); pressTimer=setTimeout(()=>{ longPressActive=true; btn.classList.add('show-note'); },380); }
@@ -587,6 +796,8 @@ function triggerAction(type,id,extra){
     if(id==='meetsomeone'){openMeetPicker();return;}
     queueAdd('p',id,extra);
   } else {
+    if(id==='learntrade'){openTrainingPicker();return;}
+    if(id==='treatment'){openMedicalTreatmentPicker();return;}
     queueAdd('d',id,extra);
   }
 }
@@ -695,11 +906,13 @@ document.addEventListener('click',e=>{
   if(hotspot){
     if(!S||!S.alive||slipOpen) return;
     const key=hotspot.dataset.hotspot;
+    if(key==='health'){ closeHotspotBubble(false); openMedicalFile(); return; }
     if(key==='job'){
       if(S.career){ closeHotspotBubble(false); openJobDetail(S.career); return; }
       if(S.jobTier>0&&S.jailUntil<=S.age){ closeHotspotBubble(false); openGenericJobLadder(); return; }
       if(!S.eduStage&&S.age>=16&&S.jailUntil<=S.age){ closeHotspotBubble(false); openJobPortal(); return; }
     }
+    if(key==='education'){ closeHotspotBubble(false); openEducationDossier(); return; }
     if(key==='housing'){ closeHotspotBubble(false); openHousehold('housing'); return; }
     if(key==='food'){ closeHotspotBubble(false); openHousehold('food'); return; }
     if(bubbleOpenField===key){ closeHotspotBubble(true); return; }
@@ -710,20 +923,23 @@ document.addEventListener('click',e=>{
 });
 function openSkillPick(){
   let ih='';
+  const cap=typeof skillCapFor==='function'?skillCapFor():10;
   Object.entries(SKILLS).forEach(([id,sk])=>{
     const tooYoung=S.age<sk.minAge;
     const queued=actionReservedThisYear('practice');
-    const locked=tooYoung||queued;
-    const lvl=S.skills[id]||0;
+    const lvl=Math.min(cap,S.skills[id]||0);
+    const atCap=lvl>=cap;
+    const locked=tooYoung||queued||atCap;
     const cur=lvl>0?sk.tiers[lvl-1]:null;
-    const next=lvl<10?sk.tiers[lvl]:null;
+    const next=lvl<cap?sk.tiers[lvl]:null;
     let sub;
     if(queued) sub=actionReservedNote('practice');
     else if(tooYoung) sub='unlocks at age '+sk.minAge;
+    else if(atCap) sub='education ceiling reached · '+cap+'/10 · continue schooling to unlock more';
     else sub=(cur?'now: '+cur+' · ':'')+(next?'next: '+next:'mastered');
     const fxLine='Trains: '+fxSummary(SKILL_PRACTICE_FX[id]);
     ih+='<div class="arow clickable'+(locked?' locked':'')+'" data-skill-row="'+id+'">'+
-      '<div class="ar-grade">'+sk.icon+'</div><div style="flex:1"><div class="ar-name">'+sk.name+' · '+lvl+'/10</div><div class="ar-meta">'+sub+'</div><div class="ar-meta">'+fxLine+'</div></div>'+
+      '<div class="ar-grade">'+sk.icon+'</div><div style="flex:1"><div class="ar-name">'+sk.name+' · '+lvl+'/'+cap+' (max 10)</div><div class="ar-meta">'+sub+'</div><div class="ar-meta">'+fxLine+'</div></div>'+
       (locked?'':'<button class="btn small" data-skill="'+id+'">Train ▸</button>')+
       '</div>';
   });
@@ -741,19 +957,20 @@ function openSkillPick(){
 function openSkillDetail(skillId){
   const sk=SKILLS[skillId]; if(!sk) return;
   const lvl=S.skills[skillId]||0;
+  const cap=typeof skillCapFor==='function'?skillCapFor():10;
   const tooYoung=S.age<sk.minAge;
   const queued=actionReservedThisYear('practice');
   const fx=SKILL_PRACTICE_FX[skillId]||{happiness:1};
-  const canTrain=!tooYoung&&!queued&&lvl<10;
-  const statusLine=tooYoung?'Unlocks at age '+sk.minAge+'.':queued?actionReservedNote('practice')+'.':lvl>=10?'Mastered — bar 10 of 10.':'Each year practiced advances this skill toward its next bar, paced by SMARTS.';
+  const canTrain=!tooYoung&&!queued&&lvl<cap;
+  const statusLine=tooYoung?'Unlocks at age '+sk.minAge+'.':queued?actionReservedNote('practice')+'.':lvl>=cap?(cap>=10?'Mastered — bar 10 of 10.':'Education ceiling reached at '+cap+'/10. Continue schooling to unlock the next bars.'):'Each year practiced advances this skill toward its current education ceiling, paced by SMARTS.';
   let rows='';
   sk.tiers.forEach((tier,idx)=>{
-    const tierLvl=idx+1, reached=lvl>=tierLvl, isNext=lvl===idx;
+    const tierLvl=idx+1, reached=lvl>=tierLvl, isNext=lvl===idx&&tierLvl<=cap, aboveCap=tierLvl>cap;
     const tag=reached?'<span class="ar-tag current">REACHED</span>':isNext?'<span class="ar-tag open">NEXT</span>':'';
-    rows+='<div class="arow'+(reached?'':' locked')+'"><div class="ar-grade">'+tierLvl+'</div>'+
-      '<div style="flex:1"><div class="ar-name">Bar '+tierLvl+' '+tag+'</div><div class="ar-meta">'+tier+'</div></div></div>';
+    rows+='<div class="arow'+(reached?'': ' locked')+'"><div class="ar-grade">'+tierLvl+'</div>'+
+      '<div style="flex:1"><div class="ar-name">Bar '+tierLvl+' '+tag+(aboveCap?' <span class="ar-tag">EDUCATION LOCK</span>':'')+'</div><div class="ar-meta">'+tier+'</div></div></div>';
   });
-  $('#jobDetailSheet').innerHTML='<div class="ps-head"><span>'+sk.icon+' '+sk.name.toUpperCase()+'</span><span>'+lvl+'/10</span></div>'+
+  $('#jobDetailSheet').innerHTML='<div class="ps-head"><span>'+sk.icon+' '+sk.name.toUpperCase()+'</span><span>'+lvl+'/'+cap+' · ceiling '+cap+'/10</span></div>'+
     '<div class="aempty" style="margin:6px 2px 8px">'+statusLine+'</div>'+
     '<div class="ps-catlab">EACH YEAR PRACTICED, THIS SKILL ALSO TRAINS</div>'+
     '<div class="aempty" style="margin:0 2px 12px;font-weight:600">'+fxSummary(fx)+'</div>'+
@@ -766,24 +983,58 @@ function openSkillDetail(skillId){
   };
   $('#jobDetailWrap').classList.remove('hidden');
 }
+function openTrainingPicker(){
+  const programs=typeof educationProgramOptions==='function'?educationProgramOptions():[];
+  let body='';
+  if(programs.length){
+    body=programs.map(program=>'<button class="household-tile" data-training="'+program.id+'"><b>TRAIN '+program.name+'</b><span>'+program.desc+'</span><i>'+money(program.tuition)+' / course · +'+program.gain+' '+SKILLS[program.skill].name+' · '+program.minAge+'+ · requires '+SCHOOL_STAGES.find(st=>st.id===program.requires).name+'</i></button>').join('');
+  }else{
+    body='<div class="aempty">No vocational course is currently available. Complete the listed school stage, reach the required age, or finish an existing certificate first.</div>';
+  }
+  $('#skillSheet').innerHTML='<div class="ps-head"><span>VOCATIONAL TRAINING</span><span>DECISION · 2 HOURS</span></div>'+
+    '<div class="aempty" style="margin:6px 2px 10px">Short credentials turn practical skills into a clearer route through care, trade, transport, and business. The fee is paid from assets first; any shortfall becomes education debt.</div>'+body+
+    '<div class="ps-foot"><button class="btn" id="trainingCancel">Never Mind â–¸</button></div>';
+  $('#skillSheet').onclick=e=>{
+    const b=e.target.closest('[data-training]');
+    if(b){queueAdd('d','learntrade',{program:b.dataset.training});$('#skillWrap').classList.add('hidden');return;}
+    if(e.target.id==='trainingCancel')$('#skillWrap').classList.add('hidden');
+  };
+  $('#skillWrap').classList.remove('hidden');
+}
 function primarySkillOf(track){ return Object.keys(track.stages[0].req)[0]; }
 function reqLine(req){ return Object.keys(req).map(k=>SKILLS[k].icon+' '+SKILLS[k].name+' '+req[k]+'/10').join(' · '); }
+function careerEducationRequirementHTML(track,stageIdx){
+  const requiredEdu=typeof educationCareerEducationRequirement==='function'?educationCareerEducationRequirement(track,stageIdx):track.minEdu;
+  const schoolOk=!requiredEdu||eduRank()>=EDU_RANK[requiredEdu];
+  const major=typeof educationCareerRequirement==='function'?educationCareerRequirement(track,stageIdx):'';
+  const majorOk=typeof educationCareerMajorAllowed==='function'?educationCareerMajorAllowed(track,stageIdx):true;
+  let text='',ok=true;
+  if(major){ text='Specific degree: '+major; ok=majorOk; }
+  else if(requiredEdu==='university'){ text='Any university degree accepted'; ok=schoolOk; }
+  else if(requiredEdu){ text=SCHOOL_STAGES.find(x=>x.id===requiredEdu).name+' completed (higher degrees accepted)'; ok=schoolOk; }
+  else { text='No formal education requirement'; }
+  return '<div class="reqrow"><span class="'+(ok?'reqok':'reqno')+'">🎓 '+text+'</span></div>';
+}
 function openJobPortal(){
   let rows='';
   CAREERS.forEach(track=>{
     const v=S.vacancies.find(x=>x.track===track.id);
     const sk=SKILLS[primarySkillOf(track)];
+    const advantage=typeof educationCareerAdvantage==='function'?educationCareerAdvantage(track):{kind:'none',label:''};
     if(!v||v.stage<0){
       const qualifies=careerStageQualifies(track,0);
-      const eduBlocked=!qualifies&&track.minEdu&&eduRank()<EDU_RANK[track.minEdu];
-      const sub=qualifies?'You qualify for this track — just no opening this year.':
-        eduBlocked?'Requires: '+SCHOOL_STAGES.find(x=>x.id===track.minEdu).name+' completed.':
+      const requiredEdu=typeof educationCareerEducationRequirement==='function'?educationCareerEducationRequirement(track,0):track.minEdu;
+      const eduBlocked=!qualifies&&requiredEdu&&eduRank()<EDU_RANK[requiredEdu];
+      const majorBlocked=!qualifies&&typeof educationCareerMajorAllowed==='function'&&!educationCareerMajorAllowed(track,0);
+      const sub=qualifies?'You qualify for this track — just no opening this year.'+(advantage.kind!=='none'?' · '+advantage.label:''):
+        majorBlocked?'Requires specific degree: '+educationCareerRequirement(track,0)+'.':
+        eduBlocked?'Requires: '+SCHOOL_STAGES.find(x=>x.id===requiredEdu).name+' completed.':
         sk.icon+' '+sk.name+'-led · requirements not met yet.';
       rows+='<div class="arow locked'+(qualifies?' qualified':'')+' clickable" data-track-row="'+track.id+'"><div class="ar-grade">'+track.icon+'</div><div style="flex:1"><div class="ar-name">'+track.name+'</div><div class="ar-meta">'+sub+'</div></div><div class="ar-chev">VIEW LADDER ›</div></div>';
     } else {
       const st=track.stages[v.stage];
       rows+='<div class="arow clickable" data-track-row="'+track.id+'"><div class="ar-grade">'+track.icon+'</div><div style="flex:1"><div class="ar-name">'+st.name+'</div>'+
-        '<div class="ar-meta">'+track.name+' · '+reqLine(st.req)+' · '+money(st.salary)+'/yr</div></div>'+
+        '<div class="ar-meta">'+track.name+' · '+reqLine(st.req)+' · '+money(st.salary)+'/yr'+(advantage.kind!=='none'?' · '+advantage.label:'')+'</div></div>'+
         '<button class="btn small" data-apply data-track="'+track.id+'" data-stage="'+v.stage+'">Apply ▸</button></div>';
     }
   });
@@ -849,17 +1100,20 @@ function openMeetPicker(){
 }
 function openJobDetail(trackId){
   const track=CAREERS.find(c=>c.id===trackId); if(!track) return;
+  const careerAdvantage=typeof educationCareerAdvantage==='function'?educationCareerAdvantage(track):{kind:'none',label:'No degree-specific advantage'};
   const v=S.vacancies.find(x=>x.track===trackId);
   const openStage=(v&&v.stage>=0)?v.stage:-1;
   let rows='';
   track.stages.forEach((st,idx)=>{
-    const minAge=TIER_MINAGE[idx+1], expYears=CAREER_EXP[idx-1];
+    const minAge=TIER_MINAGE[idx+1], expYears=idx>0?(typeof careerYearsRequired==='function'?careerYearsRequired(track,idx):CAREER_EXP[idx-1]):0;
     const isCurrent=S.career===trackId && S.jobTier===idx+1;
-    const eduOk=!track.minEdu||eduRank()>=EDU_RANK[track.minEdu];
-    const qualifies=eduOk && S.age>=minAge && Object.keys(st.req).every(k=>(S.skills[k]||0)>=st.req[k]);
+    const requiredEdu=typeof educationCareerEducationRequirement==='function'?educationCareerEducationRequirement(track,idx):track.minEdu;
+    const eduOk=!requiredEdu||eduRank()>=EDU_RANK[requiredEdu];
+    const majorOk=typeof educationCareerMajorAllowed==='function'?educationCareerMajorAllowed(track,idx):true;
+    const qualifies=eduOk && majorOk && S.age>=minAge && Object.keys(st.req).every(k=>(S.skills[k]||0)>=st.req[k]);
     const isOpen=openStage===idx;
     const tag=isCurrent?'<span class="ar-tag current">YOUR STAGE</span>':isOpen?'<span class="ar-tag open">OPEN NOW</span>':'';
-    const eduRow=track.minEdu?'<div class="reqrow"><span class="'+(eduOk?'reqok':'reqno')+'">🎓 '+SCHOOL_STAGES.find(x=>x.id===track.minEdu).name+' completed</span></div>':'';
+    const eduRow=careerEducationRequirementHTML(track,idx);
     const reqParts=eduRow+Object.keys(st.req).map(k=>{const have=S.skills[k]||0,need=st.req[k],ok=have>=need,pct=Math.min(100,Math.round(have/need*100));
       return '<div class="reqrow"><span class="'+(ok?'reqok':'reqno')+'">'+SKILLS[k].icon+' '+SKILLS[k].name+' '+have+'/'+need+'</span>'+
         '<div class="sbar mini"><div class="sfill" style="width:'+pct+'%;background:'+(ok?'var(--green)':'var(--blue)')+'"></div></div></div>';}).join('');
@@ -871,7 +1125,7 @@ function openJobDetail(trackId){
       '</div>';
   });
   $('#jobDetailSheet').innerHTML='<div class="ps-head"><span>'+track.icon+' '+track.name.toUpperCase()+'</span><span>CAREER LADDER</span></div>'+
-    '<div class="aempty" style="margin:6px 2px 12px">Higher rungs call for more skill, more of it at once, and years served in the seat below.</div>'+
+    '<div class="aempty" style="margin:6px 2px 12px">'+(typeof CAREER_PATH_LABELS!=='undefined'&&CAREER_PATH_LABELS[track.id]?CAREER_PATH_LABELS[track.id]+'. ':'')+(careerAdvantage.kind!=='none'?careerAdvantage.label+' · improves hiring and progression. ':'')+'Each rung states its education rule: no degree, a general degree, or a specific major. Higher rungs also call for more skill and years served below.</div>'+
     '<div style="margin:0 2px">'+rows+'</div>'+
     '<div class="ps-foot"><button class="btn" id="jobDetailClose">Close ▸</button></div>';
   $('#jobDetailSheet').onclick=e=>{
@@ -879,6 +1133,35 @@ function openJobDetail(trackId){
     if(e.target.id==='jobDetailClose'){ $('#jobDetailWrap').classList.add('hidden'); }
   };
   $('#jobDetailWrap').classList.remove('hidden');
+}
+function openEducationDossier(){
+  if(typeof ensureEducationState==='function') ensureEducationState(S);
+  const e=S.education, active=e.stageId&&SCHOOL_STAGES.find(x=>x.id===e.stageId), inst=typeof institutionById==='function'?institutionById(e.institutionId):null;
+  const completed=SCHOOL_STAGES.filter(st=>e.completed&&e.completed[st.id]);
+  const certificates=Object.values(e.certificates||{});
+  const nextStage=SCHOOL_STAGES.find(st=>!e.completed[st.id]&&S.age<=st.endAge);
+  const debt=(e.tuitionDebt||0)+(e.travelDebt||0);
+  const transcript=completed.length?completed.map(st=>'<div class="arow"><div class="ar-grade">✓</div><div style="flex:1"><div class="ar-name">'+st.name+'</div><div class="ar-meta">completed</div></div></div>').join(''):'<div class="aempty">No school completion is on file yet.</div>';
+  const activeBlock=active?'<div class="aempty" style="margin:8px 2px">Currently enrolled: <b>'+active.name+'</b> · year '+((S.eduYearsIn||0)+1)+'/'+active.years+(inst?' · '+inst.name:'')+'<br>'+educationTrainingLabel(active,inst,e.majorId)+'<br>Attendance '+(e.attendance==null?100:e.attendance)+'% · performance '+(e.performance==null?50:e.performance)+'<br>Funding: '+educationFundingLabel(inst,e.funding)+'<br>Residence: '+(e.residenceMode||S.residenceMode||'not recorded')+'</div>':'';
+  const educationStatus=active?'IN STUDY / '+active.name.toUpperCase():(completed.length?'LAST COMPLETED / '+completed[completed.length-1].name.toUpperCase():'NO FORMAL RECORD');
+  const nextMove=active?'Continue the current course.':nextStage?'Next possible route: '+nextStage.name+'.':'No standard school stage remains in the current age window.';
+  const certificateBlock=certificates.length?certificates.map(item=>'<div class="arow"><div class="ar-grade">CERT</div><div style="flex:1"><div class="ar-name">'+item.name+'</div><div class="ar-meta">'+item.year+' · '+(CAREERS.find(t=>t.id===item.career)?.name||item.career)+' route</div></div></div>').join(''):'<div class="aempty">No vocational certificates are on file.</div>';
+  const trainingAction=typeof educationProgramOptions==='function'&&educationProgramOptions().length?'<button class="household-tile" data-ed-training="1"><b>OPEN VOCATIONAL TRAINING</b><span>Short credentials can strengthen care, trade, transport, or business routes.</span><i>Compare available courses and their fees.</i></button>':'';
+  const majorDef=e.majorId&&MAJORS[e.majorId];
+  const majorBlock=majorDef?'<div class="aempty" style="margin:8px 2px"><b>Degree major:</b> '+educationMajorLabel(e.majorId)+' · specialist paths: '+(majorDef.careers||[]).map(id=>{const t=CAREERS.find(c=>c.id===id);return t?t.name:id;}).join(', ')+'</div>':'';
+  const skillRows=Object.entries(SKILLS).filter(([id])=>(S.skills[id]||0)>0||educationSkillFloor(id)>0).map(([id,skill])=>{
+    const level=S.skills[id]||0,floor=educationSkillFloor(id),safe=floor?' · certified floor '+floor:'/10';
+    return '<div class="arow"><div class="ar-grade">'+skill.icon+'</div><div style="flex:1"><div class="ar-name">'+skill.name+' '+level+'/10</div><div class="ar-meta">'+(floor?'School-trained'+safe:'No education protection')+'</div></div></div>';
+  }).join('')||'<div class="aempty">No skills have been recorded.</div>';
+  $('#educationSheet').innerHTML='<div class="ps-head"><span>EDUCATION & CAREER DOSSIER</span><span>FORM 3</span></div>'+
+    '<div class="aempty" style="margin:6px 2px 10px"><b>'+educationStatus+'</b> · '+nextMove+(debt?'<br>Education debt on record: '+money(debt):'')+'</div>'+
+    '<div class="ps-sub"><span>TRANSCRIPT</span></div>'+transcript+activeBlock+majorBlock+
+    '<div class="ps-sub"><span>VOCATIONAL CREDENTIALS</span></div>'+certificateBlock+trainingAction+
+    '<div class="ps-sub"><span>SKILLS & CERTIFIED KNOWLEDGE</span></div>'+skillRows+
+    '<div class="ps-foot"><button class="btn" id="educationClose">Close ▸</button></div>';
+  $('#educationSheet').onclick=e=>{if(e.target.closest('[data-ed-training]')){$('#educationWrap').classList.add('hidden');openTrainingPicker();return;} if(e.target.id==='educationClose')$('#educationWrap').classList.add('hidden');};
+  $('#educationWrap').classList.remove('hidden');
+  $('#educationSheet').scrollTop=0;
 }
 function openGenericJobLadder(){
   let rows='';
@@ -1181,6 +1464,8 @@ function dispatchReverseDiscoveryReaction(ctx){
 }
 function runHistory(){ const y=currentYear();
   for(const h of HISTORY){ if(h.y!==y) continue; if(h.if&&!h.if(S)) continue;
+    if(h.medical&&typeof medicalEventExposure==='function') medicalEventExposure(h.medical,S);
+    if(h.outbreak&&typeof medicalStartOutbreak==='function') medicalStartOutbreak(h.outbreak.id,h.outbreak.severity,h.outbreak.years);
     const fx=typeof h.fx==='function'?h.fx(S):(h.fx||{}); if(h.side)h.side(S); logEv(fill(h.t),fx,'history','HISTORY · '+y); } }
 const STAGE_INFO={
  infancy:{name:'INFANCY',blurb:'The file opens. Everything is still being decided for the subject.'},
@@ -1220,6 +1505,7 @@ function runEconomy(){
   if(S.age>=16&&S.jailUntil<=S.age){ let income=0;
     if(S.jobName==='Conscript')income=400; else if(S.career)income=CAREERS.find(c=>c.id===S.career).stages[S.jobTier-1].salary; else if(S.jobTier>0)income=INC[S.jobTier]; else if(S.jobName.startsWith('Pensioner'))income=S.pensionBase;
     if(S.garnishUntil>S.age) income=Math.round(income*0.6);
+    if(typeof medicalWorkPenalty==='function'){ const medicalPenalty=medicalWorkPenalty(S); if(medicalPenalty) income=Math.round(income*Math.max(.55,1-medicalPenalty*.14)); }
     S.assets+=income; }
   if(S.jailUntil<=S.age) runBudget(WAR);
   if(S.jailUntil>S.age){ S.assets-=200; }
@@ -1289,7 +1575,7 @@ function currentChildcare(){return CHILDCARE.find(c=>c.id===S.lifestyle.childcar
 function applyAmbient(fx,scale){ if(!fx) return; for(const k in fx){ const v=fx[k]; if(!v) continue;
   const sv=scale&&scale!==1?Math.round(v*scale):v;
   if(!sv) continue;
-  if(k==='assets'){ S.assets+=sv; } else { const cap=(k==='health'&&S.healthCap!=null)?S.healthCap:(k==='looks'&&S.looksCap!=null)?S.looksCap:100; S[k]=clamp(S[k]+sv,0,cap); } } }
+  if(k==='assets'){ S.assets+=sv; } else { const cap=(k==='health'&&S.healthCap!=null)?S.healthCap:(k==='looks'&&S.looksCap!=null)?S.looksCap:100; if(k==='health'&&typeof medicalApplyHealthDelta==='function') medicalApplyHealthDelta(S,sv,'household'); else S[k]=clamp(S[k]+sv,0,cap); } } }
 function runBudget(WAR){
   const house=currentHousing(), food=currentFood();
   const atHome=S.age<16||S.livingAtHome;
@@ -1326,12 +1612,19 @@ function resolvePlan(){
     logChips('A quiet year. Not every one needs a headline.',[],'idle','YEAR '+S.age);
   }
   q.forEach(item=>{ const def=item.type==='p'?PUR_MAP[item.id]:DEC_MAP[item.id]; if(!def)return;
-    S.acts++; window.C={}; const r=def.apply(S,item); const chips=r.fx?applyFx(r.fx):[];
+    S.acts++; window.C={};
+    let r;
+    if(item.id==='learntrade'&&item.program&&typeof educationCompleteProgram==='function'){
+      const result=educationCompleteProgram(item.program);
+      r=result.ok?{fx:{happiness:2},text:'Subject completed '+result.program.name+'. '+result.program.desc+(result.shortfall?' The unpaid '+money(result.shortfall)+' was entered as education debt.':' The certificate was paid from assets.') }:{fx:{happiness:-1},text:'Subject reached for vocational training, but the course was not available on the current record.'};
+    }else r=def.apply(S,item);
+    const chips=r.fx?applyFx(r.fx):[];
     if(r.follow) pushFollow(r.follow);
     logChips(fill(r.text),chips,item.type==='p'?'plan':'decision',(item.type==='p'?'PURSUIT':'DECISION')+' · YEAR '+S.age);
     renderStats(window.C); });
 }
 function runRandomEvents(){
+  if(typeof educationEventTick==='function') educationEventTick();
   let n=chance(.5)?1:0; if(S.age>10&&chance(.12))n++;
   const dispId=currentDisposition(S).it.id;
   const darkMult = dispId==='saint'?0.5:(dispId==='gambler'||dispId==='hustler')?1.4:1;
@@ -1341,6 +1634,7 @@ function runRandomEvents(){
     const weighted=pool.map(e=>{let w=e.w||2; if(e.dark)w*=(0.3+S.vice*0.4+(S.happiness<40?1.1:0))*darkMult; return {e,w:Math.max(w,0.05)};});
     const tot=weighted.reduce((a,x)=>a+x.w,0); let r=Math.random()*tot, e=weighted[weighted.length-1].e;
     for(const x of weighted){r-=x.w; if(r<=0){e=x.e;break;}}
+    if(e.medical&&typeof medicalEventExposure==='function') medicalEventExposure(e.medical,S);
     if(e.side)e.side(S); logEv(vtext(e), typeof e.fx==='function'?e.fx(S):e.fx, undefined, undefined, !!e.once);
     if(e.follow) pushFollow(e.follow(S)); S.cool[e.id]=S.age+(e.once?999:(e.cd||6));
   }
@@ -1362,6 +1656,8 @@ function checkMortality(){
         : pick(['a hunger the body could not recover from','a sickness a fuller table might have survived']);
     }
   }
+  const medicalMortality=typeof medicalMortalityDetails==='function'?medicalMortalityDetails(S):null;
+  if(!dead&&medicalMortality&&medicalMortality.risk>0&&chance(medicalMortality.risk)){dead=true;cause=medicalMortality.cause||'complications from a long illness';}
   if(!dead&&S.health<=0){dead=true;cause=pick(['heart failure','a long illness, patiently endured','sudden collapse at the kitchen table']);}
   else if(!dead&&S.happiness<=0&&chance(0.07)){dead=true;cause='a despair the file does not fully document';}
   else if(!dead&&S.age>=56){const p=0.006*(S.age-55)+Math.max(0,70-S.health)*0.0012; if(chance(p)){dead=true;cause=S.age>=84?'natural causes, in sleep':'heart failure';}}
@@ -1383,9 +1679,16 @@ function maybeSlip(){
   if(opool.length && chance(0.16)){ openOpportunity(pick(opool)); }
 }
 function autoPickSkill(){
+  const cap=typeof skillCapFor==='function'?skillCapFor():10;
+  if(S.career){
+    const track=CAREERS.find(c=>c.id===S.career), stage=track&&track.stages[Math.max(0,S.jobTier-1)], next=track&&track.stages[S.jobTier];
+    const needed=[...(stage?Object.keys(stage.req):[]),...(next?Object.keys(next.req):[])].filter((id,i,a)=>a.indexOf(id)===i)
+      .filter(id=>S.age>=SKILLS[id].minAge&&(S.skills[id]||0)<cap);
+    if(needed.length) return needed.sort((a,b)=>(S.skills[a]||0)-(S.skills[b]||0))[0];
+  }
   const jobDef=JOBLIST.find(j=>j.name===S.jobName);
-  if(jobDef&&jobDef.skill&&S.age>=SKILLS[jobDef.skill].minAge&&(S.skills[jobDef.skill]||0)<10) return jobDef.skill;
-  const eligible=Object.entries(SKILLS).filter(([id,sk])=>S.age>=sk.minAge&&(S.skills[id]||0)<10);
+  if(jobDef&&jobDef.skill&&S.age>=SKILLS[jobDef.skill].minAge&&(S.skills[jobDef.skill]||0)<cap) return jobDef.skill;
+  const eligible=Object.entries(SKILLS).filter(([id,sk])=>S.age>=sk.minAge&&(S.skills[id]||0)<cap);
   if(!eligible.length) return null;
   eligible.sort((a,b)=>(S.skills[b[0]]||0)-(S.skills[a[0]]||0));
   return eligible[0][0];
@@ -1393,11 +1696,14 @@ function autoPickSkill(){
 function tickSkills(){
   const jobDef=JOBLIST.find(j=>j.name===S.jobName);
   const workedSkill=jobDef?jobDef.skill:null;
+  const career=CAREERS.find(track=>track.id===S.career);
+  const careerStage=career&&career.stages[Math.max(0,S.jobTier-1)];
+  const careerSkills=new Set(careerStage?Object.keys(careerStage.req):[]);
   for(const id in S.skills){
     if(S.skills[id]<=0){delete S.skills[id];continue;}
-    const reinforced=(id===workedSkill)||(id===S.practicedSkill);
-    if(reinforced){ if(S.skills[id]<10&&chance(.28)) S.skills[id]++; }
-    else if(chance(.18)){ S.skills[id]=Math.max(0,S.skills[id]-1); }
+    const reinforced=(id===workedSkill)||(id===S.practicedSkill)||careerSkills.has(id);
+    if(reinforced){ if(S.skills[id]<skillCapFor()&&chance(.28)) S.skills[id]++; }
+    else if(chance(.18)){ S.skills[id]=Math.max(educationSkillFloor(id),S.skills[id]-1); }
   }
   S.practicedSkill=null;
 }
@@ -1409,8 +1715,8 @@ function guardianTeachTick(){
   const teacher=g.slice().sort((a,b)=>b.skillLvl-a.skillLvl)[0];
   const sk=SKILLS[teacher.skill]; if(!sk||S.age<sk.minAge) return;
   const cap=tier==='nurturing'?4:2, pTeach=tier==='nurturing'?0.4:0.2;
-  const before=S.skills[teacher.skill]||0;
-  if(before<cap&&chance(pTeach)) S.skills[teacher.skill]=before+1;
+  const before=S.skills[teacher.skill]||0, educationCap=typeof skillCapFor==='function'?skillCapFor():10;
+  if(before<Math.min(cap,educationCap)&&chance(pTeach)) S.skills[teacher.skill]=before+1;
 }
 function guardianAmbientTick(){
   if(!S) return;
@@ -1567,38 +1873,94 @@ function checkParentingStyleChoice(){
 }
 /* ================= SCHOOLING (lower/middle/upper/university, gated by parenting) ================= */
 function syncEduJobTitle(){
-  if(S.eduStage){ const st=SCHOOL_STAGES.find(x=>x.id===S.eduStage); if(st){ S.jobName=st.pupilTitle; S.jobTier=0; S.career=null; } return; }
+  const activeStage=S.eduStage||(S.education&&S.education.stageId);
+  if(activeStage){ const st=SCHOOL_STAGES.find(x=>x.id===activeStage); if(st){ S.jobName=st.pupilTitle; S.jobTier=0; S.career=null; } return; }
   if(S.jobTier>0) return;
   if(S.jailUntil>S.age) return;
   if(S.jobName&&S.jobName.startsWith('Pensioner')) return;
   S.jobName=S.age<16?'Minor':'Unemployed';
 }
 function schoolYearTick(){
-  if(!S.eduStage) return;
-  const stage=SCHOOL_STAGES.find(x=>x.id===S.eduStage); if(!stage) return;
-  S.smarts=clamp(S.smarts+stage.smartsPerYear,0,100);
-  S.eduYearsIn=(S.eduYearsIn||0)+1;
-  if(S.eduYearsIn>=stage.years){
-    S.eduCompleted=S.eduCompleted||{}; S.eduCompleted[stage.id]=true;
+  if(typeof ensureEducationState!=='function') return;
+  const e=ensureEducationState(S);
+  if(!e.stageId) return;
+  const stage=SCHOOL_STAGES.find(x=>x.id===e.stageId); if(!stage) return;
+  const inst=typeof institutionById==='function'?institutionById(e.institutionId):null;
+  const quality=inst?inst.quality:1;
+  const attendanceShift=(S.health<35?-10:0)+(S.happiness<30?-8:0)+(S.assets<0?-4:0)-(typeof medicalEducationPenalty==='function'?medicalEducationPenalty(S):0);
+  e.attendance=clamp((e.attendance==null?100:e.attendance)+attendanceShift,40,100);
+  e.performance=clamp(Math.round((e.performance||50)*.65+(S.smarts||50)*.2+(S.happiness||50)*.08+(S.health||50)*.07),0,100);
+  const academicPoints=stage.smartsPerYear*quality*(.72+e.performance/360)+(e.smartsRemainder||0);
+  const gain=Math.max(1,Math.floor(academicPoints));
+  e.smartsRemainder=academicPoints-gain;
+  S.smarts=clamp(S.smarts+gain,0,100);
+  const skillPool=typeof educationTrainingSkills==='function'?educationTrainingSkills(stage,inst,e.majorId):[];
+  const skillCap=typeof educationTrainingCap==='function'?educationTrainingCap(stage):0;
+  const trained=[];
+  const thisYearsSkills=stage.id==='university'?skillPool:skillPool.length?[skillPool[(e.yearsIn||0)%skillPool.length]]:[];
+  thisYearsSkills.forEach(skill=>{
+    if(SKILLS[skill]&&S.age>=SKILLS[skill].minAge&&(S.skills[skill]||0)<skillCap){
+      const point=chance(clamp(.7+e.performance/300,.7,.98))?1:0;
+      if(!point) return;
+      S.skills[skill]=clamp((S.skills[skill]||0)+point,0,10);
+      if(typeof educationRecordSkill==='function') educationRecordSkill(skill,S.skills[skill]);
+      trained.push(skill);
+    }
+  });
+  if(trained.length) logEv('EDUCATION TRAINING. '+trained.map(id=>SKILLS[id].name).join(' + ')+' improved through '+(inst?inst.name:stage.name)+'.',{},'milestone','SCHOOLING · YEAR '+S.age);
+  const fee=typeof educationAnnualPayment==='function'?educationAnnualPayment():0;
+  if(fee){
+    if(e.funding==='studentloan') e.tuitionDebt=(e.tuitionDebt||0)+fee;
+    else if(S.assets>=fee) S.assets-=fee;
+    else { e.tuitionDebt=(e.tuitionDebt||0)+(fee-Math.max(0,S.assets||0)); S.assets=Math.max(0,S.assets||0); }
+  }
+  const commuteFee=typeof educationAnnualCommuteCost==='function'?educationAnnualCommuteCost():0;
+  if(commuteFee){
+    if(S.assets>=commuteFee) S.assets-=commuteFee;
+    else { e.travelDebt=(e.travelDebt||0)+(commuteFee-Math.max(0,S.assets||0)); S.assets=Math.max(0,S.assets||0); }
+  }
+  e.yearsIn=(e.yearsIn||0)+1;
+  if(e.yearsIn>=stage.years){
+    e.completed=e.completed||{}; e.completed[stage.id]=true;
     if(stage.id==='university') S.edu=true;
+    e.history.push({kind:'graduation',stage:stage.id,institutionId:e.institutionId,majorId:e.majorId,year:currentYear(),performance:e.performance,attendance:e.attendance});
     logEv(stage.completeText,stage.completeFx,'milestone','MILESTONE · YEAR '+S.age);
-    if(stage.id==='university'&&!schoolWealthOK()){
+    const educationDebt=Math.round((e.tuitionDebt||0)+(e.travelDebt||0));
+    if(educationDebt>0){
       const t=LIABILITY_TYPES.studentloan;
-      S.liabilities.push({id:t.id,name:t.name,icon:t.icon,yearsLeft:t.years,annualPayment:liabilityPayment(t)});
+      const financed=Object.assign({},t,{principal:Math.max(t.principal,educationDebt)});
+      S.liabilities.push({id:financed.id,name:financed.name,icon:financed.icon,yearsLeft:financed.years,annualPayment:liabilityPayment(financed)});
+      e.tuitionDebt=0; e.travelDebt=0;
       logEv('The bursar’s office sent along the bill for the degree, payable over the years ahead.',{});
     }
-    S.eduStage=null; S.eduYearsIn=0;
+    e.stageId=null; e.yearsIn=stage.years; e.status='graduated';
+    S.eduStage=null;
+    if(typeof educationSyncLegacy==='function') educationSyncLegacy(S);
     const idx=SCHOOL_STAGES.findIndex(x=>x.id===stage.id), next=SCHOOL_STAGES[idx+1];
     if(next&&!S.eduCompleted[next.id]) S.pendingSchoolStage=next.id;
     syncEduJobTitle();
+    return;
   }
+  if(typeof educationSyncLegacy==='function') educationSyncLegacy(S);
 }
 function schoolInfoHTML(){
   if(!S.eduStage) return '';
+  if(typeof ensureEducationState==='function') ensureEducationState(S);
+  const e=S.education||{};
   const stage=SCHOOL_STAGES.find(x=>x.id===S.eduStage); if(!stage) return '';
+  const inst=typeof institutionById==='function'?institutionById(S.education&&S.education.institutionId):null;
+  const major=S.education&&S.education.majorId&&MAJORS[S.education.majorId];
+  const training=typeof educationTrainingLabel==='function'?educationTrainingLabel(stage,inst,S.education&&S.education.majorId):'';
   return '<div class="hs-info"><b>'+stage.name+'</b>'+
-    '<div class="hs-info-row">Year '+((S.eduYearsIn||0)+1)+' of '+stage.years+'</div>'+
-    '<div class="hs-info-row">+'+stage.smartsPerYear+' SMARTS/yr while enrolled — no work while attending</div></div>';
+    (inst?'<div class="hs-info-row">'+inst.name+' · quality '+Math.round(inst.quality*100)+'%</div>':'')+
+     (major?'<div class="hs-info-row">Major: '+major.name+'</div>':'')+
+     '<div class="hs-info-row">Year '+((S.eduYearsIn||0)+1)+' of '+stage.years+'</div>'+
+     '<div class="hs-info-row">Attendance '+(e.attendance==null?100:e.attendance)+'% · performance '+(e.performance==null?50:e.performance)+'</div>'+
+     '<div class="hs-info-row">Funding: '+(typeof educationFundingLabel==='function'?educationFundingLabel(inst,e.funding):e.funding||'not recorded')+'</div>'+
+     '<div class="hs-info-row">Residence: '+(e.residenceMode||S.residenceMode||'not recorded')+'</div>'+
+     ((e.tuitionDebt||e.travelDebt)?'<div class="hs-info-row">Education debt '+money((e.tuitionDebt||0)+(e.travelDebt||0))+'</div>':'')+
+    '<div class="hs-info-row">~'+(stage.smartsPerYear*(inst?inst.quality:1)).toFixed(1)+' SMARTS/yr from quality — no work while attending</div>'+
+    '<div class="hs-info-row">Training: '+training+'</div></div>';
 }
 function resolveSchoolLine(text,fx){
   window.C={};
@@ -1607,7 +1969,7 @@ function resolveSchoolLine(text,fx){
   renderStats(window.C); updateBar();
   checkAchievements('live');
 }
-function openSchoolSlip(stage){
+function openSchoolSlipLegacy(stage){
   slipOpen=true; document.body.classList.add('slip-open');
   const guardians=guardiansOf(), grip=parentGrip();
   const names=guardians.length?guardians.map(p=>p.name).join(' and '):'no one';
@@ -1616,7 +1978,7 @@ function openSchoolSlip(stage){
   const card=$('#slipCard'); card.className='slipcard crisis';
   let body='', title='', opts=[];
   function enroll(text,fx){ return ()=>{ S.eduStage=stage.id; S.eduYearsIn=0; syncEduJobTitle(); resolveSchoolLine(text,fx||{}); }; }
-  function skip(text,fx){ return ()=>{ resolveSchoolLine(text,fx||{}); }; }
+  function skip(text,fx){ return ()=>{ if(typeof educationMarkStageMissed==='function') educationMarkStageMissed(stage,S,'The subject declined or could not secure this school place.'); return resolveSchoolLine(text,fx||{}); }; }
   if(viaParent){
     if(grip>=55){
       title='Enrolled, No Say In It';
@@ -1654,13 +2016,185 @@ function openSchoolSlip(stage){
     opts[idx].run(); updateBar(); if(!S.alive) handleDeath(); };
   $('#slipWrap').classList.remove('hidden'); snd('paper'); updateBar();
 }
+function openSchoolSlip(stage){
+  slipOpen=true; document.body.classList.add('slip-open');
+  if(typeof ensureEducationState==='function') ensureEducationState(S);
+  const guardians=guardiansOf(), grip=parentGrip();
+  const names=guardians.length?guardians.map(p=>p.name).join(' and '):'no one';
+  const viaParent=schoolViaParent(stage);
+  const viaScholar=!viaParent&&schoolViaScholar(stage);
+  const options=typeof educationOptionsForStage==='function'?educationOptionsForStage(stage):[];
+  const card=$('#slipCard'); card.className='slipcard crisis';
+  function optionSub(pair){
+    const inst=pair.inst, remote=inst.settlementId!==World.activeSettlementId;
+    const specialty=inst.specialties&&inst.specialties.length?' · '+inst.specialties.map(id=>SKILLS[id]?SKILLS[id].name:id).join(', '):'';
+    const major=pair.major?' · '+educationMajorLabel(pair.major):'';
+    const training=typeof educationTrainingLabel==='function'?educationTrainingLabel(stage,inst,pair.major):'';
+    return money(inst.tuition)+'/yr · quality '+Math.round(inst.quality*100)+'%'+specialty+major+' · '+(remote?'relocation required':'local')+' · '+training;
+  }
+  function enroll(pair,funding,allowFunding,residenceMode){ return ()=>{
+    if(!allowFunding&&(!funding||(funding==='family'&&viaParent&&grip<55))){
+      renderFundingForPair(pair,null);
+      $('#slipWrap').classList.remove('hidden');
+      return;
+    }
+    const remote=pair.inst.settlementId!==World.activeSettlementId;
+    if(remote&&stage.id==='university'&&!residenceMode){
+      renderResidenceForPair(pair,funding);
+      $('#slipWrap').classList.remove('hidden');
+      return;
+    }
+    S.eduStage=stage.id; S.eduYearsIn=0;
+    educationEnroll(stage,pair.inst,pair.major,funding,residenceMode);
+    const residenceText=remote?(residenceMode==='commute'?' A commuter route was filed.':' Residence transferred immediately for study.'):'';
+    resolveSchoolLine('Subject enrolled at '+pair.inst.name+(pair.major?' to study '+educationMajorLabel(pair.major):'')+'.'+residenceText,{happiness:stage.id==='university'?2:1});
+  }; }
+  function skip(text,fx){ return ()=>{ if(typeof educationMarkStageMissed==='function') educationMarkStageMissed(stage,S,'The subject declined or could not secure this school place.'); return resolveSchoolLine(text,fx||{}); }; }
+  function closeAndRun(run){
+    $('#slipWrap').classList.add('hidden'); slipOpen=false; document.body.classList.remove('slip-open'); card.onclick=null;
+    run(); updateBar(); if(!S.alive) handleDeath();
+  }
+  function renderFundingForPair(pair,back){
+    const funds=typeof educationFundingOptions==='function'?educationFundingOptions(stage,pair.inst,viaParent,viaScholar):[];
+    const opts=funds.map(fund=>({label:fund.label,cls:fund.kind==='debt'?'maybe':'ok',sub:educationFundingLabel(pair.inst,fund.id)+' · '+fund.desc,run:enroll(pair,fund.id,true)}));
+    if(back) opts.push({label:'Back to institutions',cls:'maybe',sub:'Choose a different place',show:back});
+    render('How Will This Be Funded?',pair.inst.name+' is available. Select the payment route before the record is filed.',stage.id==='university'?'The selected route affects yearly assets and education debt.':'The listed tuition is the institution\'s annual cost.',opts,'SUBJECT MUST CHOOSE');
+  }
+  function renderResidenceForPair(pair,funding){
+    const to=settlementById(pair.inst.settlementId), fare=to?travelCost(currentSettlement(),to):0;
+    const opts=[
+      {label:'Move to campus',cls:'ok',sub:'one transfer fare '+money(fare)+' · student residence follows the institution',run:enroll(pair,funding,true,'relocate')},
+      {label:'Commute to campus',cls:'maybe',sub:'stay here · yearly route cost estimated at '+money(Math.round(fare*1.5))+' · may become travel debt',run:enroll(pair,funding,true,'commute')}
+    ];
+    render('Where Will You Live?',pair.inst.name+' is outside the current settlement. Choose the residence plan before enrollment.', 'Campus residence is simpler. Commuting preserves the current home but adds a yearly route cost.',opts,'SUBJECT MUST CHOOSE');
+  }
+  function render(title,body,note,opts,req){
+    let optsHtml=''; opts.forEach((o,i)=>{optsHtml+='<button class="sl-btn '+o.cls+'" data-o="'+i+'">'+o.label+(o.sub?'<small>'+o.sub+'</small>':'')+'</button>';});
+    card.innerHTML='<div class="sl-head crisis"><span>SCHOOLING · YEAR '+S.age+'</span><span class="sl-req">'+req+'</span></div>'+
+      '<div class="sl-title crisis">'+title+'</div><p class="sl-body">'+body+'</p>'+
+      '<p class="sl-note">'+note+'</p><div class="sl-actions school-choice-actions">'+optsHtml+'</div>';
+    card.onclick=e=>{const b=e.target.closest('[data-o]');if(!b)return;const option=opts[+b.dataset.o];if(option.run) closeAndRun(option.run);else if(option.show) option.show();};
+  }
+  function renderUniversityInstitutions(major){
+    const matching=options.filter(inst=>educationMajorOptions(inst).includes(major));
+    const funding=viaParent?'family':viaScholar?'scholarship':null;
+    const pBase=clamp(0.3+(S.smarts-stage.scholarSmarts)/100,0.15,0.75);
+    const opts=matching.map(inst=>{
+      const pair={inst,major};
+      if(viaScholar){
+        const p=clamp(pBase+(inst.quality-1)*.35-(inst.tuition-500)/3000,.10,.82);
+        return {label:inst.name,cls:'maybe',sub:P(p)+' chance · '+optionSub(pair),run:()=>{if(chance(p)) enroll(pair,funding)();else skip('Subject tried for a scholarship to '+inst.name+' and did not get it. The door stayed shut.',{happiness:-3})();}};
+      }
+      return {label:inst.name,cls:'ok',sub:optionSub(pair),run:enroll(pair,funding)};
+    });
+    opts.push({label:'← Back to majors',cls:'maybe',sub:'Choose a different course of study',show:renderUniversityMajors});
+    render('Study '+educationMajorLabel(major),viaScholar?'Choose a university offering this major and apply for its funded seat.':'Choose where to study '+educationMajorLabel(major)+'.','University options are scrollable. A campus outside your residence requires relocation.',opts,'SUBJECT MUST CHOOSE');
+  }
+  function renderUniversityMajors(){
+    const majors=[...new Set(options.flatMap(inst=>educationMajorOptions(inst)))];
+    const opts=majors.map(major=>{
+      const count=options.filter(inst=>educationMajorOptions(inst).includes(major)).length;
+      const careers=(MAJORS[major]&&MAJORS[major].careers||[]).map(id=>{const track=CAREERS.find(c=>c.id===id);return track?track.name:id;}).join(', ');
+      return {label:educationMajorLabel(major),cls:'ok',sub:count+' university '+(count===1?'option':'options')+' · trains '+MAJORS[major].skills.map(id=>SKILLS[id].name).join(' + ')+' · specialist paths: '+(careers||'none'),show:()=>renderUniversityInstitutions(major)};
+    });
+    if(viaParent) opts.push({label:'Decline — '+stage.declineNote,cls:'no',sub:'+HAPPINESS now · education opportunity lost',run:skip('Subject chose to skip '+stage.name+'. Better, for now, to '+stage.declineNote+'.',{happiness:3})});
+    else opts.push({label:'Do not bother',cls:'no',sub:'',run:skip('Subject did not try for a funded university place. No one would have paid for it anyway.',{})});
+    render('Choose Your Major',viaScholar?'No one at home is arranging university. First choose a field, then a campus offering it.':names+' left the university decision to you. First choose a field of study.','Your major controls which specialist careers you can enter after graduation.',opts,'SUBJECT MUST CHOOSE');
+  }
+  const canSelfFund=stage.id==='university'&&S.age>=18&&options.length;
+  if(stage.id==='university'&&(viaParent||viaScholar||canSelfFund)&&!(viaParent&&grip>=55)){
+    if(!options.length) render('No University Available','There is no qualifying university available from the current residence.','The year kept moving anyway.',[{label:'(no university this year)',cls:'no',sub:'',run:skip('No qualifying university was available. The year kept moving anyway.',{happiness:-2})}],'SUBJECT MUST CHOOSE');
+    else renderUniversityMajors();
+    $('#slipWrap').classList.remove('hidden'); snd('paper'); updateBar();
+    return;
+  }
+  const pairs=options.map(inst=>({inst,major:null}));
+  let title='',body='',opts=[];
+  if(!pairs.length){
+    title='No Institution Available';
+    body='There is no qualifying institution available from the current residence.';
+    opts=[{label:'(no school this year)',cls:'no',sub:'',run:skip('No qualifying institution was available. The year kept moving anyway.',{happiness:-2})}];
+  }else if(viaParent&&grip>=55){
+    const chosen=educationParentChoice(stage,options);
+    const major=stage.id==='university'?educationMajorOptions(chosen)[0]:null;
+    const pair={inst:chosen,major};
+    title='Enrolled, No Say In It';
+    body=names+' selected the institution. No one asked what you wanted.';
+    opts=[{label:chosen.name+(major?' · '+educationMajorLabel(major):''),cls:'ok',sub:optionSub(pair),run:enroll(pair,'family')}];
+  }else if(viaParent){
+    title=stage.id==='university'?'University? Your Choice':'Choose Your '+stage.name;
+    body=names+' left the choice up to you. Select an institution or decline.';
+    opts=pairs.map(pair=>({label:pair.inst.name+(pair.major?' · '+educationMajorLabel(pair.major):''),cls:'ok',sub:optionSub(pair),run:enroll(pair,'family')}));
+    opts.push({label:'Decline — '+stage.declineNote,cls:'no',sub:'+HAPPINESS now · education opportunity lost',run:skip('Subject chose to skip '+stage.name+'. Better, for now, to '+stage.declineNote+'.',{happiness:3})});
+  }else if(viaScholar){
+    const pBase=clamp(0.3+(S.smarts-stage.scholarSmarts)/100,0.15,0.75);
+    title='A Scholarship Chance';
+    body='No one at home is arranging school. Choose a place and try to win its funded seat.';
+    opts=pairs.map(pair=>{
+      const p=clamp(pBase+(pair.inst.quality-1)*.35-(pair.inst.tuition-500)/3000,.10,.82);
+      return {label:'Try '+pair.inst.name+(pair.major?' · '+educationMajorLabel(pair.major):''),cls:'maybe',sub:P(p)+' chance · '+optionSub(pair),run:()=>{if(chance(p)) enroll(pair,'scholarship')();else skip('Subject tried for a scholarship to '+pair.inst.name+' and did not get it. The door stayed shut.',{happiness:-3})();}};
+    });
+    opts.push({label:'Do not bother',cls:'no',sub:'',run:skip('Subject did not try for a funded place. No one would have paid for it anyway.',{})});
+  }else{
+    title='No School This Year';
+    body='No one is arranging school for you — not this year, maybe not ever.';
+    opts=[{label:'(no school this year)',cls:'no',sub:'',run:skip('No one arranged schooling. Subject stayed home, and the years kept moving anyway.',{happiness:-2})}];
+  }
+  render(title,body,'Quality affects learning. Cost, funding, and residence are filed before enrollment.',opts,viaParent&&grip>=55?'THE FAMILY DECIDES':'SUBJECT MUST CHOOSE');
+  $('#slipWrap').classList.remove('hidden'); snd('paper'); updateBar();
+}
 function checkSchoolTransition(){
-  if(!S.alive||S.eduStage||S.eduDropped) return false;
+  if(!S.alive||S.eduStage||(S.education&&S.education.stageId)) return false;
   let stage=null;
-  if(S.pendingSchoolStage){ stage=SCHOOL_STAGES.find(x=>x.id===S.pendingSchoolStage); S.pendingSchoolStage=null; }
-  else stage=SCHOOL_STAGES.find(x=>x.startAge===S.age);
+  if(S.pendingSchoolStage){
+    const pending=SCHOOL_STAGES.find(x=>x.id===S.pendingSchoolStage);
+    if(pending&&S.age<pending.startAge) return false;
+    if(pending&&S.age<=pending.endAge){ stage=pending; S.pendingSchoolStage=null; }
+    else S.pendingSchoolStage=null;
+  }
+  if(stage&&typeof educationStageWasMissed==='function'&&educationStageWasMissed(stage,S)) stage=null;
+  if(!stage) stage=SCHOOL_STAGES.find(x=>S.age>=x.startAge&&S.age<=x.endAge&&!(S.eduCompleted&&S.eduCompleted[x.id])&&!(typeof educationStageWasMissed==='function'&&educationStageWasMissed(x,S)));
   if(!stage) return false;
+  if(typeof educationStageAgeAvailable==='function'&&!educationStageAgeAvailable(stage,S)) return false;
   if(S.eduCompleted&&S.eduCompleted[stage.id]) return false;
+  if(typeof ensureEducationState==='function') ensureEducationState(S);
+  if(S.education.lastOpportunityYear&&S.education.lastOpportunityYear[stage.id]===S.age) return false;
+  if(typeof educationMigratePassedOpportunity==='function'&&educationMigratePassedOpportunity(stage,S)) return false;
+  if(S.education.lastOpportunityYear) S.education.lastOpportunityYear[stage.id]=S.age;
+  if(typeof educationStageAvailable==='function'&&!educationStageAvailable(stage,S)){
+    const prerequisite=typeof educationStagePrerequisite==='function'?educationStagePrerequisite(stage):null;
+    if(typeof educationMarkStageMissed==='function') educationMarkStageMissed(stage,S,'A required prior school stage was not completed.');
+    logEv('EDUCATION BLOCKED. '+stage.name+' could not begin because '+(prerequisite?prerequisite.name:'the required prior course')+' was not completed.',{happiness:-1},'milestone','SCHOOLING · YEAR '+S.age);
+    renderStats(window.C||{}); updateBar();
+    openNotice({title:'PREREQUISITE NOT MET',body:(prerequisite?prerequisite.name:'The prior school stage')+' must be completed before '+stage.name+'. This enrollment opportunity has passed.'});
+    return true;
+  }
+  const options=typeof educationOptionsForStage==='function'?educationOptionsForStage(stage):[];
+  const guardians=guardiansOf(), parentEnrolling=schoolViaParent(stage);
+  if(parentEnrolling&&parentGrip()>=55&&options.length){
+    const institution=educationParentChoice(stage,options);
+    const major=stage.id==='university'?educationMajorOptions(institution)[0]:null;
+    S.eduStage=stage.id; S.eduYearsIn=0;
+    educationEnroll(stage,institution,major,'family');
+    logEv('FAMILY ENROLLMENT. '+guardians.map(p=>p.name).join(' and ')+' enrolled the subject at '+institution.name+(major?' for '+educationMajorLabel(major):'')+'.',{happiness:-1},'milestone','SCHOOLING · YEAR '+S.age);
+    syncEduJobTitle();
+    renderIdentity(); renderStats(window.C||{}); updateBar();
+    openNotice({
+      title:'SCHOOL ENROLLMENT FILED',
+      body:guardians.map(p=>p.name).join(' and ')+' enrolled you at '+institution.name+(major?' for '+educationMajorLabel(major):'')+'. Their decision was made without asking you.'
+    });
+    return true;
+  }
+  if(guardians.length&&!parentEnrolling&&!schoolViaScholar(stage)){
+    if(typeof educationMarkStageMissed==='function') educationMarkStageMissed(stage,S,'The family did not arrange enrollment.');
+    logEv('FAMILY RULING. '+guardians.map(p=>p.name).join(' and ')+' did not enroll the subject in '+stage.name+'.',{happiness:-2},'milestone','SCHOOLING · YEAR '+S.age);
+    renderStats(window.C||{}); updateBar();
+    openNotice({
+      title:'SCHOOLING WITHHELD',
+      body:guardians.map(p=>p.name).join(' and ')+' decided not to enroll you in '+stage.name+'.'
+    });
+    return true;
+  }
   openSchoolSlip(stage);
   return true;
 }
@@ -1701,11 +2235,12 @@ function advance(suppressBurst,quiet){
   renderStats(window.C); renderYear(); updateBar();
   checkAchievements('live');
   if(S.alive){
-    if(S.__pendingDiscovery){ const ctx=S.__pendingDiscovery; S.__pendingDiscovery=null; dispatchDiscoveryReaction(ctx); }
+    if(checkSchoolTransition()){}
+    else if(S.__pendingDiscovery){ const ctx=S.__pendingDiscovery; S.__pendingDiscovery=null; dispatchDiscoveryReaction(ctx); }
     else if(S.__pendingReverseDiscovery){ const ctx=S.__pendingReverseDiscovery; S.__pendingReverseDiscovery=null; dispatchReverseDiscoveryReaction(ctx); }
     else if(S.__pendingTheirSpouseNotice){ const n=S.__pendingTheirSpouseNotice; S.__pendingTheirSpouseNotice=null; openNotice(n); }
     else if(S.__pendingGuardianNotice){ const gp=S.__pendingGuardianNotice; S.__pendingGuardianNotice=null; openGuardianNotice(gp); }
-    else if(!checkGuardianEviction()&&!checkSchoolTransition()&&!checkParentingStyleChoice()) maybeSlip();
+    else if(!checkGuardianEviction()&&!checkParentingStyleChoice()) maybeSlip();
   }
   if(!S.alive) handleDeath();
 }
@@ -1777,7 +2312,8 @@ function handleDeath(){
   evaluateYearStreak(true);
   const g=grade(), ir=intentResult(), legacy=computeParentingLegacy();
   Lineage.pastSubjects.push({name:S.first+' '+S.last,dob:S.dob,deathYear:currentYear(),age:S.age,cause:S.cause,grade:g.g,intentName:ir.lab,intentStars:ir.stars,
-    parentWarmth:legacy.warmth,parentStability:legacy.stability,parentYears:legacy.years});
+    parentWarmth:legacy.warmth,parentStability:legacy.stability,parentYears:legacy.years,
+    education:S.education?{completed:Object.assign({},S.education.completed||{}),majorId:S.education.majorId||null,certificates:Object.keys(S.education.certificates||{})}:null});
   const candidates=livingKin().filter(m=>(currentYear()-m.dob)>=16);
   if(candidates.length){ openSuccession(candidates); }
   else { closeFile(); }
@@ -1805,7 +2341,7 @@ function promoteToLeader(member){
     photoSeed:RI(0,99),photoTint:pick(TINTS),
     usedV:{},cool:{},desk:{subsidy:0,checkup:0,censure:0},warned:{},queue:[],usedNames:[],skills:{},practicedSkill:null,petDone:{},garnishUntil:0,bankrupt:false,autoTrain:false,marked:false,markedNote:'',healthCap:100,looksCap:100,
     streak:0,bestStreak:0,yearAccum:{},stage:stageForAge(age),career:null,vacancies:[],careerYears:0,
-    eduStage:null,eduYearsIn:0,eduDropped:true,eduCompleted:{},pendingSchoolStage:null,
+    eduStage:null,eduYearsIn:0,eduDropped:false,eduCompleted:{},pendingSchoolStage:null,
     familyTier:newFam?newFam.id:null,lifestyle:startLifestyle,liabilities:[],livingAtHome:false,
     freedom:70,bureauFavor:0,scrutiny:0,housingSecurity:55,financialSecurity:50,medicalRecord:false,conditions:[],lastFavorYear:currentYear(),
     holdMember:!!member.holdMember,holdRecruitCooldown:0,
@@ -1815,6 +2351,13 @@ function promoteToLeader(member){
     highlights:[]};
   S.id='SF-'+S.dob+'-'+String(RI(1,99999)).padStart(5,'0');
   S.place=World.place;
+  if(typeof ensureEducationState==='function'){
+    ensureEducationState(S);
+    S.education.completed={lower:age>=12,middle:age>=15,upper:age>=18,university:false};
+    S.education.status='inherited';
+    S.education.history.push({kind:'inherited',year:currentYear(),note:'Prior family years were carried into the new subject record.'});
+    if(typeof educationSyncLegacy==='function') educationSyncLegacy(S);
+  }
   S.usedNames.push(S.first);
   S.base={health:S.health,happiness:S.happiness,smarts:S.smarts,looks:S.looks,relations:S.relations};
   if(member.relation==='child'&&departedName&&(member.motherName===departedName||member.fatherName===departedName)){

@@ -112,9 +112,11 @@ const KARSEN_SETTLEMENTS=[
  {id:'svetlin',name:'Svetlin',kind:'village',region:'South Parishes',x:81,y:15,population:'2,900',surveillance:21,travelDifficulty:1.35,description:'A village around a clinic and a monastery, both of which insist they are not political.',districts:['Monastery Close','Clinic Road','East Gardens']},
 ];
 const KARSEN_MAP_POSITIONS={
- branec:{x:49,y:42},veskar:{x:14,y:43},eisenmark:{x:66,y:55},kostrin:{x:64,y:29},rudava:{x:83,y:44},
- dobraven:{x:32,y:25},krasnava:{x:51,y:71},brezin:{x:29,y:69},lindava:{x:14,y:23},sundervik:{x:72,y:11},
- oberhain:{x:84,y:69},marec:{x:90,y:27},kamenor:{x:25,y:56},svetlin:{x:82,y:17}
+ // The country is deliberately roomy: a long, crooked bean with a western
+ // coast, northern woods, a central lowland, and a broad eastern shoulder.
+ branec:{x:82,y:52},veskar:{x:23,y:59},eisenmark:{x:108,y:69},kostrin:{x:68,y:68},rudava:{x:122,y:57},
+ dobraven:{x:44,y:40},krasnava:{x:78,y:81},brezin:{x:56,y:28},lindava:{x:27,y:43},sundervik:{x:117,y:29},
+ oberhain:{x:128,y:78},marec:{x:134,y:43},kamenor:{x:43,y:58},svetlin:{x:103,y:81}
 };
 KARSEN_SETTLEMENTS.forEach(s=>Object.assign(s,KARSEN_MAP_POSITIONS[s.id]));
 const KARSEN_BUILDING_NAMES={
@@ -168,9 +170,12 @@ function settlementById(id){ return KARSEN_SETTLEMENTS.find(s=>s.id===id)||null;
 function buildingById(settlementId,id){ const s=settlementById(settlementId); return s&&s.buildings.find(b=>b.id===id)||null; }
 function routeBetween(a,b){ return KARSEN_ROUTES.find(r=>(r.from===a&&r.to===b)||(r.from===b&&r.to===a))||null; }
 function newWorld(){
-  const home=settlementById('branec');
+  // Every settlement is a valid birthplace. Equal settlement odds keep
+  // villages playable instead of making population size decide the opening.
+  const home=pick(KARSEN_SETTLEMENTS);
   const year=RI(1917,1936);
-  World={year,place:home.name,activeSettlementId:home.id,activeBuildingId:home.id+'-b4',map:{discoveredSettlementIds:[home.id],visitedSettlementIds:[home.id],selectedSettlementId:home.id,selectedBuildingId:home.id+'-b4',mode:'national'},mandate:'continuity'};
+  const homeBuilding=home.buildings.find(b=>b.type==='residence')||home.buildings[0];
+  World={year,place:home.name,activeSettlementId:home.id,activeBuildingId:homeBuilding.id,map:{discoveredSettlementIds:[home.id],visitedSettlementIds:[home.id],selectedSettlementId:home.id,selectedBuildingId:homeBuilding.id,mode:'national'},publicHealth:{outbreak:null,lastNoticeYear:null},mandate:'continuity'};
 }
 function currentYear(){ return World?World.year:(S?S.dob+S.age:0); }
 function currentSettlement(){ return World&&World.activeSettlementId?settlementById(World.activeSettlementId):settlementById('branec'); }
@@ -190,6 +195,7 @@ function moveWithinSettlement(buildingId){
 }
 function scheduleTravel(id){
   if(!S||!World||S.traveling) return {ok:false,reason:'already travelling'};
+  if(S.eduStage||(S.education&&S.education.stageId)) return {ok:false,reason:'enrolled students must finish or transfer their course before travelling'};
   const from=currentSettlement(), to=travelDestination(id); if(!from||!to||from.id===to.id) return {ok:false,reason:'already there'};
   if(S.age<16) return {ok:false,reason:'no independent travel before age 16'};
   const cost=travelCost(from,to); if(S.assets<cost) return {ok:false,reason:'needs '+money(cost)};
@@ -214,6 +220,11 @@ function resolveTravel(){
   if(!World.map.visitedSettlementIds.includes(to.id)) World.map.visitedSettlementIds.push(to.id);
   if(!World.map.discoveredSettlementIds.includes(to.id)) World.map.discoveredSettlementIds.push(to.id);
   S.place=to.name; S.location={settlementId:to.id,buildingId:World.activeBuildingId};
+  if(typeof ensureEducationState==='function'){
+    ensureEducationState(S);
+    S.residenceSettlementId=to.id;
+    if(S.education.pendingResidenceSettlementId===to.id) S.education.pendingResidenceSettlementId=null;
+  }
   logEv('Subject arrived in '+to.name+'. The new address was entered on the file.',{},'milestone','ARRIVAL · YEAR '+S.age);
   updatePersonalStanding(); renderIdentity(); renderStats(window.C||{});
 }
@@ -228,12 +239,12 @@ function newHold(){
 }
 
 /* Personal systems intentionally do not depend on Hold enrollment. */
-const MEDICAL_CONDITIONS={
-  respiratory:{name:'Respiratory complaint',note:'breath catches in cold weather',minAge:8,base:2},
-  injury:{name:'Lingering injury',note:'pain returns with work and weather',minAge:12,base:3},
-  strain:{name:'Nervous strain',note:'sleep is thin and easily broken',minAge:16,base:2},
-  chronic:{name:'Chronic condition',note:'requires regular treatment',minAge:38,base:3},
-};
+function baseMedicalState(legacyConditions){
+  return {schemaVersion:1,resilience:50,prevention:{sanitation:0,vaccination:0,screening:0},
+    conditions:Array.isArray(legacyConditions)?legacyConditions:[],history:[],
+    exposure:{currentRisk:0,lastSource:null,lastYear:null},lastCheckupAge:null,lastTreatmentAge:null,
+    yearHoursPenalty:0};
+}
 function ensurePersonalSystems(s){
   if(!s) return;
   if(s.freedom==null) s.freedom=70;
@@ -242,7 +253,13 @@ function ensurePersonalSystems(s){
   if(s.housingSecurity==null) s.housingSecurity=50;
   if(s.financialSecurity==null) s.financialSecurity=50;
   if(s.medicalRecord==null) s.medicalRecord=false;
-  if(!Array.isArray(s.conditions)) s.conditions=[];
+  if(!s.medical||typeof s.medical!=='object') s.medical=baseMedicalState(s.conditions);
+  if(!Array.isArray(s.medical.conditions)) s.medical.conditions=Array.isArray(s.conditions)?s.conditions:[];
+  if(!s.medical.prevention) s.medical.prevention={sanitation:0,vaccination:0,screening:0};
+  if(!s.medical.exposure) s.medical.exposure={currentRisk:0,lastSource:null,lastYear:null};
+  if(s.medical.resilience==null) s.medical.resilience=50;
+  if(s.medical.yearHoursPenalty==null) s.medical.yearHoursPenalty=0;
+  s.conditions=s.medical.conditions;
   if(s.lastFavorYear==null) s.lastFavorYear=currentYear();
 }
 function securityLabel(value){ return value>=75?'secure':value>=50?'steady':value>=28?'precarious':'at risk'; }
@@ -265,54 +282,6 @@ function updatePersonalStanding(){
   const ageRestriction=S.age<16?Math.max(0,62-S.age*4):0;
   const restriction=ageRestriction+(S.record?13:0)+S.scrutiny*.42+Math.max(0,35-S.financialSecurity)*.28+(S.jailUntil>S.age?55:0)+medicalLoad;
   S.freedom=clamp(Math.round(88-restriction+Math.min(8,S.bureauFavor*2)),0,100);
-}
-function activeConditions(){ return S&&S.conditions?S.conditions.filter(c=>!c.resolved):[]; }
-function conditionById(id){ return S&&S.conditions?S.conditions.find(c=>c.id===id&&!c.resolved):null; }
-function addCondition(id,severity){
-  if(!S||!MEDICAL_CONDITIONS[id]) return null;
-  const existing=conditionById(id);
-  if(existing){ existing.severity=clamp(Math.max(existing.severity||1,severity||1),1,5); return existing; }
-  const rec={id,severity:clamp(severity||MEDICAL_CONDITIONS[id].base,1,5),known:false,treated:false,years:0,resolved:false};
-  S.conditions.push(rec); return rec;
-}
-function medicalExamination(source){
-  ensurePersonalSystems(S); S.medicalRecord=true;
-  let condition=activeConditions().find(c=>!c.known);
-  if(!condition){
-    const risk=(S.health<58?0.55:0)+(S.age>=45?0.18:0)+(S.vice>=4?0.16:0)+(S.lifestyle&&S.lifestyle.food==='meager'?0.18:0);
-    if(chance(Math.min(.72,.12+risk))){
-      const choices=Object.keys(MEDICAL_CONDITIONS).filter(id=>S.age>=MEDICAL_CONDITIONS[id].minAge);
-      condition=addCondition(pick(choices),S.health<38?4:undefined);
-    }
-  }
-  if(condition){ condition.known=true; condition.treated=false; const info=MEDICAL_CONDITIONS[condition.id];
-    return {condition,found:true,text:'The examination entered '+info.name.toLowerCase()+' in the medical file. Treatment is now available.'}; }
-  return {condition:null,found:false,text:source==='desk'?'The inspection found no condition requiring a treatment order. The Bureau filed the clean page.':'The doctor found nothing urgent. The visit still goes into the medical file.'};
-}
-function treatCondition(id){
-  const c=conditionById(id); if(!c||!c.known) return null;
-  const info=MEDICAL_CONDITIONS[c.id]; const cost=70+c.severity*55;
-  c.treated=true; c.severity=Math.max(0,c.severity-2); c.years++;
-  if(c.severity===0){ c.resolved=true; return {cost,resolved:true,text:'Treatment cleared the '+info.name.toLowerCase()+'. The medical file is amended, not erased.'}; }
-  return {cost,resolved:false,text:'Treatment eased the '+info.name.toLowerCase()+'. It remains on file, but no longer has the whole say.'};
-}
-function runPersonalYearTick(){
-  if(!S) return; ensurePersonalSystems(S);
-  const conditions=activeConditions(); let healthHit=0;
-  conditions.forEach(c=>{
-    c.years++;
-    if(c.treated){ c.severity=Math.max(0,c.severity-1); c.treated=false; if(c.severity===0) c.resolved=true; }
-    else healthHit-=Math.max(1,Math.ceil(c.severity/2));
-  });
-  if(healthHit&&typeof applyFx==='function') applyFx({health:healthHit});
-  const misconduct=(S.record?7:0)+S.crime*4+S.vice*1.5;
-  const cooling=S.bureauFavor>0?2:4;
-  S.scrutiny=clamp(Math.round(S.scrutiny+misconduct-cooling),0,100);
-  if(S.age>=18&&!S.record&&S.vice<=1&&S.scrutiny<20&&currentYear()-S.lastFavorYear>=5){
-    S.bureauFavor=Math.min(3,S.bureauFavor+1); S.lastFavorYear=currentYear();
-    logEv('The file remained unremarkable long enough to earn a small Bureau Favor. It is not kindness, but it can be spent.',{},'ruling','PERSONAL STANDING');
-  }
-  updatePersonalStanding();
 }
 function makeKin(m){ return Object.assign({mid:'K'+Math.random().toString(36).slice(2,9),alive:true,bond:70,holdMember:false,holdLoyalty:0,holdInviteCooldown:0},m); }
 function addKin(m){ const rec=makeKin(m); Lineage.members.push(rec); return rec; }
@@ -415,6 +384,7 @@ function newSubject(){
   S.usedNames.push(S.first);
   S.base={health:S.health,happiness:S.happiness,smarts:S.smarts,looks:S.looks,relations:S.relations};
   S.mother=randomParent('F'); S.father=randomParent('M',last);
+  if(typeof ensureEducationState==='function') ensureEducationState(S);
   if(!Lineage.name) Lineage.name='The '+last+' Family';
   Lineage.activeSubjectId=S.id;
   updatePersonalStanding();

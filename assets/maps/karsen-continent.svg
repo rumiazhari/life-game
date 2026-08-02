@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2400 1500" role="img" aria-labelledby="title desc">
+  <title id="title">Commonwealth of Karsen - Continental Survey Map</title>
+  <desc id="desc">A vintage Bureau survey map showing seaside Karsen on the western coast of a continuous greyed-out continent surrounded by Drazna, Olsvik, Marn, Sevren, and the Skeld Isles.</desc>
+  <defs>
+    <pattern id="externalHatch" width="18" height="18" patternUnits="userSpaceOnUse" patternTransform="rotate(28)">
+      <path d="M 0 0 V 18 M 9 0 V 18" stroke="#7d8581" stroke-width="2" opacity=".26"/>
+    </pattern>
+    <pattern id="paperGrain" width="44" height="44" patternUnits="userSpaceOnUse">
+      <circle cx="5" cy="8" r="1.3" fill="#675d4d" opacity=".08"/>
+      <circle cx="31" cy="21" r="1" fill="#675d4d" opacity=".07"/>
+      <path d="M 0 36 L 44 34" stroke="#675d4d" stroke-width="1" opacity=".04"/>
+    </pattern>
+    <pattern id="waterLines" width="220" height="90" patternUnits="userSpaceOnUse">
+      <path d="M 0 26 C 35 8 75 42 112 23 S 190 8 220 27" fill="none" stroke="#d7e0dc" stroke-width="3" opacity=".35"/>
+      <path d="M -30 62 C 5 44 45 78 82 59 S 160 44 200 64" fill="none" stroke="#6e898b" stroke-width="2" opacity=".28"/>
+    </pattern>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="9" stdDeviation="8" flood-color="#27302d" flood-opacity=".26"/>
+    </filter>
+    <style>
+      .title{font:700 42px Georgia,serif;letter-spacing:10px;fill:#2d342f}
+      .subtitle{font:600 17px Arial,sans-serif;letter-spacing:5px;fill:#5a625c}
+      .nation{font:700 45px Georgia,serif;letter-spacing:8px;fill:#4e554f;text-anchor:middle}
+      .nation-small{font:700 29px Georgia,serif;letter-spacing:6px;fill:#56605a;text-anchor:middle}
+      .karsen-title{font:700 52px Georgia,serif;letter-spacing:6px;fill:#2c342d;text-anchor:middle}
+      .karsen-subtitle{font:600 20px Arial,sans-serif;letter-spacing:5px;fill:#4e5a50;text-anchor:middle}
+      .place{font:600 20px Arial,sans-serif;letter-spacing:2px;fill:#334039}
+      .place-light{font:600 18px Arial,sans-serif;letter-spacing:2px;fill:#626d66}
+      .small{font:600 15px Arial,sans-serif;letter-spacing:2px;fill:#58625c}
+      .tiny{font:600 12px Arial,sans-serif;letter-spacing:1.7px;fill:#68726b}
+      .terrain{fill:none;stroke:#a57d58;stroke-width:7;opacity:.42;stroke-linecap:round}
+      .river{fill:none;stroke:#628f96;stroke-width:7;opacity:.78;stroke-linecap:round}
+      .border{fill:none;stroke:#59635d;stroke-width:6;stroke-dasharray:18 12;stroke-linecap:round}
+      .internal-border{fill:none;stroke:#737c74;stroke-width:3;stroke-dasharray:12 10;opacity:.72}
+      .external-border{fill:none;stroke:#6e7770;stroke-width:5;stroke-dasharray:19 14;opacity:.7}
+      .war-label{font:700 24px Arial,sans-serif;letter-spacing:5px;fill:#8c4d43;text-anchor:middle}
+    </style>
+  </defs>
+
+  <rect width="2400" height="1500" fill="#d7c9a9"/>
+  <rect x="42" y="42" width="2316" height="1416" rx="8" fill="#9aafb0" stroke="#3e4944" stroke-width="9" filter="url(#softShadow)"/>
+  <rect x="64" y="64" width="2272" height="1372" fill="url(#waterLines)" opacity=".78"/>
+
+  <!-- Continental landmasses: all surrounding territory is under Bureau censorship. -->
+  <g id="external-territories">
+    <!-- One continuous mainland. The western indentation creates Karsen's coast. -->
+    <path d="M 430 72 C 720 35 1040 82 1350 70 C 1690 54 2020 92 2328 180 V 1436 H 590 C 535 1330 535 1215 462 1100 C 400 1000 360 930 400 830 C 432 748 360 670 350 575 C 340 488 365 405 420 330 C 458 260 390 150 430 72 Z" fill="#b5b6ab"/>
+    <path d="M 430 72 C 720 35 1040 82 1350 70 C 1690 54 2020 92 2328 180 V 1436 H 590 C 535 1330 535 1215 462 1100 C 400 1000 360 930 400 830 C 432 748 360 670 350 575 C 340 488 365 405 420 330 C 458 260 390 150 430 72 Z" fill="url(#externalHatch)" opacity=".9"/>
+    <path class="external-border" d="M 430 72 C 390 150 458 260 420 330 C 365 405 340 488 350 575 C 360 670 432 748 400 830 C 360 930 400 1000 462 1100 C 535 1215 535 1330 590 1436"/>
+    <path class="external-border" d="M 720 1180 C 900 1250 1050 1180 1190 1245 C 1350 1315 1520 1225 1680 1280 C 1870 1340 2050 1275 2200 1320"/>
+  </g>
+
+  <!-- Greyed-out islands and archipelagos. -->
+  <g id="islands" fill="#adb1a8" stroke="#68736c" stroke-width="5" stroke-dasharray="15 12">
+    <path d="M 190 540 C 235 490 305 502 323 552 C 306 605 240 625 198 590 C 182 578 178 555 190 540 Z"/>
+    <path d="M 385 180 C 420 140 480 145 499 190 C 480 235 424 247 394 218 C 378 204 374 192 385 180 Z"/>
+    <path d="M 1875 190 C 1910 145 1975 152 1995 200 C 1976 246 1925 260 1888 228 C 1872 215 1866 202 1875 190 Z"/>
+    <path d="M 2040 520 C 2080 475 2145 485 2165 532 C 2145 580 2082 595 2048 565 C 2035 552 2032 536 2040 520 Z"/>
+    <path d="M 1700 1250 C 1745 1205 1810 1220 1824 1270 C 1800 1320 1744 1330 1708 1295 C 1693 1281 1692 1264 1700 1250 Z"/>
+    <path d="M 520 1240 C 565 1200 625 1217 638 1265 C 620 1310 565 1324 530 1298 C 512 1284 510 1257 520 1240 Z"/>
+  </g>
+
+  <!-- Neighbouring political regions. -->
+  <g id="neighbouring-nations">
+    <path d="M 470 265 C 650 185 860 215 1000 340 L 920 540 C 780 585 650 555 505 620 L 390 490 C 380 395 410 315 470 265 Z" fill="#bfc0b4" stroke="#69736c" stroke-width="5"/>
+    <path d="M 1260 265 C 1530 170 1870 220 2140 380 L 2050 650 C 1890 735 1690 650 1490 625 L 1280 480 Z" fill="#bfc0b4" stroke="#69736c" stroke-width="5"/>
+    <path d="M 455 735 C 610 650 790 680 930 805 L 850 1085 C 700 1160 535 1100 410 975 C 350 875 365 790 455 735 Z" fill="#bfc0b4" stroke="#69736c" stroke-width="5"/>
+    <path d="M 1320 720 C 1570 640 1890 700 2110 890 C 2080 1060 1930 1170 1730 1155 L 1490 1030 L 1280 850 Z" fill="#bfc0b4" stroke="#69736c" stroke-width="5"/>
+    <path d="M 850 1085 C 1040 1125 1170 1085 1310 1140 C 1460 1200 1610 1135 1730 1155 C 1600 1310 1380 1360 1160 1300 C 980 1325 820 1240 700 1130 Z" fill="#bfc0b4" stroke="#69736c" stroke-width="5"/>
+    <text class="nation" x="700" y="390">OLSVIK</text>
+    <text class="nation" x="1700" y="430">DRAZNA</text>
+    <text class="nation" x="600" y="900">MARN</text>
+    <text class="nation" x="1780" y="930">SEVREN</text>
+    <text class="nation-small" x="1785" y="1300">SKELD ISLES</text>
+  </g>
+
+  <!-- Karsen: central, readable, elongated crooked bean silhouette. -->
+  <g id="karsen" transform="translate(-360 0)">
+    <path d="M 850 520 C 930 420 1050 390 1165 445 C 1265 492 1315 560 1425 565 C 1545 570 1630 660 1642 760 C 1655 865 1572 930 1490 970 C 1410 1010 1345 960 1260 1018 C 1165 1077 1080 1010 985 1028 C 885 1048 805 970 790 882 C 776 800 820 758 782 690 C 748 630 790 575 850 520 Z" fill="#d7c99f" stroke="#303a32" stroke-width="12" stroke-dasharray="28 17"/>
+    <path d="M 870 533 C 948 446 1048 423 1150 468 C 1255 516 1307 584 1410 590 C 1518 596 1600 672 1610 756 C 1620 840 1547 900 1470 942 C 1398 976 1335 931 1250 989 C 1168 1040 1080 982 990 1002 C 900 1018 835 950 822 874 C 810 802 850 754 812 695 C 785 646 820 582 870 533 Z" fill="#d8cfac" opacity=".8"/>
+    <path class="terrain" d="M 950 535 C 1000 590 1045 650 1085 720 C 1110 775 1145 805 1175 875"/>
+    <path class="terrain" d="M 1050 475 C 1100 540 1145 570 1190 620 C 1230 665 1290 690 1360 715"/>
+    <path class="terrain" d="M 1280 790 C 1340 820 1395 865 1430 920"/>
+    <path class="river" d="M 1030 430 C 1040 525 1010 600 1050 680 C 1085 750 1115 800 1095 880 C 1080 935 1110 982 1160 1015"/>
+    <path class="river" d="M 1210 515 C 1190 600 1205 660 1265 720 C 1310 768 1360 780 1410 800 C 1460 820 1510 860 1560 885"/>
+    <path class="river" d="M 915 720 C 990 735 1035 760 1085 805"/>
+    <path class="internal-border" d="M 1000 470 C 1075 535 1110 610 1155 680 C 1190 735 1240 760 1290 800"/>
+    <path class="internal-border" d="M 1185 880 C 1270 865 1340 875 1415 920"/>
+    <text class="karsen-title" x="1190" y="690">COMMONWEALTH</text>
+    <text class="karsen-title" x="1190" y="755">OF KARSEN</text>
+    <text class="karsen-subtitle" x="1190" y="795">CONTINENTAL HEARTLAND</text>
+    <g fill="#a84d3d" stroke="#f3e7c4" stroke-width="7">
+      <circle cx="1115" cy="720" r="18"/><circle cx="1325" cy="665" r="18"/><circle cx="1450" cy="835" r="18"/>
+    </g>
+    <g class="place">
+      <text x="1145" y="714">BRANEC</text>
+      <text x="1355" y="660">KOSTRIN</text>
+      <text x="1478" y="830">RUDAVA</text>
+    </g>
+    <g fill="#4f716f" stroke="#f3e7c4" stroke-width="6">
+      <circle cx="885" cy="795" r="13"/><circle cx="1010" cy="900" r="13"/><circle cx="1260" cy="965" r="13"/><circle cx="1510" cy="720" r="13"/>
+    </g>
+    <g class="place-light">
+      <text x="820" y="790">VESKAR</text>
+      <text x="925" y="936">KRASNAVA</text>
+      <text x="1180" y="1010">EISENMARK</text>
+      <text x="1535" y="715">MAREC</text>
+    </g>
+  </g>
+
+  <!-- Survey annotations and military cordon. -->
+  <g id="war-annotations">
+    <path d="M 720 350 C 820 280 930 255 1040 290" fill="none" stroke="#9a5147" stroke-width="7" stroke-dasharray="24 16" opacity=".85"/>
+    <path d="M 1490 290 C 1620 250 1760 290 1880 360" fill="none" stroke="#9a5147" stroke-width="7" stroke-dasharray="24 16" opacity=".85"/>
+    <path d="M 700 1060 C 850 1140 980 1175 1110 1160" fill="none" stroke="#9a5147" stroke-width="7" stroke-dasharray="24 16" opacity=".85"/>
+    <text class="war-label" x="1120" y="330">WAR ZONE - OUTER TERRITORIES SEALED</text>
+    <g transform="translate(155 150) rotate(-8)">
+      <rect width="620" height="185" fill="none" stroke="#934a41" stroke-width="12"/>
+      <rect x="18" y="18" width="584" height="149" fill="none" stroke="#934a41" stroke-width="4"/>
+      <text x="310" y="70" text-anchor="middle" font-family="Georgia,serif" font-size="48" font-weight="700" letter-spacing="8" fill="#934a41">BUREAU ORDER 17-B</text>
+      <text x="310" y="125" text-anchor="middle" font-family="Arial,sans-serif" font-size="26" font-weight="700" letter-spacing="4" fill="#934a41">CIVILIAN MOVEMENT SUSPENDED</text>
+    </g>
+  </g>
+
+  <!-- Marginalia, compass, and scale. -->
+  <g id="marginalia">
+    <text class="title" x="120" y="1330">BUREAU OF TERRITORIAL SURVEYS</text>
+    <text class="subtitle" x="122" y="1370">CONTINENTAL DIVISION - FIELD SHEET C-7 - SURVEYED 1924</text>
+    <g transform="translate(2110 1180)">
+      <circle r="110" fill="#d7c9a9" opacity=".88" stroke="#3e4944" stroke-width="5"/>
+      <path d="M 0 -95 L 20 0 L 0 95 L -20 0 Z" fill="#39433d"/>
+      <path d="M -95 0 L 0 20 L 95 0 L 0 -20 Z" fill="#d7c9a9" stroke="#39433d" stroke-width="3"/>
+      <text x="0" y="-125" text-anchor="middle" class="place">N</text><text x="0" y="145" text-anchor="middle" class="place">S</text><text x="-130" y="8" text-anchor="middle" class="place">W</text><text x="130" y="8" text-anchor="middle" class="place">E</text>
+    </g>
+    <g transform="translate(980 1370)">
+      <rect x="0" y="-22" width="440" height="18" fill="#39433d"/>
+      <rect x="110" y="-22" width="110" height="18" fill="#d7c9a9"/>
+      <rect x="330" y="-22" width="110" height="18" fill="#d7c9a9"/>
+      <text class="tiny" x="0" y="28">0</text><text class="tiny" x="105" y="28">100</text><text class="tiny" x="215" y="28">200</text><text class="tiny" x="325" y="28">300</text><text class="tiny" x="430" y="28">400 STATUTE MILES</text>
+    </g>
+  </g>
+
+  <rect x="64" y="64" width="2272" height="1372" fill="url(#paperGrain)" opacity=".55" pointer-events="none"/>
+  <rect x="42" y="42" width="2316" height="1416" rx="8" fill="none" stroke="#38423d" stroke-width="9"/>
+</svg>
