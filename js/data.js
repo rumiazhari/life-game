@@ -1,9 +1,9 @@
 'use strict';
 const $=s=>document.querySelector(s);
-const R=(a,b)=>a+Math.random()*(b-a);
-const RI=(a,b)=>Math.floor(R(a,b+1));
-const pick=a=>a[Math.floor(Math.random()*a.length)];
-const chance=p=>Math.random()<p;
+const R=(a,b)=>Random.range(a,b);
+const RI=(a,b)=>Random.int(a,b);
+const pick=a=>Random.pick(a);
+const chance=p=>Random.chance(p);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const money=n=>(n<0?'−$':'$')+Math.abs(Math.round(n)).toLocaleString('en-US');
 const P=p=>Math.round(clamp(p,0,1)*100)+'%';
@@ -305,7 +305,7 @@ function ancestorFateLine(a){
 function fill(t){const a=lastAncestor(); return t.replace(/\{place\}/g,S.place).replace(/\{n\}/g,()=>String(RI(2,9))).replace(/\{partner\}/g,S.partner||S.__partnerNameSnapshot||'—').replace(/\{other\}/g,S.__affairName||'—').replace(/\{friend\}/g,S.__lastContactName||'—').replace(/\{mother\}/g,S.mother?S.mother.name:'—').replace(/\{father\}/g,S.father?S.father.name:'—').replace(/\{ancestor\}/g,a?a.name:'—').replace(/\{ancestorFate\}/g,ancestorFateLine(a));}
 
 /* ================= HOUSEHOLD LEDGER (housing, food, dependents, debt) ================= */
-function pickWeighted(items){ const total=items.reduce((a,i)=>a+i.chance,0); let r=Math.random()*total;
+function pickWeighted(items){ const total=items.reduce((a,i)=>a+i.chance,0); let r=Random.next()*total;
   for(const it of items){ r-=it.chance; if(r<=0) return it; } return items[items.length-1]; }
 function fxSummary(fx){
   const order=['health','happiness','smarts','looks','relations'];
@@ -1444,7 +1444,7 @@ const CRISES=[
    body:()=>{
      const cands=S.contacts.filter(c=>c.role==='friend'&&!(S.activeAffairCids||[]).includes(c.cid));
      const weighted=cands.map(c=>({c,w:Math.max(1,c.charm*(S.partnerMood<50?1.6:1)*(1+(S.looks-50)/250))}));
-     const total=weighted.reduce((a,x)=>a+x.w,0); let r=Math.random()*total, chosen=cands[0];
+     const total=weighted.reduce((a,x)=>a+x.w,0); let r=Random.next()*total, chosen=cands[0];
      for(const x of weighted){ r-=x.w; if(r<=0){chosen=x.c;break;} }
      S.__pickContactCid=chosen.cid; S.__affairName=chosen.name;
      const marriedNote=chosen.npcMarried?' {other} is already married, apparently — which hasn’t stopped them.':'';

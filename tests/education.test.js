@@ -1,25 +1,15 @@
 'use strict';
 
 const assert=require('node:assert/strict');
-const fs=require('node:fs');
-const path=require('node:path');
-const vm=require('node:vm');
+const {createGameContext,expose}=require('./helpers/vm-loader');
 
-const root=path.resolve(__dirname,'..');
-const context={console,Math,Date,JSON,Set,Map,Object,Array,String,Number,Boolean,parseInt,parseFloat,isNaN};
-context.globalThis=context;
-context.window=context;
-context.document={};
-vm.createContext(context);
-['js/lore.js','js/data.js','js/state.js','js/education.js'].forEach(file=>{
-  vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),context,{filename:file});
-});
-vm.runInContext('globalThis.__educationInstitutions=EDUCATION_INSTITUTIONS;globalThis.__schoolStages=SCHOOL_STAGES;globalThis.__careers=CAREERS;',context);
+const context=createGameContext(['js/lore.js','js/data.js','js/state.js','js/education.js']);
+expose(context,'globalThis.__educationInstitutions=EDUCATION_INSTITUTIONS;globalThis.__schoolStages=SCHOOL_STAGES;globalThis.__careers=CAREERS;');
 
 context.newWorld();
 context.newLineage();
 context.newSubject();
-vm.runInContext('globalThis.__S=S;',context);
+expose(context,'globalThis.__S=S;');
 
 assert.ok(context.__educationInstitutions.length>0,'education catalog should be generated');
 assert.equal(context.__S.education.stageId,null,'new subjects start without an active course');

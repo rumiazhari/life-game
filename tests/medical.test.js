@@ -1,25 +1,15 @@
 'use strict';
 
 const assert=require('node:assert/strict');
-const fs=require('node:fs');
-const path=require('node:path');
-const vm=require('node:vm');
+const {createGameContext,expose}=require('./helpers/vm-loader');
 
-const root=path.resolve(__dirname,'..');
-const context={console,Math,Date,JSON,Set,Map,Object,Array,String,Number,Boolean,parseInt,parseFloat,isNaN};
-context.globalThis=context;
-context.window=context;
-context.document={};
-vm.createContext(context);
-['js/lore.js','js/data.js','js/state.js','js/medical.js'].forEach(file=>{
-  vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),context,{filename:file});
-});
+const context=createGameContext(['js/lore.js','js/data.js','js/state.js','js/medical.js']);
 
 context.newWorld();
 context.newLineage();
 context.newHold();
 context.newSubject();
-vm.runInContext('globalThis.__S=S;globalThis.__World=World;',context);
+expose(context,'globalThis.__S=S;globalThis.__World=World;');
 
 assert.ok(context.__S.medical,'new subjects receive canonical medical state');
 assert.strictEqual(context.__S.conditions,context.__S.medical.conditions,'legacy conditions remain a synchronized compatibility view');
