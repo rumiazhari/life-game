@@ -2466,7 +2466,7 @@ function closeFile(){
 let AC=null;
 function ac(){ if(!AC){ try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(AC&&AC.state==='suspended')AC.resume(); return AC; }
 function thud(c,t,freq,gain){ const b=c.createBuffer(1,c.sampleRate*0.09,c.sampleRate), d=b.getChannelData(0);
-  for(let i=0;i<d.length;i++) d[i]=(Random.next()*2-1)*Math.pow(1-i/d.length,2);
+  for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,2);
   const src=c.createBufferSource(); src.buffer=b; const f=c.createBiquadFilter(); f.type='lowpass'; f.frequency.value=900;
   const g=c.createGain(); g.gain.setValueAtTime(gain,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.09);
   src.connect(f); f.connect(g); g.connect(c.destination); src.start(t);
@@ -2496,7 +2496,7 @@ function snd(kind,intensity){ if(!soundOn) return; const c=ac(); if(!c) return; 
   if(kind==='stamp') thud(c,t,110,0.5);
   else if(kind==='close'){ thud(c,t,90,0.5); thud(c,t+0.28,70,0.45); }
   else if(kind==='paper'){ const b=c.createBuffer(1,c.sampleRate*0.16,c.sampleRate), d=b.getChannelData(0);
-    for(let i=0;i<d.length;i++) d[i]=(Random.next()*2-1)*(1-i/d.length);
+    for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*(1-i/d.length);
     const src=c.createBufferSource(); src.buffer=b; const f=c.createBiquadFilter(); f.type='bandpass'; f.frequency.value=1600; f.Q.value=0.7;
     const g=c.createGain(); g.gain.setValueAtTime(0.14,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.16);
     src.connect(f); f.connect(g); g.connect(c.destination); src.start(t); }
