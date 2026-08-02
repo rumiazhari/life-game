@@ -19,7 +19,7 @@ const MEDICAL_TREATMENTS={
 };
 
 function medicalNow(){ return typeof currentYear==='function'?currentYear():(S?S.dob+S.age:0); }
-function medicalRandom(random){ return (random||Math.random)(); }
+function medicalRandom(random){ return random?random():Random.next(); }
 function medicalInfo(id){ return MEDICAL_CONDITIONS[id]||MEDICAL_CONDITIONS.chronic; }
 function medicalStateLabel(condition){
   const labels={latent:'not yet apparent',symptomatic:'symptomatic',diagnosed:'diagnosed',treated:'under treatment',remission:'in remission',chronic:'chronic',resolved:'resolved'};

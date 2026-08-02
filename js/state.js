@@ -283,9 +283,9 @@ function updatePersonalStanding(){
   const restriction=ageRestriction+(S.record?13:0)+S.scrutiny*.42+Math.max(0,35-S.financialSecurity)*.28+(S.jailUntil>S.age?55:0)+medicalLoad;
   S.freedom=clamp(Math.round(88-restriction+Math.min(8,S.bureauFavor*2)),0,100);
 }
-function makeKin(m){ return Object.assign({mid:'K'+Math.random().toString(36).slice(2,9),alive:true,bond:70,holdMember:false,holdLoyalty:0,holdInviteCooldown:0},m); }
+function makeKin(m){ return Object.assign({mid:'K'+Random.next().toString(36).slice(2,9),alive:true,bond:70,holdMember:false,holdLoyalty:0,holdInviteCooldown:0},m); }
 function addKin(m){ const rec=makeKin(m); Lineage.members.push(rec); return rec; }
-function makeHoldMember(m){ return Object.assign({mid:'H'+Math.random().toString(36).slice(2,9),alive:true,loyalty:50,role:'',holdMember:true,holdInviteCooldown:0},m); }
+function makeHoldMember(m){ return Object.assign({mid:'H'+Random.next().toString(36).slice(2,9),alive:true,loyalty:50,role:'',holdMember:true,holdInviteCooldown:0},m); }
 function addHoldMember(m){ const rec=makeHoldMember(m); Hold.members.push(rec); return rec; }
 function bearChild(){
   const sex=chance(.5)?'M':'F'; const first=pick(sex==='M'?MALE:FEMALE);
@@ -322,7 +322,7 @@ function makeContact(sex,bias){
   const npcMarried=chance(0.3);
   const b=bias||{};
   const rt=(key,def)=>b[key]?RI(b[key][0],b[key][1]):RI(def[0],def[1]);
-  return {cid:'N'+Math.random().toString(36).slice(2,9), name:pick(sex==='M'?MALE:FEMALE)+' '+last, sex,
+  return {cid:'N'+Random.next().toString(36).slice(2,9), name:pick(sex==='M'?MALE:FEMALE)+' '+last, sex,
     role:'friend', mood:RI(55,75), metAge:S.age,
     temperament:rt('temperament',[0,100]), fidelity:rt('fidelity',[15,95]), charm:rt('charm',[15,95]),
     kindness:rt('kindness',[5,95]), intellect:rt('intellect',[5,95]),

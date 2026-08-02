@@ -1,0 +1,9 @@
+{
+  "name": "life-game",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Life File browser game",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\""
+  }
+}
