@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Life File browser game",
   "scripts": {
-    "test": "node --test \"tests/*.test.js\""
+    "test": "node --test \"tests/*.test.js\"",
+    "diagnostic:world": "node tools/world-diagnostic.js"
   }
 }

@@ -3,7 +3,7 @@
 const assert=require('node:assert/strict');
 const {createGameContext,expose}=require('./helpers/vm-loader');
 
-const context=createGameContext(['js/lore.js','js/data.js','js/state.js','js/medical.js','js/education.js']);
+const context=createGameContext(['js/lore.js','js/data.js','js/state.js','js/medical.js','js/education.js','js/systems/settlement-economy.js','js/systems/public-health.js','js/systems/world-simulation.js']);
 context.newWorld();
 context.newLineage();
 context.newHold();

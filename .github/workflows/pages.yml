@@ -30,6 +30,8 @@ jobs:
           node-version: 22
       - name: Run test suite
         run: npm test
+      - name: Run world diagnostic
+        run: npm run diagnostic:world
 
   deploy:
     needs: test
