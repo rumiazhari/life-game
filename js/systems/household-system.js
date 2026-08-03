@@ -28,7 +28,7 @@
   }
 
   function defaultFinances(){
-    return {income:0,expenses:0,savings:0,debt:0,lastBalance:0,subjectIncome:0,otherMemberIncome:0,subjectExpenses:0,memberExpenses:0,sharedContributions:0,personalAssetsRetained:0,sharedSavingsChange:0,debtPayment:0,newDebt:0,expenseBreakdown:{}};
+    return {income:0,expenses:0,savings:0,debt:0,lastBalance:0,subjectIncome:0,otherMemberIncome:0,otherMemberGrossIncome:0,subjectExpenses:0,memberExpenses:0,sharedContributions:0,personalAssetChange:0,npcPersonalWealthChange:0,personalAssetsUsed:0,savingsUsed:0,householdDebtRepaid:0,newHouseholdDebt:0,sharedSavingsAdded:0,sharedSavingsChange:0,householdDebtChange:0,accountingIdentity:0,expenseBreakdown:{}};
   }
 
   function normalize(household,world){
@@ -44,7 +44,7 @@
     out.housing.quality=clamp(out.housing.quality==null?.5:out.housing.quality);
     out.housing.rooms=Math.max(1,integer(out.housing.rooms||1));
     out.finances=Object.assign(defaultFinances(),out.finances||{});
-    ['income','expenses','savings','debt','lastBalance','subjectIncome','otherMemberIncome','subjectExpenses','memberExpenses','sharedContributions','personalAssetsRetained','sharedSavingsChange','debtPayment','newDebt'].forEach(key=>{out.finances[key]=finite(out.finances[key],0);});
+    ['income','expenses','savings','debt','lastBalance','subjectIncome','otherMemberIncome','otherMemberGrossIncome','subjectExpenses','memberExpenses','sharedContributions','personalAssetChange','npcPersonalWealthChange','personalAssetsUsed','savingsUsed','householdDebtRepaid','newHouseholdDebt','sharedSavingsAdded','sharedSavingsChange','householdDebtChange','accountingIdentity'].forEach(key=>{out.finances[key]=finite(out.finances[key],0);});
     out.finances.expenseBreakdown=out.finances.expenseBreakdown&&typeof out.finances.expenseBreakdown==='object'?out.finances.expenseBreakdown:{};
     out.finances.debt=Math.max(0,out.finances.debt);
     out.socialClass=String(out.socialClass||'working');
@@ -184,6 +184,13 @@
     return {subjectExpenses:lifestyle.total,memberExpenses:memberIncrement+healthcare,breakdown:{rent:lifestyle.housing,food:lifestyle.food,childcare:lifestyle.childcare,medical:healthcare,debt:lifestyle.debt,memberIncrement}};
   }
 
+  function memberContribution(npc,year){
+    if(!npc||npc.alive===false||!npc.employment||npc.employment.status!=='employed') return {gross:0,contribution:0};
+    const gross=Math.max(0,Math.round(finite(npc.employment.income,0)));
+    if(Number(npc.__householdContributionYear)===Number(year)) return {gross,contribution:Math.max(0,Math.round(finite(npc.__householdContribution,0)))};
+    return {gross,contribution:gross};
+  }
+
   function householdAttractiveness(world,settlementId){
     const runtime=settlementRuntime(world,settlementId);
     if(!runtime) return 0;
@@ -266,44 +273,71 @@
       const economy=runtime&&runtime.economy||{};
       const memberNpcs=household.memberIds.map(id=>livingNpc(world,id)).filter(Boolean);
       const subjectMember=subject&&subject.npcId&&household.memberIds.includes(subject.npcId)&&subject.alive!==false?subject:null;
-      const subjectIncome=Math.max(0,Math.round(finite(ctx.subjectIncome!=null?ctx.subjectIncome:(subjectMember&&subjectMember.__worldWagePaidYear===year?subjectMember.__worldWagePaid:0),0)));
+      const subjectIncome=subjectMember?Math.max(0,Math.round(finite(ctx.subjectIncome!=null?ctx.subjectIncome:(subjectMember.__worldWagePaidYear===year?subjectMember.__worldWagePaid:0),0))):0;
       const employed=memberNpcs.filter(npc=>npc.employment&&npc.employment.status==='employed');
-      const otherMemberIncome=employed.reduce((sum,npc)=>sum+Math.max(0,finite(npc.employment.income,0)),0);
+      const memberIncome=employed.map(npc=>memberContribution(npc,year));
+      const otherMemberIncome=memberIncome.reduce((sum,item)=>sum+item.contribution,0);
+      const otherMemberGrossIncome=memberIncome.reduce((sum,item)=>sum+item.gross,0);
       const income=otherMemberIncome+subjectIncome;
       const model=expenseModel(world,household,subject,memberNpcs,runtime);
-      const expenses=model.subjectExpenses+model.memberExpenses;
-      // The subject contributes paid take-home to current household expenses first.
-      // Any subject surplus remains in S.assets; only non-subject income builds the
-      // shared household savings/debt ledger, preventing double counting.
-      const sharedMemberCoverage=subjectMember?Math.min(otherMemberIncome,model.memberExpenses):Math.min(otherMemberIncome,expenses);
-      const subjectPaidExpenses=subjectMember?model.subjectExpenses+Math.max(0,model.memberExpenses-sharedMemberCoverage):0;
-      const sharedBalance=otherMemberIncome-sharedMemberCoverage;
+      const subjectExpenses=subjectMember&&ctx.subjectEconomySettled&&ctx.subjectExpensesPaid!=null?Math.max(0,Math.round(finite(ctx.subjectExpensesPaid,model.subjectExpenses))):model.subjectExpenses;
+      const expenses=subjectExpenses+model.memberExpenses;
+      const startingSavings=Math.max(0,Math.round(finite(household.finances.savings,0)));
+      const startingDebt=Math.max(0,Math.round(finite(household.finances.debt,0)));
+      const subjectAssetsBefore=subjectMember?finite(ctx.subjectAssetsBefore,finite(subject.assets,0)):0;
+      if(subjectMember&&!ctx.subjectEconomySettled){ subject.assets=finite(subject.assets,0)+subjectIncome-model.subjectExpenses; }
+      const sharedCoverage=Math.min(otherMemberIncome,model.memberExpenses);
+      const memberDeficit=Math.max(0,model.memberExpenses-sharedCoverage);
+      let savingsUsed=0, personalAssetsUsed=0, householdDebtRepaid=0, newHouseholdDebt=0, sharedSavingsAdded=0;
+      let remainingDeficit=memberDeficit;
+      if(remainingDeficit>0){
+        savingsUsed=Math.min(startingSavings,remainingDeficit);
+        remainingDeficit-=savingsUsed;
+        if(subjectMember){
+          personalAssetsUsed=Math.min(Math.max(0,finite(subject.assets,0)),remainingDeficit);
+          subject.assets-=personalAssetsUsed;
+          remainingDeficit-=personalAssetsUsed;
+        }
+        newHouseholdDebt+=remainingDeficit;
+      }
+      const sharedSurplus=Math.max(0,otherMemberIncome-model.memberExpenses);
+      householdDebtRepaid=Math.min(startingDebt,sharedSurplus);
+      sharedSavingsAdded=Math.max(0,sharedSurplus-householdDebtRepaid);
+      if(subjectMember&&finite(subject.assets,0)<0){
+        const baseDeficit=Math.abs(Math.round(subject.assets));
+        subject.assets=0;
+        newHouseholdDebt+=baseDeficit;
+      }
+      const endingSavings=Math.max(0,startingSavings-savingsUsed+sharedSavingsAdded);
+      const endingDebt=Math.max(0,startingDebt-householdDebtRepaid+newHouseholdDebt);
+      const personalAssetChange=subjectMember?Math.round(finite(subject.assets,0)-subjectAssetsBefore):0;
+      const npcPersonalWealthChange=0;
+      const sharedSavingsChange=sharedSavingsAdded-savingsUsed;
+      const householdDebtChange=newHouseholdDebt-householdDebtRepaid;
       const balance=income-expenses;
+      const accountingIdentity=personalAssetChange+sharedSavingsChange-householdDebtChange+npcPersonalWealthChange;
       household.finances.income=income;
       household.finances.expenses=expenses;
       household.finances.lastBalance=balance;
       household.finances.subjectIncome=subjectIncome;
       household.finances.otherMemberIncome=otherMemberIncome;
-      household.finances.subjectExpenses=subjectPaidExpenses;
+      household.finances.otherMemberGrossIncome=otherMemberGrossIncome;
+      household.finances.subjectExpenses=subjectExpenses;
       household.finances.memberExpenses=model.memberExpenses;
       household.finances.sharedContributions=otherMemberIncome;
-      household.finances.personalAssetsRetained=Math.max(0,subjectIncome-subjectPaidExpenses);
-      household.finances.sharedSavingsChange=0;
-      household.finances.debtPayment=0;
-      household.finances.newDebt=0;
+      household.finances.personalAssetChange=personalAssetChange;
+      household.finances.npcPersonalWealthChange=npcPersonalWealthChange;
+      household.finances.personalAssetsUsed=personalAssetsUsed;
+      household.finances.savingsUsed=savingsUsed;
+      household.finances.householdDebtRepaid=householdDebtRepaid;
+      household.finances.newHouseholdDebt=newHouseholdDebt;
+      household.finances.sharedSavingsAdded=sharedSavingsAdded;
+      household.finances.sharedSavingsChange=sharedSavingsChange;
+      household.finances.householdDebtChange=householdDebtChange;
+      household.finances.accountingIdentity=accountingIdentity;
       household.finances.expenseBreakdown=model.breakdown;
-      if(sharedBalance>=0) household.finances.savings+=sharedBalance;
-      else {
-        const available=Math.max(0,household.finances.savings);
-        const paid=Math.min(available,Math.abs(sharedBalance));
-        household.finances.savings-=paid;
-        household.finances.debt+=Math.abs(sharedBalance)-paid;
-        household.finances.debtPayment=paid;
-        household.finances.newDebt=Math.max(0,Math.abs(sharedBalance)-paid);
-      }
-      household.finances.sharedSavingsChange=sharedBalance>=0?sharedBalance:-household.finances.debtPayment;
-      household.finances.savings=Math.max(0,Math.round(household.finances.savings));
-      household.finances.debt=Math.max(0,Math.round(household.finances.debt));
+      household.finances.savings=endingSavings;
+      household.finances.debt=endingDebt;
       const coverage=expenses?income/expenses:1;
       household.foodSecurity=clamp(household.foodSecurity*.72+clamp(.35+coverage*.35-healthPressure(runtime)*.18)*.28);
       household.stability=clamp(household.stability*.76+clamp(.38+coverage*.28+household.housing.quality*.18-healthPressure(runtime)*.12)*.24);
@@ -328,7 +362,8 @@
       if(h.id!==id) violations.push('household key and id must match for '+id);
       if(!Array.isArray(h.memberIds)||!Array.isArray(h.dependentIds)) violations.push('household '+id+' requires member and dependent arrays');
       ['foodSecurity','stability'].forEach(key=>{if(!Number.isFinite(Number(h[key]))||Number(h[key])<0||Number(h[key])>1) violations.push('household '+id+' '+key+' must be between 0 and 1');});
-      ['income','expenses','savings','debt','lastBalance','subjectIncome','otherMemberIncome','subjectExpenses','memberExpenses','sharedContributions','personalAssetsRetained','sharedSavingsChange','debtPayment','newDebt'].forEach(key=>{if(!Number.isFinite(Number(h.finances&&h.finances[key]))) violations.push('household '+id+' finances.'+key+' must be finite');});
+      ['income','expenses','savings','debt','lastBalance','subjectIncome','otherMemberIncome','otherMemberGrossIncome','subjectExpenses','memberExpenses','sharedContributions','personalAssetChange','npcPersonalWealthChange','personalAssetsUsed','savingsUsed','householdDebtRepaid','newHouseholdDebt','sharedSavingsAdded','sharedSavingsChange','householdDebtChange','accountingIdentity'].forEach(key=>{if(!Number.isFinite(Number(h.finances&&h.finances[key]))) violations.push('household '+id+' finances.'+key+' must be finite');});
+      if(h.finances&&Number.isFinite(Number(h.finances.lastBalance))&&Number.isFinite(Number(h.finances.accountingIdentity))&&Math.abs(Number(h.finances.lastBalance)-Number(h.finances.accountingIdentity))>.001) violations.push('household '+id+' accounting identity must balance');
       if(!h.finances||!h.finances.expenseBreakdown||typeof h.finances.expenseBreakdown!=='object') violations.push('household '+id+' finances.expenseBreakdown must be an object');
       (h.memberIds||[]).forEach(memberId=>{
         memberships[memberId]=(memberships[memberId]||0)+1;

@@ -1499,6 +1499,7 @@ function runMilestones(){ const m=S.age;
 }
 function runEconomy(){
   const y=currentYear(), WAR=(y>=1914&&y<=1918)||(y>=1939&&y<=1945), student=!!S.eduStage;
+  S.__householdAssetsBeforeEconomy=S.assets; S.__householdSubjectExpensesPaid=0;
   S.__worldWagePaid=0; S.__worldWagePaidYear=y;
   if(S.age>=16&&S.age<65&&!student&&S.jobName!=='Conscript'&&S.jailUntil<=S.age){
     if(S.jobTier===0){ const p=(0.04+S.smarts*0.0006)*(WAR?0.6:1);
@@ -1594,6 +1595,7 @@ function runBudget(WAR){
   if(S.kids>0) outlay+=currentChildcare().costPerKid*S.kids;
   S.liabilities.forEach(l=>{ outlay+=l.annualPayment; });
   if(WAR) outlay=Math.round(outlay*1.15);
+  S.__householdSubjectExpensesPaid=Math.round(outlay);
   S.assets-=outlay;
   S.liabilities.forEach(l=>{ l.yearsLeft--; });
   const paidOff=S.liabilities.filter(l=>l.yearsLeft<=0);
@@ -2236,7 +2238,7 @@ function advanceYear(suppressBurst,quiet){
   }
   resolveTravel(); runHoldTick(); snd('stamp'); shake(); window.C={};
   runFollowups(); runHistory(); runMilestones(); runEconomy();
-  if(typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.tick==='function') HouseholdSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,subjectIncome:S.__worldWagePaid}).forEach(notice=>{
+  if(typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.tick==='function') HouseholdSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,subjectIncome:S.__worldWagePaid,subjectAssetsBefore:S.__householdAssetsBeforeEconomy,subjectExpensesPaid:S.__householdSubjectExpensesPaid,subjectEconomySettled:true}).forEach(notice=>{
     if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.noticeText==='function') logEv('CONNECTED LIFE. '+NpcSystem.noticeText(World,notice),{},'milestone','HOUSEHOLD FILE · YEAR '+S.age);
   });
   runPersonalYearTick();
