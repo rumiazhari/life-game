@@ -1,0 +1,317 @@
+'use strict';
+
+(function(root){
+  const SCHEMA_VERSION=1;
+  const MAX_HOUSEHOLDS=120;
+  const clamp=(value,min=0,max=1)=>Math.max(min,Math.min(max,Number(value)||0));
+  const finite=(value,fallback=0)=>Number.isFinite(Number(value))?Number(value):fallback;
+  const integer=value=>Math.max(0,Math.round(finite(value,0)));
+
+  function ensure(world){
+    if(!world||typeof world!=='object') throw new Error('HouseholdSystem.ensure requires a world object');
+    if(!world.households||typeof world.households!=='object'||Array.isArray(world.households)) world.households={};
+    if(!Number.isFinite(Number(world.householdCounter))||Number(world.householdCounter)<0) world.householdCounter=0;
+    world.householdSchemaVersion=SCHEMA_VERSION;
+    return world.households;
+  }
+
+  function nextId(world){
+    ensure(world);
+    world.householdCounter+=1;
+    return 'household:'+String(world.householdCounter).padStart(5,'0');
+  }
+
+  function uniqueIds(values){ return [...new Set((Array.isArray(values)?values:[]).filter(Boolean).map(String))]; }
+
+  function defaultHousing(){
+    return {mode:'rented',buildingId:null,quality:.5,rooms:2};
+  }
+
+  function defaultFinances(){
+    return {income:0,expenses:0,savings:0,debt:0,lastBalance:0};
+  }
+
+  function normalize(household,world){
+    const out=household&&typeof household==='object'?household:{};
+    out.id=String(out.id||nextId(world));
+    out.settlementId=String(out.settlementId||world.activeSettlementId||'branec');
+    out.memberIds=uniqueIds(out.memberIds);
+    out.historicalMemberIds=uniqueIds(out.historicalMemberIds);
+    out.dependentIds=uniqueIds(out.dependentIds).filter(id=>out.memberIds.includes(id));
+    out.housing=Object.assign(defaultHousing(),out.housing||{});
+    out.housing.mode=String(out.housing.mode||'rented');
+    out.housing.buildingId=out.housing.buildingId==null?null:String(out.housing.buildingId);
+    out.housing.quality=clamp(out.housing.quality==null?.5:out.housing.quality);
+    out.housing.rooms=Math.max(1,integer(out.housing.rooms||1));
+    out.finances=Object.assign(defaultFinances(),out.finances||{});
+    ['income','expenses','savings','debt','lastBalance'].forEach(key=>{out.finances[key]=finite(out.finances[key],0);});
+    out.finances.debt=Math.max(0,out.finances.debt);
+    out.socialClass=String(out.socialClass||'working');
+    out.foodSecurity=clamp(out.foodSecurity==null?.55:out.foodSecurity);
+    out.stability=clamp(out.stability==null?.55:out.stability);
+    out.origin=String(out.origin||'generated');
+    out.createdYear=Number.isFinite(Number(out.createdYear))?Math.round(Number(out.createdYear)):Number(world.year)||0;
+    out.lastMoveYear=Number.isFinite(Number(out.lastMoveYear))?Math.round(Number(out.lastMoveYear)):null;
+    out.flags=out.flags&&typeof out.flags==='object'?out.flags:{};
+    return out;
+  }
+
+  function create(world,input){
+    const households=ensure(world);
+    const household=normalize(Object.assign({},input||{}, {id:(input&&input.id)||nextId(world)}),world);
+    households[household.id]=household;
+    trim(world);
+    return household;
+  }
+
+  function trim(world){
+    const households=ensure(world);
+    const ids=Object.keys(households);
+    if(ids.length<=MAX_HOUSEHOLDS) return;
+    ids.map(id=>households[id]).filter(h=>!h.memberIds.length)
+      .sort((a,b)=>Number(a.createdYear)-Number(b.createdYear)||String(a.id).localeCompare(String(b.id)))
+      .slice(0,ids.length-MAX_HOUSEHOLDS)
+      .forEach(h=>delete households[h.id]);
+  }
+
+  function all(world){ return Object.values(ensure(world)); }
+
+  function findByMember(world,memberId){
+    const id=String(memberId||'');
+    return all(world).find(household=>household.memberIds.includes(id))||null;
+  }
+
+  function addMember(world,householdId,memberId,dependent=false){
+    const households=ensure(world), household=households[householdId];
+    if(!household||!memberId) return null;
+    const id=String(memberId);
+    all(world).forEach(other=>{
+      if(other.id===household.id) return;
+      other.memberIds=other.memberIds.filter(value=>value!==id);
+      other.dependentIds=other.dependentIds.filter(value=>value!==id);
+    });
+    if(!household.memberIds.includes(id)) household.memberIds.push(id);
+    household.historicalMemberIds=household.historicalMemberIds.filter(value=>value!==id);
+    if(dependent&&!household.dependentIds.includes(id)) household.dependentIds.push(id);
+    if(!dependent) household.dependentIds=household.dependentIds.filter(value=>value!==id);
+    return household;
+  }
+
+  function removeMember(world,householdId,memberId){
+    const household=ensure(world)[householdId];
+    if(!household) return null;
+    const id=String(memberId||'');
+    household.memberIds=household.memberIds.filter(value=>value!==id);
+    household.dependentIds=household.dependentIds.filter(value=>value!==id);
+    return household;
+  }
+
+  function merge(world,targetId,sourceId){
+    const households=ensure(world), target=households[targetId], source=households[sourceId];
+    if(!target||!source||target.id===source.id) return target||null;
+    source.memberIds.forEach(id=>addMember(world,target.id,id,source.dependentIds.includes(id)));
+    target.finances.savings+=source.finances.savings;
+    target.finances.debt+=source.finances.debt;
+    target.stability=clamp((target.stability+source.stability)/2);
+    delete households[source.id];
+    return target;
+  }
+
+  function settlementRuntime(world,settlementId){
+    return world&&world.settlements&&world.settlements[settlementId]||null;
+  }
+
+  function healthPressure(runtime){
+    if(root.PublicHealth&&typeof root.PublicHealth.pressure==='function') return root.PublicHealth.pressure(runtime);
+    return 0;
+  }
+
+  function livingNpc(world,id){
+    const npc=world&&world.npcs&&world.npcs[id];
+    return npc&&npc.alive!==false&&!npc.isSubject?npc:null;
+  }
+
+  function livingMember(world,id,subject){
+    if(subject&&String(subject.npcId||'')===String(id||'')) return subject.alive!==false?subject:null;
+    return livingNpc(world,id);
+  }
+
+  function classify(finances){
+    const net=finite(finances.savings,0)-finite(finances.debt,0);
+    if(net>=8000) return 'affluent';
+    if(net>=1800) return 'comfortable';
+    if(net>=-500) return 'working';
+    if(net>=-2500) return 'precarious';
+    return 'destitute';
+  }
+
+  function householdAttractiveness(world,settlementId){
+    const runtime=settlementRuntime(world,settlementId);
+    if(!runtime) return 0;
+    if(root.WorldSimulation&&typeof root.WorldSimulation.attractiveness==='function') return root.WorldSimulation.attractiveness(runtime);
+    return clamp((runtime.economy&&runtime.economy.employmentIndex||.5)*.5+(runtime.publicHealth&&runtime.publicHealth.sanitation||.5)*.3+(1-(runtime.security&&runtime.security.unrest||.5))*.2);
+  }
+
+  function destinationFor(world,household,year){
+    const definitions=root.WorldSimulation&&typeof root.WorldSimulation.definitions==='function'?root.WorldSimulation.definitions(world):[];
+    const currentScore=householdAttractiveness(world,household.settlementId);
+    const ranked=definitions
+      .filter(settlement=>settlement&&settlement.id&&settlement.id!==household.settlementId)
+      .map(settlement=>({id:settlement.id,score:householdAttractiveness(world,settlement.id)}))
+      .sort((a,b)=>b.score-a.score||String(a.id).localeCompare(String(b.id)));
+    const best=ranked[0];
+    if(!best||best.score<currentScore+.08) return null;
+    const rng=root.Random.create([world.seed,year,household.id,'household-migration'].join('|'));
+    const pressure=clamp((.42-household.stability)*1.25+(best.score-currentScore));
+    return rng.chance(clamp(.025+pressure*.16,0,.28))?best.id:null;
+  }
+
+  function move(world,household,destinationId,year){
+    if(!household||!destinationId||destinationId===household.settlementId) return false;
+    household.settlementId=String(destinationId);
+    household.lastMoveYear=Number(year)||0;
+    household.memberIds.forEach(id=>{
+      const npc=world.npcs&&world.npcs[id];
+      if(npc&&!npc.isSubject) npc.locationId=household.settlementId;
+    });
+    return true;
+  }
+
+  function reconcile(world,subject){
+    const households=ensure(world), npcs=world.npcs||{};
+    Object.keys(households).forEach(id=>{households[id]=normalize(households[id],world);});
+
+    const seen=new Set();
+    all(world).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(household=>{
+      household.memberIds=household.memberIds.filter(id=>{
+        const npc=npcs[id];
+        if(npc&&npc.alive===false){
+          if(!household.historicalMemberIds.includes(id)) household.historicalMemberIds.push(id);
+          return false;
+        }
+        return true;
+      });
+      household.memberIds=household.memberIds.filter(id=>{
+        if(seen.has(id)) return false;
+        if(!npcs[id]&&(!subject||subject.npcId!==id)) return false;
+        seen.add(id);
+        return true;
+      });
+      household.dependentIds=household.dependentIds.filter(id=>household.memberIds.includes(id)&&livingMember(world,id,subject));
+      household.memberIds.forEach(id=>{if(npcs[id]) npcs[id].householdId=household.id;});
+    });
+
+    Object.values(npcs).forEach(npc=>{
+      if(!npc||npc.alive===false||npc.isSubject) return;
+      if(!seen.has(npc.id)){
+        const household=create(world,{settlementId:npc.locationId||world.activeSettlementId,memberIds:[npc.id],dependentIds:[],origin:'orphan-repair'});
+        npc.householdId=household.id;
+        seen.add(npc.id);
+      }
+    });
+
+    Object.keys(households).forEach(id=>{
+      const household=households[id];
+      if(!household.memberIds.length&&!household.flags.keepEmpty) delete households[id];
+    });
+    trim(world);
+    return households;
+  }
+
+  function tick(world,context){
+    const ctx=context||{}, subject=ctx.subject||null, year=Number(ctx.year)||Number(world.year)||0;
+    reconcile(world,subject);
+    const notices=[];
+    all(world).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(household=>{
+      const runtime=settlementRuntime(world,household.settlementId);
+      const economy=runtime&&runtime.economy||{};
+      const memberNpcs=household.memberIds.map(id=>livingNpc(world,id)).filter(Boolean);
+      const subjectMember=subject&&subject.npcId&&household.memberIds.includes(subject.npcId)&&subject.alive!==false?subject:null;
+      const subjectIncome=Math.max(0,Math.round(finite(ctx.subjectIncome!=null?ctx.subjectIncome:(subjectMember&&subjectMember.__worldWagePaidYear===year?subjectMember.__worldWagePaid:0),0)));
+      const dependents=household.dependentIds.filter(id=>!!livingMember(world,id,subject)).length;
+      const employed=memberNpcs.filter(npc=>npc.employment&&npc.employment.status==='employed');
+      const sharedIncome=employed.reduce((sum,npc)=>sum+Math.max(0,finite(npc.employment.income,0)),0);
+      const income=sharedIncome+subjectIncome;
+      const foodIndex=finite(economy.foodPriceIndex,1), rentIndex=finite(economy.rentIndex,1);
+      const people=Math.max(1,memberNpcs.length+(subject&&household.memberIds.includes(subject.npcId)?1:0));
+      const rent=Math.round((220+household.housing.rooms*95)*rentIndex);
+      const food=Math.round((110*people+35*dependents)*foodIndex);
+      const healthcare=Math.round(90*healthPressure(runtime)*people);
+      const expenses=rent+food+healthcare;
+      // The subject contributes paid take-home to current household expenses first.
+      // Any subject surplus remains in S.assets; only non-subject income builds the
+      // shared household savings/debt ledger, preventing double counting.
+      const subjectCoverage=Math.min(subjectIncome,expenses);
+      const sharedBalance=sharedIncome-(expenses-subjectCoverage);
+      const balance=income-expenses;
+      household.finances.income=income;
+      household.finances.expenses=expenses;
+      household.finances.lastBalance=balance;
+      if(sharedBalance>=0) household.finances.savings+=sharedBalance;
+      else {
+        const available=Math.max(0,household.finances.savings);
+        const paid=Math.min(available,Math.abs(sharedBalance));
+        household.finances.savings-=paid;
+        household.finances.debt+=Math.abs(sharedBalance)-paid;
+      }
+      household.finances.savings=Math.max(0,Math.round(household.finances.savings));
+      household.finances.debt=Math.max(0,Math.round(household.finances.debt));
+      const coverage=expenses?income/expenses:1;
+      household.foodSecurity=clamp(household.foodSecurity*.72+clamp(.35+coverage*.35-healthPressure(runtime)*.18)*.28);
+      household.stability=clamp(household.stability*.76+clamp(.38+coverage*.28+household.housing.quality*.18-healthPressure(runtime)*.12)*.24);
+      household.socialClass=classify(household.finances);
+
+      const containsSubject=!!(subject&&subject.npcId&&household.memberIds.includes(subject.npcId));
+      if(!containsSubject&&household.lastMoveYear!==year){
+        const destination=destinationFor(world,household,year);
+        if(destination&&move(world,household,destination,year)) notices.push({type:'household_migration',householdId:household.id,settlementId:destination});
+      }
+    });
+    reconcile(world,subject);
+    return notices;
+  }
+
+  function checkInvariants(world,subject){
+    const violations=[], households=world&&world.households||{}, npcs=world&&world.npcs||{}, memberships={};
+    if(world&&Object.keys(households).length&&world.householdSchemaVersion!==SCHEMA_VERSION) violations.push('household schema must be version '+SCHEMA_VERSION);
+    Object.keys(households).forEach(id=>{
+      const h=households[id];
+      if(!h||typeof h!=='object') {violations.push('household '+id+' must be an object');return;}
+      if(h.id!==id) violations.push('household key and id must match for '+id);
+      if(!Array.isArray(h.memberIds)||!Array.isArray(h.dependentIds)) violations.push('household '+id+' requires member and dependent arrays');
+      ['foodSecurity','stability'].forEach(key=>{if(!Number.isFinite(Number(h[key]))||Number(h[key])<0||Number(h[key])>1) violations.push('household '+id+' '+key+' must be between 0 and 1');});
+      ['income','expenses','savings','debt','lastBalance'].forEach(key=>{if(!Number.isFinite(Number(h.finances&&h.finances[key]))) violations.push('household '+id+' finances.'+key+' must be finite');});
+      (h.memberIds||[]).forEach(memberId=>{
+        memberships[memberId]=(memberships[memberId]||0)+1;
+        if(!npcs[memberId]&&(!subject||subject.npcId!==memberId)) violations.push('household '+id+' references unknown member '+memberId);
+      });
+      (h.dependentIds||[]).forEach(memberId=>{if(!(h.memberIds||[]).includes(memberId)) violations.push('household '+id+' dependent '+memberId+' is not a member');});
+    });
+    Object.keys(memberships).forEach(id=>{if(memberships[id]>1) violations.push('member '+id+' belongs to more than one household');});
+    Object.values(npcs).forEach(npc=>{
+      if(!npc||npc.isSubject||npc.alive===false) return;
+      if(!memberships[npc.id]) violations.push('living NPC '+npc.id+' has no household');
+      if(npc.householdId&&!households[npc.householdId]) violations.push('NPC '+npc.id+' references missing household '+npc.householdId);
+    });
+    return violations;
+  }
+
+  root.HouseholdSystem={
+    SCHEMA_VERSION,
+    MAX_HOUSEHOLDS,
+    ensure,
+    normalize,
+    create,
+    all,
+    findByMember,
+    addMember,
+    removeMember,
+    merge,
+    move,
+    reconcile,
+    tick,
+    classify,
+    householdAttractiveness,
+    checkInvariants
+  };
+})(typeof globalThis!=='undefined'?globalThis:this);

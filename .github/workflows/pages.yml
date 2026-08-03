@@ -32,6 +32,8 @@ jobs:
         run: npm test
       - name: Run world diagnostic
         run: npm run diagnostic:world
+      - name: Run NPC diagnostic
+        run: npm run diagnostic:npcs
 
   deploy:
     needs: test

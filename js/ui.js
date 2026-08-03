@@ -288,6 +288,9 @@ function renderHousehold(){
   if(!filterCat||filterCat==='housing') h+='<div class="ps-catlab">HOUSING</div><div class="lifegrid">'+lifeToggle(HOUSING,S.lifestyle.housing,'house',it=>it.rent?money(it.rent)+'/yr':'free')+'</div>';
   if(!filterCat||filterCat==='food') h+='<div class="ps-catlab">FOOD</div><div class="lifegrid">'+lifeToggle(FOOD,S.lifestyle.food,'food',it=>money(it.cost)+'/yr')+'</div>';
   if(!filterCat&&S.kids>0) h+='<div class="ps-catlab">CHILDCARE</div><div class="lifegrid">'+lifeToggle(CHILDCARE,S.lifestyle.childcare,'childcare',it=>money(it.costPerKid)+'/yr per kid')+'</div>';
+  if(!filterCat&&typeof PersistentPeopleUI==='object'&&PersistentPeopleUI&&typeof PersistentPeopleUI.householdPanel==='function'){
+    h+=PersistentPeopleUI.householdPanel(World,S);
+  }
   const title=filterCat==='housing'?'HOUSING':filterCat==='food'?'FOOD':'HOUSEHOLD & GROCERIES';
   $('#householdSheet').innerHTML='<div class="ps-head"><span>'+title+'</span><span>FORM H-1</span></div>'+
     '<div class="aempty" style="margin:6px 2px 12px">Standing choices — no hours spent, changed as often as you like. Every rung shows what it costs, and what it does to the subject, every single year.</div>'+
@@ -1496,6 +1499,7 @@ function runMilestones(){ const m=S.age;
 }
 function runEconomy(){
   const y=currentYear(), WAR=(y>=1914&&y<=1918)||(y>=1939&&y<=1945), student=!!S.eduStage;
+  S.__worldWagePaid=0; S.__worldWagePaidYear=y;
   if(S.age>=16&&S.age<65&&!student&&S.jobName!=='Conscript'&&S.jailUntil<=S.age){
     if(S.jobTier===0){ const p=(0.04+S.smarts*0.0006)*(WAR?0.6:1);
       if(chance(p)){const job=bestJobForTier(1); if(job){S.jobTier=1; S.jobName=job.name; logEv('Subject stumbled into work — '+job.name+' — without much looking. Beginner’s luck, filed as such.',{happiness:2});}} }
@@ -1509,7 +1513,7 @@ function runEconomy(){
     if(S.garnishUntil>S.age) income=Math.round(income*0.6);
     if(typeof medicalWorkPenalty==='function'){ const medicalPenalty=medicalWorkPenalty(S); if(medicalPenalty) income=Math.round(income*Math.max(.55,1-medicalPenalty*.14)); }
     if(typeof WorldGameplay==='object'&&WorldGameplay&&typeof WorldGameplay.adjustPaidIncome==='function') income=WorldGameplay.adjustPaidIncome(income,S);
-    S.assets+=income; }
+    S.__worldWagePaid=Math.max(0,Math.round(income)); S.__worldWagePaidYear=y; S.assets+=income; }
   if(S.jailUntil<=S.age) runBudget(WAR);
   if(S.jailUntil>S.age){ S.assets-=200; }
   if(WAR&&!S.warned['war'+(y>=1939?'2':'1')]){S.warned['war'+(y>=1939?'2':'1')]=1; logEv('Ration books were issued. Subject’s butter became a rumor.',{happiness:-2});}
@@ -1521,7 +1525,7 @@ function runEconomy(){
     logEv('A child was born to the subject. The Bureau congratulates the subject, cautiously.',{happiness:6,assets:-300,relations:6,health:-2}); }
   if(S.married&&S.age>=55&&chance(0.02+(S.age-55)*0.002)){
     logEv('Subject’s spouse, '+S.partner+', passed away. The Bureau extends its formal condolences.',{happiness:-12,relations:-10});
-    endMarriageSide(S,'Widowed'); }
+    markSpouseDeath(S,'natural causes'); }
   if(S.married){ const p=activePartnerContact(); if(p){ p.mood=clamp(p.mood-3,0,100); syncPartnerMirror(); } }
   else if(S.partner){ const p=activePartnerContact(); if(p){ p.mood=clamp(p.mood-1,0,100); syncPartnerMirror(); } }
   S.contacts.filter(c=>c.role==='friend').forEach(c=>{ c.mood=clamp(c.mood-2,0,100); });
@@ -2221,8 +2225,21 @@ function advanceYear(suppressBurst,quiet){
   // and personal systems. It establishes this year's settlement conditions;
   // every existing yearly call remains in its original order after this point.
   if(typeof WorldSimulation==='object'&&WorldSimulation&&typeof WorldSimulation.tick==='function') WorldSimulation.tick(World,{random:Random,year:World.year});
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.tick==='function'){
+    NpcSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,deferHousehold:true});
+    const npcNotices=typeof NpcSystem.drainNotices==='function'?NpcSystem.drainNotices(World):[];
+    npcNotices.slice(0,4).forEach(notice=>{
+      const cls=notice.type==='death'?'crisis':'milestone';
+      logEv('CONNECTED LIFE. '+NpcSystem.noticeText(World,notice),{},cls,'HOUSEHOLD FILE · YEAR '+S.age);
+    });
+    if(npcNotices.length>4) logEv((npcNotices.length-4)+' other connected-life changes were filed in summary.',{},'milestone','HOUSEHOLD FILE · YEAR '+S.age);
+  }
   resolveTravel(); runHoldTick(); snd('stamp'); shake(); window.C={};
-  runFollowups(); runHistory(); runMilestones(); runEconomy(); runPersonalYearTick();
+  runFollowups(); runHistory(); runMilestones(); runEconomy();
+  if(typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.tick==='function') HouseholdSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,subjectIncome:S.__worldWagePaid}).forEach(notice=>{
+    if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.noticeText==='function') logEv('CONNECTED LIFE. '+NpcSystem.noticeText(World,notice),{},'milestone','HOUSEHOLD FILE · YEAR '+S.age);
+  });
+  runPersonalYearTick();
   if(S.jobTier===0&&S.age>=16&&S.age<65) rollJobVacancies();
   const __newStage=stageForAge(S.age);
   if(__newStage!==S.stage){ S.stage=__newStage; queueChapterCard(__newStage); renderStage(); }
@@ -2321,6 +2338,7 @@ function showNextToast(){
 function handleDeath(){
   evaluateYearStreak(true);
   const g=grade(), ir=intentResult(), legacy=computeParentingLegacy();
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.markSubjectDeath==='function') NpcSystem.markSubjectDeath(World,S,Lineage);
   Lineage.pastSubjects.push({name:S.first+' '+S.last,dob:S.dob,deathYear:currentYear(),age:S.age,cause:S.cause,grade:g.g,intentName:ir.lab,intentStars:ir.stars,
     parentWarmth:legacy.warmth,parentStability:legacy.stability,parentYears:legacy.years,
     education:S.education?{completed:Object.assign({},S.education.completed||{}),majorId:S.education.majorId||null,certificates:Object.keys(S.education.certificates||{})}:null});
@@ -2329,6 +2347,7 @@ function handleDeath(){
   else { closeFile(); }
 }
 function promoteToLeader(member){
+  const previousSubjectNpcId=S&&S.npcId?S.npcId:null;
   const age=currentYear()-member.dob;
   const inheritedLocation=S&&S.location?Object.assign({},S.location):{settlementId:World.activeSettlementId,buildingId:World.activeBuildingId};
   const departedName=S?(S.first+' '+S.last):null, departedSex=S?S.sex:null;
@@ -2392,6 +2411,7 @@ function promoteToLeader(member){
     S.mother=randomParent('F'); S.father=randomParent('M',member.last);
   }
   Lineage.activeSubjectId=S.id; Lineage.generation++; updatePersonalStanding();
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.promoteSubject==='function') NpcSystem.promoteSubject(World,S,member,Lineage,previousSubjectNpcId);
 }
 function openSuccession(candidates){
   const slip=$('#intentSlip');

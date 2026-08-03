@@ -101,6 +101,9 @@
       violations.push('world year must equal subject birth year plus age');
     }
     violations.push(...checkSettlementRuntimeState(w));
+    if(w&&typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.checkInvariants==='function'){
+      violations.push(...NpcSystem.checkInvariants(w,s,typeof Lineage!=='undefined'?Lineage:null));
+    }
     if(s&&s.assets!=null&&!Number.isFinite(Number(s.assets))) violations.push('assets must be finite');
     if(s){
       boundedStats.forEach(key=>{
