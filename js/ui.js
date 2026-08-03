@@ -192,7 +192,7 @@ function renderInventory(){
   const standing='<div class="personal-ledger"><div class="sec-h">PERSONAL STANDING <span>LIVE FILE</span></div>'+ 
     '<div class="standing-grid"><div><b>FREEDOM</b><span>'+S.freedom+' · '+freedomLabel(S.freedom)+'</span></div><div><b>SCRUTINY</b><span>'+S.scrutiny+' · '+scrutinyLabel(S.scrutiny)+'</span></div>'+ 
     '<div><b>BUREAU FAVOR</b><span>'+S.bureauFavor+' / 3</span></div><div><b>SECURITY</b><span>'+securityLabel(Math.min(S.housingSecurity,S.financialSecurity))+'</span></div></div>'+ 
-    '<div class="medical-line"><b>MEDICAL FILE</b><span>'+(conditions.length?conditions.map(c=>MEDICAL_CONDITIONS[c.id].name+(c.known?'':' · unexamined')).join(' · '):(S.medicalRecord?'no active condition':'not yet opened'))+'</span></div>'+ 
+    '<div class="medical-line"><b>MEDICAL FILE</b><span>'+(conditions.length?conditions.map(c=>medicalInfo(c.id).name+(c.known?'':' · unexamined')).join(' · '):(S.medicalRecord?'no active condition':'not yet opened'))+'</span></div>'+
     '<div class="location-line"><b>LOCATION</b><span>'+location.name+' · '+(building?building.name:'address pending')+(travel?' · travelling to '+travel.name:'')+'</span></div>'+
     (settlementConditions?'<div class="settlement-conditions"><div class="sec-h">SETTLEMENT CONDITIONS <span>SIMULATION</span></div><div class="condition-grid"><div><b>EMPLOYMENT</b><span>'+settlementConditions.employment+'</span></div><div><b>COST OF LIVING</b><span>'+settlementConditions.costOfLiving+'</span></div><div><b>HEALTHCARE PRESSURE</b><span>'+settlementConditions.healthcare+'</span></div><div><b>UNREST</b><span>'+settlementConditions.unrest+'</span></div><div><b>SURVEILLANCE</b><span>'+settlementConditions.surveillance+'</span></div></div></div>':'')+'</div>';
   if(S.age<16||S.livingAtHome){
@@ -232,9 +232,9 @@ function renderInventory(){
   el.innerHTML=standing+h;
 }
 function openMedicalTreatmentPicker(conditionId){
-  const condition=conditionById(conditionId||((activeConditions()[0]||{}).id));
+  const condition=conditionById(conditionId||((activeConditions()[0]||{}).instanceId));
   if(!condition||!condition.known) return;
-  const options=medicalTreatmentOptions(condition.id);
+  const options=medicalTreatmentOptions(condition.instanceId);
   const access=medicalAccessFor(S,medicalContext(S));
   const rows=options.length?options.map(option=>'<button class="chipbtn" data-medical-treatment="'+option.id+'"><b>'+option.name+'</b><span>'+money(option.cost)+' · '+Math.round(option.success*100)+'% course success</span></button>').join(''):'<div class="qempty">No treatment is available through '+access.facility+'.</div>';
   $('#skillSheet').innerHTML='<div class="ps-head"><span>TREATMENT ORDER</span><span>'+medicalInfo(condition.id).name.toUpperCase()+'</span></div>'+
@@ -242,7 +242,7 @@ function openMedicalTreatmentPicker(conditionId){
     '<div class="chips">'+rows+'</div><div class="ps-foot"><button class="btn" id="medicalTreatmentCancel">Back ▸</button></div>';
   $('#skillSheet').onclick=e=>{
     const choice=e.target.closest('[data-medical-treatment]');
-    if(choice){ queueAdd('d','treatment',{condition:condition.id,treatment:choice.dataset.medicalTreatment}); $('#skillWrap').classList.add('hidden'); return; }
+    if(choice){ queueAdd('d','treatment',{condition:condition.instanceId,treatment:choice.dataset.medicalTreatment}); $('#skillWrap').classList.add('hidden'); return; }
     if(e.target.id==='medicalTreatmentCancel') $('#skillWrap').classList.add('hidden');
   };
   $('#skillWrap').classList.remove('hidden');
@@ -251,7 +251,7 @@ function openMedicalFile(){
   if(!S) return;
   const summary=medicalSummary(S), conditions=summary.conditions, access=summary.access;
   const rows=conditions.length?conditions.map(c=>{
-    const treatment=c.known?'<button class="btn small" data-medical-treat="'+c.id+'">File treatment · 1h ▸</button>':'<span class="ar-meta">Diagnosis required before treatment.</span>';
+    const treatment=c.known?'<button class="btn small" data-medical-treat="'+c.instanceId+'">File treatment · 1h ▸</button>':'<span class="ar-meta">Diagnosis required before treatment.</span>';
     return '<div class="medical-card"><div class="arow"><div class="ar-grade">'+c.severity+'</div><div style="flex:1"><div class="ar-name">'+medicalInfo(c.id).name+'</div><div class="ar-meta">'+medicalSeverityLabel(c.severity)+' · '+medicalStateLabel(c)+' · since age '+c.onsetAge+'</div><div class="ar-meta">'+(c.source||'unclassified')+(c.treatment?' · last care: '+(MEDICAL_TREATMENTS[c.treatment]||{}).name:'')+'</div></div></div>'+treatment+'</div>';
   }).join(''):'<div class="aempty">No active condition is recorded. A healthy-looking file is still only a file; use a doctor visit when something feels wrong.</div>';
   $('#medicalSheet').innerHTML='<div class="ps-head"><span>MEDICAL FILE</span><span>FORM M-2</span></div>'+
