@@ -41,7 +41,7 @@
   function defaultPersonality(){ return {warmth:.5,ambition:.5,loyalty:.5,volatility:.3}; }
   function defaultEducation(){ return {level:'none',status:'none',years:0,quality:.5}; }
   function defaultEmployment(){ return {status:'unemployed',sector:null,careerId:null,income:0,lastChangeYear:null}; }
-  function defaultHealth(){ return {general:70,conditions:[],lastChangeYear:null}; }
+  function defaultHealth(){ return {general:70,medical:null,conditions:[],lastChangeYear:null}; }
   function defaultWealth(){ return {cash:0,debt:0}; }
 
   function normalize(npc,world){
@@ -77,6 +77,7 @@
     out.health=Object.assign(defaultHealth(),out.health||{});
     out.health.general=clamp(out.health.general,0,100);
     out.health.conditions=Array.isArray(out.health.conditions)?out.health.conditions:[];
+    if(root.MedicalSystem){ root.MedicalSystem.ensureMedicalState(out,{world,year:world.year}); out.health.conditions=out.health.medical.conditions; }
     out.wealth=Object.assign(defaultWealth(),out.wealth||{});
     out.wealth.cash=Math.round(finite(out.wealth.cash,0));
     out.wealth.debt=Math.max(0,Math.round(finite(out.wealth.debt,0)));
