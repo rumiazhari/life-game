@@ -359,6 +359,36 @@ function syncPartnerMirror(){
   if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.syncLegacy==='function') NpcSystem.syncLegacy(World,S,Lineage);
 }
 function activePartnerContact(){ return S.contacts.find(c=>c.role==='partner'||c.role==='spouse')||null; }
+function markSpouseDeath(s,cause){
+  const subject=s||S, spouse=subject&&Array.isArray(subject.contacts)
+    ?subject.contacts.find(c=>c&&c.alive!==false&&(c.role==='partner'||c.role==='spouse'))
+    :null;
+  const year=currentYear(), deathCause=cause||'natural causes';
+  if(!spouse){ subject.married=false; subject.status='Widowed'; subject.partner=null; subject.partnerMood=0; return null; }
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.markNpcDeath==='function'){
+    if(!spouse.npcId&&typeof NpcSystem.registerContact==='function') NpcSystem.registerContact(World,subject,spouse);
+    const npc=spouse.npcId&&World.npcs&&World.npcs[spouse.npcId];
+    if(npc) NpcSystem.markNpcDeath(World,npc,year,deathCause,World.npcNotices);
+    if(npc) npc.partnerId=null;
+    Object.values(World.npcs||{}).forEach(candidate=>{
+      if(candidate&&candidate.partnerId===spouse.npcId) candidate.partnerId=null;
+    });
+    const subjectNpc=subject.npcId&&World.npcs&&World.npcs[subject.npcId];
+    if(subjectNpc&&subjectNpc.partnerId===spouse.npcId) subjectNpc.partnerId=null;
+  }
+  spouse.alive=false; spouse.deathYear=year; spouse.deathCause=deathCause; spouse.role='ex';
+  subject.married=false; subject.status='Widowed'; subject.partner=null; subject.partnerMood=0;
+  if(typeof HouseholdSystem==='object'&&HouseholdSystem&&spouse.npcId){
+    const household=HouseholdSystem.findByMember(World,spouse.npcId);
+    if(household){
+      HouseholdSystem.removeMember(World,household.id,spouse.npcId);
+      household.historicalMemberIds=Array.from(new Set((household.historicalMemberIds||[]).concat(spouse.npcId)));
+    }
+    HouseholdSystem.reconcile(World,subject);
+  }
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.syncLegacy==='function') NpcSystem.syncLegacy(World,subject,Lineage);
+  return spouse;
+}
 function hasPartner(s){ return !!activePartnerContact(); }
 function worstFadingFriend(){
   const cands=S.contacts.filter(c=>c.role==='friend');

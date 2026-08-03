@@ -1525,7 +1525,7 @@ function runEconomy(){
     logEv('A child was born to the subject. The Bureau congratulates the subject, cautiously.',{happiness:6,assets:-300,relations:6,health:-2}); }
   if(S.married&&S.age>=55&&chance(0.02+(S.age-55)*0.002)){
     logEv('Subject’s spouse, '+S.partner+', passed away. The Bureau extends its formal condolences.',{happiness:-12,relations:-10});
-    endMarriageSide(S,'Widowed'); }
+    markSpouseDeath(S,'natural causes'); }
   if(S.married){ const p=activePartnerContact(); if(p){ p.mood=clamp(p.mood-3,0,100); syncPartnerMirror(); } }
   else if(S.partner){ const p=activePartnerContact(); if(p){ p.mood=clamp(p.mood-1,0,100); syncPartnerMirror(); } }
   S.contacts.filter(c=>c.role==='friend').forEach(c=>{ c.mood=clamp(c.mood-2,0,100); });
@@ -2237,7 +2237,7 @@ function advanceYear(suppressBurst,quiet){
   resolveTravel(); runHoldTick(); snd('stamp'); shake(); window.C={};
   runFollowups(); runHistory(); runMilestones(); runEconomy();
   if(typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.tick==='function') HouseholdSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,subjectIncome:S.__worldWagePaid}).forEach(notice=>{
-    if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.noticeText==='function') logEv('CONNECTED LIFE. '+NpcSystem.noticeText(World,notice),{},'milestone','HOUSEHOLD FILE Â· YEAR '+S.age);
+    if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.noticeText==='function') logEv('CONNECTED LIFE. '+NpcSystem.noticeText(World,notice),{},'milestone','HOUSEHOLD FILE · YEAR '+S.age);
   });
   runPersonalYearTick();
   if(S.jobTier===0&&S.age>=16&&S.age<65) rollJobVacancies();
