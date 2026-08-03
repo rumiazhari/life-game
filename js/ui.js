@@ -1499,6 +1499,7 @@ function runMilestones(){ const m=S.age;
 }
 function runEconomy(){
   const y=currentYear(), WAR=(y>=1914&&y<=1918)||(y>=1939&&y<=1945), student=!!S.eduStage;
+  S.__worldWagePaid=0; S.__worldWagePaidYear=y;
   if(S.age>=16&&S.age<65&&!student&&S.jobName!=='Conscript'&&S.jailUntil<=S.age){
     if(S.jobTier===0){ const p=(0.04+S.smarts*0.0006)*(WAR?0.6:1);
       if(chance(p)){const job=bestJobForTier(1); if(job){S.jobTier=1; S.jobName=job.name; logEv('Subject stumbled into work — '+job.name+' — without much looking. Beginner’s luck, filed as such.',{happiness:2});}} }
@@ -1512,7 +1513,7 @@ function runEconomy(){
     if(S.garnishUntil>S.age) income=Math.round(income*0.6);
     if(typeof medicalWorkPenalty==='function'){ const medicalPenalty=medicalWorkPenalty(S); if(medicalPenalty) income=Math.round(income*Math.max(.55,1-medicalPenalty*.14)); }
     if(typeof WorldGameplay==='object'&&WorldGameplay&&typeof WorldGameplay.adjustPaidIncome==='function') income=WorldGameplay.adjustPaidIncome(income,S);
-    S.assets+=income; }
+    S.__worldWagePaid=Math.max(0,Math.round(income)); S.__worldWagePaidYear=y; S.assets+=income; }
   if(S.jailUntil<=S.age) runBudget(WAR);
   if(S.jailUntil>S.age){ S.assets-=200; }
   if(WAR&&!S.warned['war'+(y>=1939?'2':'1')]){S.warned['war'+(y>=1939?'2':'1')]=1; logEv('Ration books were issued. Subject’s butter became a rumor.',{happiness:-2});}
@@ -2225,7 +2226,7 @@ function advanceYear(suppressBurst,quiet){
   // every existing yearly call remains in its original order after this point.
   if(typeof WorldSimulation==='object'&&WorldSimulation&&typeof WorldSimulation.tick==='function') WorldSimulation.tick(World,{random:Random,year:World.year});
   if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.tick==='function'){
-    NpcSystem.tick(World,{year:World.year,subject:S,lineage:Lineage});
+    NpcSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,deferHousehold:true});
     const npcNotices=typeof NpcSystem.drainNotices==='function'?NpcSystem.drainNotices(World):[];
     npcNotices.slice(0,4).forEach(notice=>{
       const cls=notice.type==='death'?'crisis':'milestone';
@@ -2234,7 +2235,11 @@ function advanceYear(suppressBurst,quiet){
     if(npcNotices.length>4) logEv((npcNotices.length-4)+' other connected-life changes were filed in summary.',{},'milestone','HOUSEHOLD FILE · YEAR '+S.age);
   }
   resolveTravel(); runHoldTick(); snd('stamp'); shake(); window.C={};
-  runFollowups(); runHistory(); runMilestones(); runEconomy(); runPersonalYearTick();
+  runFollowups(); runHistory(); runMilestones(); runEconomy();
+  if(typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.tick==='function') HouseholdSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,subjectIncome:S.__worldWagePaid}).forEach(notice=>{
+    if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.noticeText==='function') logEv('CONNECTED LIFE. '+NpcSystem.noticeText(World,notice),{},'milestone','HOUSEHOLD FILE Â· YEAR '+S.age);
+  });
+  runPersonalYearTick();
   if(S.jobTier===0&&S.age>=16&&S.age<65) rollJobVacancies();
   const __newStage=stageForAge(S.age);
   if(__newStage!==S.stage){ S.stage=__newStage; queueChapterCard(__newStage); renderStage(); }

@@ -222,6 +222,7 @@ function resolveTravel(){
   if(!World.map.visitedSettlementIds.includes(to.id)) World.map.visitedSettlementIds.push(to.id);
   if(!World.map.discoveredSettlementIds.includes(to.id)) World.map.discoveredSettlementIds.push(to.id);
   S.place=to.name; S.location={settlementId:to.id,buildingId:World.activeBuildingId};
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.syncAfterTravel==='function') NpcSystem.syncAfterTravel(World,S,Lineage,to.id);
   if(typeof ensureEducationState==='function'){
     ensureEducationState(S);
     S.residenceSettlementId=to.id;

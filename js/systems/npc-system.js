@@ -92,7 +92,14 @@
 
   function upsert(world,input){
     const npcs=ensure(world), normalized=normalize(input,world), existing=npcs[normalized.id];
-    npcs[normalized.id]=normalize(existing?Object.assign(existing,normalized):normalized,world);
+    const merged=existing?Object.assign(existing,normalized):normalized;
+    if(existing&&existing.alive===false){
+      merged.alive=false;
+      merged.deathYear=existing.deathYear||merged.deathYear;
+      merged.deathCause=existing.deathCause||merged.deathCause;
+      merged.employment=Object.assign({},merged.employment,{status:'deceased',income:0});
+    }
+    npcs[normalized.id]=normalize(merged,world);
     trim(world);
     return npcs[normalized.id];
   }
@@ -121,6 +128,26 @@
   }
 
   function stream(world,year,id,subsystem){ return root.Random.create([world.seed,year,id,subsystem].join('|')); }
+
+  function detachPartner(world,npc){
+    if(!npc) return;
+    const partner=world&&world.npcs&&npc.partnerId&&world.npcs[npc.partnerId];
+    npc.partnerId=null;
+    if(partner&&partner.partnerId===npc.id) partner.partnerId=null;
+  }
+
+  function repairPartnerLinks(world){
+    const npcs=world&&world.npcs||{};
+    Object.values(npcs).forEach(npc=>{
+      if(!npc) return;
+      if(npc.alive===false){ detachPartner(world,npc); return; }
+      if(!npc.partnerId) return;
+      const partner=npcs[npc.partnerId];
+      if(!partner||partner.alive===false||partner.id===npc.id){ npc.partnerId=null; return; }
+      if(!partner.partnerId) partner.partnerId=npc.id;
+      else if(partner.partnerId!==npc.id) npc.partnerId=null;
+    });
+  }
 
   function subjectRecord(world,subject){
     if(!subject) return null;
@@ -266,16 +293,17 @@
     });
     npc.roleTags=roleSet([contact.role||'friend','associate']);
     if(subject){
+      const subjectNpc=world.npcs[subject.npcId];
       const rel=relationship(npc,subject.npcId,{closeness:finite(contact.mood,60),trust:finite(contact.fidelity,50),conflict:Math.max(0,50-finite(contact.mood,60))});
       rel.closeness=clamp(finite(contact.mood,rel.closeness));
       rel.trust=clamp(finite(contact.fidelity,rel.trust));
       rel.conflict=clamp(Math.max(0,50-finite(contact.mood,60)));
-      if(contact.role==='partner'||contact.role==='spouse'){
+      if((contact.role==='partner'||contact.role==='spouse')&&npc.alive!==false&&subjectNpc&&subjectNpc.alive!==false){
         if(npc.partnerId&&npc.partnerId!==subject.npcId&&world.npcs[npc.partnerId]) world.npcs[npc.partnerId].partnerId=null;
         npc.partnerId=subject.npcId;
         const subjectNpc=world.npcs[subject.npcId];
         if(subjectNpc) subjectNpc.partnerId=npc.id;
-      }
+      } else if(npc.alive===false) detachPartner(world,npc);
     }
     registerContactSpouse(world,subject,contact,npc);
     return npc;
@@ -318,8 +346,9 @@
 
   function activePartnerNpc(world,subject){
     if(!subject||!Array.isArray(subject.contacts)) return null;
-    const contact=subject.contacts.find(item=>item&&(item.role==='partner'||item.role==='spouse'));
-    return contact?registerContact(world,subject,contact):null;
+    const contact=subject.contacts.find(item=>item&&item.alive!==false&&(item.role==='partner'||item.role==='spouse'));
+    const npc=contact?registerContact(world,subject,contact):null;
+    return npc&&npc.alive!==false?npc:null;
   }
 
   function childNpcs(world,subject,lineage){
@@ -344,8 +373,8 @@
     if(partner&&(subject.married||subject.status==='Attached')) root.HouseholdSystem.addMember(world,target.id,partner.id,false);
     children.forEach(child=>root.HouseholdSystem.addMember(world,target.id,child.id,true));
     if(!partner){
-      Object.values(world.npcs).filter(npc=>npc.partnerId===subject.npcId&&!npc.isSubject).forEach(npc=>{
-        npc.partnerId=null;
+      Object.values(world.npcs).filter(npc=>npc.partnerId===subject.npcId&&!npc.isSubject&&npc.alive!==false).forEach(npc=>{
+        detachPartner(world,npc);
         root.HouseholdSystem.removeMember(world,target.id,npc.id);
         if(!root.HouseholdSystem.findByMember(world,npc.id)) root.HouseholdSystem.create(world,{settlementId:npc.locationId,memberIds:[npc.id],dependentIds:[],origin:'separation'});
       });
@@ -395,7 +424,13 @@
       contact.mood=clamp(rel?rel.closeness:contact.mood);
       contact.locationId=npc.locationId;
       contact.health=npc.health.general;
-      if(npc.alive===false) contact.deathYear=npc.deathYear;
+      if(npc.alive===false){
+        contact.deathYear=npc.deathYear;
+        if(contact.role==='partner'||contact.role==='spouse'){
+          contact.role='ex';
+          if(subject.partner===contact.name||subject.married){ subject.married=false;subject.status='Widowed';subject.partner=null;subject.partnerMood=0; }
+        }
+      }
     });
     const active=world.npcs[subjectId];
     if(active){active.health.general=clamp(subject.health);active.wealth.cash=Math.round(finite(subject.assets,0));active.locationId=subject.location&&subject.location.settlementId||world.activeSettlementId;active.alive=subject.alive!==false;}
@@ -410,12 +445,7 @@
     const deceasedSnapshots=Object.values(world.npcs).filter(npc=>npc&&npc.alive===false).map(npc=>({id:npc.id,snapshot:JSON.stringify(npc)}));
     if(subject) syncLegacyToRegistry(world,subject,lineage);
     deceasedSnapshots.forEach(item=>{if(world.npcs[item.id]) Object.assign(world.npcs[item.id],JSON.parse(item.snapshot));});
-    Object.values(world.npcs).forEach(npc=>{
-      if(!npc||!npc.partnerId) return;
-      const partner=world.npcs[npc.partnerId];
-      if(!partner) npc.partnerId=null;
-      else partner.partnerId=npc.id;
-    });
+    repairPartnerLinks(world);
     if(root.HouseholdSystem) root.HouseholdSystem.reconcile(world,subject||null);
     world.npcSchemaVersion=SCHEMA_VERSION;
     return world.npcs;
@@ -512,7 +542,7 @@
     npc.alive=false;npc.deathYear=year;npc.deathCause=cause||'natural causes';npc.health.general=0;
     npc.employment.status='deceased';npc.employment.income=0;
     historyPush(npc,{year,type:'death',summary:'Died: '+npc.deathCause+'.'});
-    if(npc.partnerId&&world.npcs[npc.partnerId]) world.npcs[npc.partnerId].partnerId=null;
+    detachPartner(world,npc);
     notices.push({type:'death',npcId:npc.id,name:fullName(npc),cause:npc.deathCause});
     return true;
   }
@@ -587,16 +617,11 @@
       if(rng.chance(mortalityProbability(npc,age,runtime))) markDeath(world,npc,year,age<1?'infant illness':healthPressure(runtime)>.55?'illness during a healthcare crisis':'natural causes',notices);
     });
     autonomousFamilyTransitions(world,year,notices);
-    if(root.HouseholdSystem){
+    if(root.HouseholdSystem&&!ctx.deferHousehold){
       root.HouseholdSystem.tick(world,{year,subject,lineage}).forEach(notice=>notices.push(notice));
     }
     if(root.RelationshipMemory) root.RelationshipMemory.tick(world,year);
-    Object.values(world.npcs).forEach(npc=>{
-      if(!npc||!npc.partnerId) return;
-      const partner=world.npcs[npc.partnerId];
-      if(!partner) npc.partnerId=null;
-      else partner.partnerId=npc.id;
-    });
+    repairPartnerLinks(world);
     world.npcNotices.push(...notices);
     if(world.npcNotices.length>120) world.npcNotices=world.npcNotices.slice(-120);
     world.npcLastTickYear=year;
@@ -616,12 +641,43 @@
     syncRegistryToLegacy(world,subject,lineage);
   }
 
+  function markNpcDeath(world,npc,year,cause,notices){
+    ensure(world);
+    const result=markDeath(world,npc,Number(year)||Number(world.year)||0,cause,notices||world.npcNotices);
+    repairPartnerLinks(world);
+    return result;
+  }
+
   function markSubjectDeath(world,subject,lineage){
     if(!world||!subject) return null;
     migrate(world,subject,lineage);
     const npc=world.npcs[subject.npcId];
-    if(npc){npc.alive=false;npc.deathYear=Number(world.year)||subject.dob+subject.age;npc.deathCause=subject.cause||'recorded death';npc.health.general=0;npc.employment.status='deceased';npc.employment.income=0;historyPush(npc,{year:npc.deathYear,type:'death',summary:'Subject file closed: '+npc.deathCause+'.'});}
+    if(npc){npc.alive=false;npc.deathYear=Number(world.year)||subject.dob+subject.age;npc.deathCause=subject.cause||'recorded death';npc.health.general=0;npc.employment.status='deceased';npc.employment.income=0;historyPush(npc,{year:npc.deathYear,type:'death',summary:'Subject file closed: '+npc.deathCause+'.'});detachPartner(world,npc);}
+    repairPartnerLinks(world);
     return npc;
+  }
+
+  function syncAfterTravel(world,subject,lineage,destinationId){
+    ensure(world);
+    if(!root.HouseholdSystem||!subject||!subject.npcId||subject.alive===false) return null;
+    const settlementId=String(destinationId||subject.location&&subject.location.settlementId||world.activeSettlementId||'');
+    let household=root.HouseholdSystem.findByMember(world,subject.npcId);
+    if(!household) household=root.HouseholdSystem.create(world,{settlementId,memberIds:[subject.npcId],dependentIds:[],origin:'travel-repair'});
+    household.settlementId=settlementId;
+    household.lastMoveYear=Number(world.year)||0;
+    const subjectNpc=world.npcs[subject.npcId];
+    if(subjectNpc){subjectNpc.locationId=settlementId;subjectNpc.householdId=household.id;}
+    syncLegacyToRegistry(world,subject,lineage);
+    household=root.HouseholdSystem.findByMember(world,subject.npcId)||household;
+    household.settlementId=settlementId;
+    household.memberIds.forEach(id=>{
+      const npc=world.npcs[id];
+      if(npc&&npc.alive!==false) npc.locationId=settlementId;
+    });
+    root.HouseholdSystem.reconcile(world,subject);
+    repairPartnerLinks(world);
+    syncRegistryToLegacy(world,subject,lineage);
+    return household;
   }
 
   function promoteSubject(world,subject,member,lineage,previousSubjectId){
@@ -709,8 +765,10 @@
     registerContact,
     registerKinNow,
     markLegacyKinDeath,
+    markNpcDeath,
     markSubjectDeath,
     promoteSubject,
+    syncAfterTravel,
     syncLegacy,
     syncLegacyToRegistry,
     syncRegistryToLegacy,

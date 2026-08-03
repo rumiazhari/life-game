@@ -80,6 +80,27 @@ test('deceased NPCs stop receiving normal employment',()=>{
   assert.equal(result.violations.length,0);
 });
 
+test('partnered death clears both links and allows later widowhood transition',()=>{
+  const context=newContext('partnered-death');
+  const result=JSON.parse(expose(context,`(function(){
+    S.age=32; World.year=S.dob+S.age; S.livingAtHome=false; S.married=true; S.status='Married';
+    const partner=makeContact(S.sex==='M'?'F':'M'); partner.role='spouse'; partner.npcMarried=false; partner.npcSpouseName=null; partner.npcSpouseTemperament=null; S.contacts.push(partner); syncPartnerMirror();
+    const deceased=World.npcs[partner.npcId]; const survivor=World.npcs[S.npcId];
+    NpcSystem.markNpcDeath(World,deceased,World.year,'deterministic partnered death',[]); NpcSystem.syncRegistryToLegacy(World,S,Lineage); NpcSystem.syncLegacy(World,S,Lineage);
+    const afterDeath={deceased:deceased.partnerId,survivor:survivor.partnerId,status:S.status,role:partner.role};
+    const next=makeContact(S.sex==='M'?'F':'M'); next.role='partner'; next.npcMarried=false; next.npcSpouseName=null; next.npcSpouseTemperament=null; S.contacts.push(next); S.married=true; S.status='Attached'; syncPartnerMirror();
+    return JSON.stringify({afterDeath,nextId:next.npcId,subjectId:S.npcId,nextPartner:World.npcs[next.npcId]&&World.npcs[next.npcId].partnerId,subjectPartner:survivor.partnerId,violations:NpcSystem.checkInvariants(World,S,Lineage)});
+  })()`));
+  assert.equal(result.afterDeath.deceased,null);
+  assert.equal(result.afterDeath.survivor,null);
+  assert.equal(result.afterDeath.status,'Widowed');
+  assert.equal(result.afterDeath.role,'ex');
+  assert.ok(result.nextPartner);
+  assert.equal(result.nextPartner,result.subjectId);
+  assert.equal(result.subjectPartner,result.nextId);
+  assert.equal(result.violations.length,0);
+});
+
 test('a 100-year persistent NPC simulation remains finite and bounded',()=>{
   const context=newContext('npc-century');
   const result=JSON.parse(expose(context,`(function(){
