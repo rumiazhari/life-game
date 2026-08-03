@@ -216,18 +216,17 @@ function renderInventory(){
   if(S.kids>0){ const care=currentChildcare();
     h+='<div class="frow"><span class="flabel">DEPENDENTS</span><span class="fval">'+care.icon+' '+care.name+' · '+money(care.costPerKid)+'/yr × '+S.kids+'</span></div>';
     h+='<div class="hh-risk">'+fxSummary(care.fx)+' · '+care.risk+'</div>'; }
-  const totalOutlay=house.rent+food.cost+(S.kids>0?currentChildcare().costPerKid*S.kids:0)+S.liabilities.reduce((a,l)=>a+l.annualPayment,0);
   const subjectHousehold=typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.findByMember==='function'?HouseholdSystem.findByMember(World,S.npcId):null;
-  const additionalHouseholdCosts=subjectHousehold&&subjectHousehold.finances?Math.max(0,Number(subjectHousehold.finances.memberExpenses)||0):0;
-  const projectedHouseholdOutlay=totalOutlay+additionalHouseholdCosts;
+  const outlay=typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.estimateOutlay==='function'?HouseholdSystem.estimateOutlay(World,subjectHousehold,S,{year:currentYear()}):{personalLifestyleOutlay:0,additionalHouseholdCosts:0,projectedTotalOutlay:0};
   h+='<div class="sec-h">LIABILITIES <span>'+(S.liabilities.length||'NONE')+'</span></div>';
   if(S.liabilities.length){
     S.liabilities.forEach(l=>{ h+='<div class="arow"><div class="ar-grade">'+l.icon+'</div><div style="flex:1"><div class="ar-name">'+l.name+'</div><div class="ar-meta">'+money(l.annualPayment)+'/yr · '+l.yearsLeft+'y remaining</div></div></div>'; });
   } else {
     h+='<div class="aempty">No debts on file.</div>';
   }
-  h+='<div class="frow moneyrow hotspot" data-hotspot="outlay"><span class="flabel">ANNUAL OUTLAY</span><span class="fval big">'+money(totalOutlay)+'</span></div>';
-  if(additionalHouseholdCosts>0) h+='<div class="frow moneyrow"><span class="flabel">PROJECTED HOUSEHOLD OUTLAY</span><span class="fval big">'+money(projectedHouseholdOutlay)+'</span></div><div class="hh-risk">Includes '+money(additionalHouseholdCosts)+' in additional living-member and medical costs.</div>';
+  h+='<div class="frow moneyrow hotspot" data-hotspot="outlay"><span class="flabel">PERSONAL LIFESTYLE OUTLAY</span><span class="fval big">'+money(outlay.personalLifestyleOutlay)+'</span></div>';
+  h+='<div class="frow moneyrow"><span class="flabel">ADDITIONAL HOUSEHOLD COSTS</span><span class="fval big">'+money(outlay.additionalHouseholdCosts)+'</span></div>';
+  h+='<div class="frow moneyrow"><span class="flabel">PROJECTED TOTAL OUTLAY</span><span class="fval big">'+money(outlay.projectedTotalOutlay)+'</span></div>';
   h+='<button class="btn small" id="invOpenMedical" style="width:100%;margin-top:8px">Open Medical File ▸</button>';
   h+='<button class="btn small" id="invOpenHousehold" style="width:100%;margin-top:8px">Manage the Household ▸</button>';
   el.innerHTML=standing+h;
@@ -1595,10 +1594,9 @@ function runBudget(WAR){
   applyAmbient(house.fx,childScale); applyAmbient(food.fx,childScale);
   if(S.kids>0){ applyAmbient(currentChildcare().fx,childScale); }
   if(atHome) return;
-  let outlay=house.rent+food.cost;
-  if(S.kids>0) outlay+=currentChildcare().costPerKid*S.kids;
-  S.liabilities.forEach(l=>{ outlay+=l.annualPayment; });
-  if(WAR) outlay=Math.round(outlay*1.15);
+  const household=typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.findByMember==='function'?HouseholdSystem.findByMember(World,S.npcId):null;
+  const projection=typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.estimateOutlay==='function'?HouseholdSystem.estimateOutlay(World,household,S,{year:currentYear()}):null;
+  const outlay=projection?projection.personalLifestyleOutlay:Math.round((house.rent+food.cost+(S.kids>0?currentChildcare().costPerKid*S.kids:0)+S.liabilities.reduce((sum,l)=>sum+l.annualPayment,0))*(WAR?1.15:1));
   S.__householdSubjectExpensesPaid=Math.round(outlay);
   S.assets-=outlay;
   S.liabilities.forEach(l=>{ l.yearsLeft--; });
@@ -2242,7 +2240,7 @@ function advanceYear(suppressBurst,quiet){
   }
   resolveTravel(); runHoldTick(); snd('stamp'); shake(); window.C={};
   runFollowups(); runHistory(); runMilestones(); runEconomy();
-  if(typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.tick==='function') HouseholdSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,subjectIncome:S.__worldWagePaid,subjectAssetsBefore:S.__householdAssetsBeforeEconomy,subjectExpensesPaid:S.__householdSubjectExpensesPaid,subjectEconomySettled:true}).forEach(notice=>{
+  if(typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.tick==='function') HouseholdSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,subjectIncome:S.__worldWagePaid,subjectAssetsBefore:S.__householdAssetsBeforeEconomy,subjectAssetsAfterEconomy:S.assets,subjectExpensesPaid:S.__householdSubjectExpensesPaid,subjectEconomySettled:true}).forEach(notice=>{
     if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.noticeText==='function') logEv('CONNECTED LIFE. '+NpcSystem.noticeText(World,notice),{},'milestone','HOUSEHOLD FILE · YEAR '+S.age);
   });
   runPersonalYearTick();

@@ -28,7 +28,7 @@
   }
 
   function defaultFinances(){
-    return {income:0,expenses:0,savings:0,debt:0,lastBalance:0,subjectIncome:0,otherMemberIncome:0,otherMemberGrossIncome:0,otherSubjectCashFlow:0,subjectExpenses:0,memberExpenses:0,sharedContributions:0,personalAssetChange:0,npcPersonalWealthChange:0,personalAssetsUsed:0,savingsUsed:0,householdDebtRepaid:0,newHouseholdDebt:0,sharedSavingsAdded:0,sharedSavingsChange:0,householdDebtChange:0,accountingIdentity:0,expenseBreakdown:{}};
+    return {income:0,expenses:0,savings:0,debt:0,lastBalance:0,subjectIncome:0,otherMemberIncome:0,otherMemberGrossIncome:0,otherMemberPersonalExpenses:0,otherSubjectCashFlow:0,subjectExpenses:0,memberExpenses:0,sharedContributions:0,personalAssetChange:0,npcPersonalWealthChange:0,personalAssetsUsed:0,savingsUsed:0,householdDebtRepaid:0,newHouseholdDebt:0,sharedSavingsAdded:0,sharedSavingsChange:0,householdDebtChange:0,accountingIdentity:0,expenseBreakdown:{}};
   }
 
   function normalize(household,world){
@@ -44,7 +44,7 @@
     out.housing.quality=clamp(out.housing.quality==null?.5:out.housing.quality);
     out.housing.rooms=Math.max(1,integer(out.housing.rooms||1));
     out.finances=Object.assign(defaultFinances(),out.finances||{});
-    ['income','expenses','savings','debt','lastBalance','subjectIncome','otherMemberIncome','otherMemberGrossIncome','otherSubjectCashFlow','subjectExpenses','memberExpenses','sharedContributions','personalAssetChange','npcPersonalWealthChange','personalAssetsUsed','savingsUsed','householdDebtRepaid','newHouseholdDebt','sharedSavingsAdded','sharedSavingsChange','householdDebtChange','accountingIdentity'].forEach(key=>{out.finances[key]=finite(out.finances[key],0);});
+    ['income','expenses','savings','debt','lastBalance','subjectIncome','otherMemberIncome','otherMemberGrossIncome','otherMemberPersonalExpenses','otherSubjectCashFlow','subjectExpenses','memberExpenses','sharedContributions','personalAssetChange','npcPersonalWealthChange','personalAssetsUsed','savingsUsed','householdDebtRepaid','newHouseholdDebt','sharedSavingsAdded','sharedSavingsChange','householdDebtChange','accountingIdentity'].forEach(key=>{out.finances[key]=finite(out.finances[key],0);});
     out.finances.expenseBreakdown=out.finances.expenseBreakdown&&typeof out.finances.expenseBreakdown==='object'?out.finances.expenseBreakdown:{};
     out.finances.debt=Math.max(0,out.finances.debt);
     out.socialClass=String(out.socialClass||'working');
@@ -146,9 +146,9 @@
     return 'destitute';
   }
 
-  function baseLifestyle(world,subject,year){
+  function baseLifestyle(world,subject,year,settlementId){
     if(!subject||subject.age<16||subject.livingAtHome) return {housing:0,food:0,childcare:0,debt:0,total:0};
-    const settlement=world&&world.settlements&&world.settlements[subject.location&&subject.location.settlementId||world.activeSettlementId];
+    const settlement=world&&world.settlements&&world.settlements[settlementId||subject.location&&subject.location.settlementId||world.activeSettlementId];
     const economy=settlement&&settlement.economy||{};
     const housingFn=typeof root.currentHousing==='function'?root.currentHousing:(typeof currentHousing==='function'?currentHousing:null);
     const foodFn=typeof root.currentFood==='function'?root.currentFood:(typeof currentFood==='function'?currentFood:null);
@@ -164,24 +164,39 @@
     return {housing:housingCost,food:foodCost,childcare:Math.round(childcareCost),debt:Math.round(debtCost),total:Math.round(housingCost+foodCost+childcareCost+debtCost)};
   }
 
-  function expenseModel(world,household,subject,memberNpcs,runtime){
-    const subjectPresent=!!(subject&&subject.npcId&&household.memberIds.includes(subject.npcId)&&subject.alive!==false);
+  function wartime(year){ return (year>=1914&&year<=1918)||(year>=1939&&year<=1945); }
+
+  function estimateOutlay(world,household,subject,options){
+    const year=Number(options&&options.year)||Number(world&&world.year)||0;
+    const activeHousehold=household||findByMember(world,subject&&subject.npcId);
+    if(!activeHousehold) return {personalLifestyleOutlay:0,additionalHouseholdCosts:0,projectedTotalOutlay:0,livingMemberCosts:0,healthcareCosts:0,breakdown:{rent:0,food:0,childcare:0,medical:0,debt:0,memberIncrement:0,wartimeSurcharge:0}};
+    const runtime=settlementRuntime(world,activeHousehold.settlementId);
+    const memberNpcs=activeHousehold.memberIds.map(id=>livingNpc(world,id)).filter(Boolean);
+    const subjectPresent=!!(subject&&subject.npcId&&activeHousehold.memberIds.includes(subject.npcId)&&subject.alive!==false);
     if(!subjectPresent){
       const economy=runtime&&runtime.economy||{}, foodIndex=finite(economy.foodPriceIndex,1), rentIndex=finite(economy.rentIndex,1);
-      const dependents=household.dependentIds.filter(id=>!!livingMember(world,id,subject)).length;
+      const dependents=activeHousehold.dependentIds.filter(id=>!!livingMember(world,id,subject)).length;
       const people=Math.max(1,memberNpcs.length);
-      const rent=Math.round((220+household.housing.rooms*95)*rentIndex);
+      const rent=Math.round((220+activeHousehold.housing.rooms*95)*rentIndex);
       const food=Math.round((110*people+35*dependents)*foodIndex);
       const healthcare=Math.round(90*healthPressure(runtime)*people);
-      return {subjectExpenses:0,memberExpenses:rent+food+healthcare,breakdown:{rent,food,childcare:0,medical:healthcare,debt:0,memberIncrement:0}};
+      return {personalLifestyleOutlay:0,additionalHouseholdCosts:rent+food+healthcare,projectedTotalOutlay:rent+food+healthcare,livingMemberCosts:rent+food,healthcareCosts:healthcare,breakdown:{rent,food,childcare:0,medical:healthcare,debt:0,memberIncrement:0,wartimeSurcharge:0}};
     }
-    const lifestyle=baseLifestyle(world,subject,Number(world.year)||0);
+    const lifestyle=baseLifestyle(world,subject,year,activeHousehold.settlementId);
+    const surcharge=wartime(year)?Math.round(lifestyle.total*.15):0;
     const economy=runtime&&runtime.economy||{}, foodIndex=finite(economy.foodPriceIndex,1);
-    const livingOtherAdults=memberNpcs.filter(npc=>npc.id!==subject.npcId&&npc.alive!==false&&!household.dependentIds.includes(npc.id)).length;
-    const livingDependents=household.dependentIds.filter(id=>id!==subject.npcId&&!!livingMember(world,id,subject)).length;
+    const livingOtherAdults=memberNpcs.filter(npc=>npc.id!==subject.npcId&&npc.alive!==false&&!activeHousehold.dependentIds.includes(npc.id)).length;
+    const livingDependents=activeHousehold.dependentIds.filter(id=>id!==subject.npcId&&!!livingMember(world,id,subject)).length;
     const memberIncrement=Math.round((110*livingOtherAdults+35*livingDependents)*foodIndex);
     const healthcare=Math.round(90*healthPressure(runtime)*Math.max(1,memberNpcs.length+1));
-    return {subjectExpenses:lifestyle.total,memberExpenses:memberIncrement+healthcare,breakdown:{rent:lifestyle.housing,food:lifestyle.food,childcare:lifestyle.childcare,medical:healthcare,debt:lifestyle.debt,memberIncrement}};
+    const personalLifestyleOutlay=lifestyle.total+surcharge;
+    const additionalHouseholdCosts=memberIncrement+healthcare;
+    return {personalLifestyleOutlay,additionalHouseholdCosts,projectedTotalOutlay:personalLifestyleOutlay+additionalHouseholdCosts,livingMemberCosts:memberIncrement,healthcareCosts:healthcare,breakdown:{rent:lifestyle.housing,food:lifestyle.food,childcare:lifestyle.childcare,medical:healthcare,debt:lifestyle.debt,memberIncrement,wartimeSurcharge:surcharge}};
+  }
+
+  function expenseModel(world,household,subject,memberNpcs,runtime){
+    const estimate=estimateOutlay(world,household,subject,{year:world&&world.year});
+    return {subjectExpenses:estimate.personalLifestyleOutlay,memberExpenses:estimate.additionalHouseholdCosts,breakdown:estimate.breakdown};
   }
 
   function memberContribution(npc,year){
@@ -278,10 +293,12 @@
       const memberIncome=employed.map(npc=>memberContribution(npc,year));
       const otherMemberIncome=memberIncome.reduce((sum,item)=>sum+item.contribution,0);
       const otherMemberGrossIncome=memberIncome.reduce((sum,item)=>sum+item.gross,0);
-      const income=otherMemberIncome+subjectIncome;
+      const economyAssetChange=subjectMember&&ctx.subjectEconomySettled?Math.round(finite(ctx.subjectAssetsAfterEconomy,finite(subject.assets,0))-finite(ctx.subjectAssetsBefore,finite(subject.assets,0))):0;
       const model=expenseModel(world,household,subject,memberNpcs,runtime);
       const subjectExpenses=subjectMember&&ctx.subjectEconomySettled&&ctx.subjectExpensesPaid!=null?Math.max(0,Math.round(finite(ctx.subjectExpensesPaid,model.subjectExpenses))):model.subjectExpenses;
       const expenses=subjectExpenses+model.memberExpenses;
+      const otherSubjectCashFlow=subjectMember&&ctx.subjectEconomySettled?Math.round(economyAssetChange-subjectIncome+subjectExpenses):0;
+      const income=otherMemberIncome+subjectIncome+otherSubjectCashFlow;
       const startingSavings=Math.max(0,Math.round(finite(household.finances.savings,0)));
       const startingDebt=Math.max(0,Math.round(finite(household.finances.debt,0)));
       const subjectAssetsBefore=subjectMember?finite(ctx.subjectAssetsBefore,finite(subject.assets,0)):0;
@@ -312,22 +329,24 @@
       const endingDebt=Math.max(0,startingDebt-householdDebtRepaid+newHouseholdDebt);
       const personalAssetChange=subjectMember?Math.round(finite(subject.assets,0)-subjectAssetsBefore):0;
       const npcPersonalWealthChange=memberNpcs.reduce((sum,npc)=>sum+(Number(npc.__householdPersonalWealthChangeYear)===year?finite(npc.__householdPersonalWealthChange,0):0),0);
+      const otherMemberPersonalExpenses=memberNpcs.reduce((sum,npc)=>sum+(Number(npc.__householdPersonalExpensesYear)===year?finite(npc.__householdPersonalExpenses,0):0),0);
       const sharedSavingsChange=sharedSavingsAdded-savingsUsed;
       const householdDebtChange=newHouseholdDebt-householdDebtRepaid;
       const balance=income-expenses;
-      const accountingIdentity=personalAssetChange+sharedSavingsChange-householdDebtChange+npcPersonalWealthChange;
+      const accountingIdentity=personalAssetChange+sharedSavingsChange-householdDebtChange;
       household.finances.income=income;
       household.finances.expenses=expenses;
       household.finances.lastBalance=balance;
       household.finances.subjectIncome=subjectIncome;
       household.finances.otherMemberIncome=otherMemberIncome;
       household.finances.otherMemberGrossIncome=otherMemberGrossIncome;
-      household.finances.otherSubjectCashFlow=otherMemberIncome;
+      household.finances.otherSubjectCashFlow=otherSubjectCashFlow;
       household.finances.subjectExpenses=subjectExpenses;
       household.finances.memberExpenses=model.memberExpenses;
       household.finances.sharedContributions=otherMemberIncome;
       household.finances.personalAssetChange=personalAssetChange;
       household.finances.npcPersonalWealthChange=npcPersonalWealthChange;
+      household.finances.otherMemberPersonalExpenses=otherMemberPersonalExpenses;
       household.finances.personalAssetsUsed=personalAssetsUsed;
       household.finances.savingsUsed=savingsUsed;
       household.finances.householdDebtRepaid=householdDebtRepaid;
@@ -363,7 +382,7 @@
       if(h.id!==id) violations.push('household key and id must match for '+id);
       if(!Array.isArray(h.memberIds)||!Array.isArray(h.dependentIds)) violations.push('household '+id+' requires member and dependent arrays');
       ['foodSecurity','stability'].forEach(key=>{if(!Number.isFinite(Number(h[key]))||Number(h[key])<0||Number(h[key])>1) violations.push('household '+id+' '+key+' must be between 0 and 1');});
-      ['income','expenses','savings','debt','lastBalance','subjectIncome','otherMemberIncome','otherMemberGrossIncome','otherSubjectCashFlow','subjectExpenses','memberExpenses','sharedContributions','personalAssetChange','npcPersonalWealthChange','personalAssetsUsed','savingsUsed','householdDebtRepaid','newHouseholdDebt','sharedSavingsAdded','sharedSavingsChange','householdDebtChange','accountingIdentity'].forEach(key=>{if(!Number.isFinite(Number(h.finances&&h.finances[key]))) violations.push('household '+id+' finances.'+key+' must be finite');});
+      ['income','expenses','savings','debt','lastBalance','subjectIncome','otherMemberIncome','otherMemberGrossIncome','otherMemberPersonalExpenses','otherSubjectCashFlow','subjectExpenses','memberExpenses','sharedContributions','personalAssetChange','npcPersonalWealthChange','personalAssetsUsed','savingsUsed','householdDebtRepaid','newHouseholdDebt','sharedSavingsAdded','sharedSavingsChange','householdDebtChange','accountingIdentity'].forEach(key=>{if(!Number.isFinite(Number(h.finances&&h.finances[key]))) violations.push('household '+id+' finances.'+key+' must be finite');});
       if(h.finances&&Number.isFinite(Number(h.finances.lastBalance))&&Number.isFinite(Number(h.finances.accountingIdentity))&&Math.abs(Number(h.finances.lastBalance)-Number(h.finances.accountingIdentity))>.001) violations.push('household '+id+' accounting identity must balance');
       if(!h.finances||!h.finances.expenseBreakdown||typeof h.finances.expenseBreakdown!=='object') violations.push('household '+id+' finances.expenseBreakdown must be an object');
       (h.memberIds||[]).forEach(memberId=>{
@@ -395,6 +414,7 @@
     move,
     reconcile,
     tick,
+    estimateOutlay,
     classify,
     householdAttractiveness,
     checkInvariants

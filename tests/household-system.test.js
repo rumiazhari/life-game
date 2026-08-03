@@ -4,8 +4,8 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const {createWorldContext,expose}=require('./helpers/vm-loader');
 
-function newContext(seed){
-  const context=createWorldContext();
+function newContext(seed,files=[]){
+  const context=createWorldContext(files);
   expose(context,`Random.setSeed(${JSON.stringify(seed)}); newWorld(); newLineage(); newHold(); newSubject();`);
   return context;
 }
@@ -217,6 +217,25 @@ test('employed spouse salary is split between personal expenses and one househol
   assert.equal(result.salary,result.wealthChange+result.contribution+result.personalExpenses);
   assert.ok(result.householdSavings>=0);
   assert.equal(result.identity,result.balance);
+  assert.equal(result.violations.length,0);
+});
+
+test('low-income spouse keeps a negative personal wealth change outside the household balance',()=>{
+  const context=newContext('household-low-income-spouse',['js/systems/persistent-people-ui.js']);
+  const result=JSON.parse(expose(context,`(function(){
+    S.age=30; World.year=S.dob+S.age; S.livingAtHome=false; S.married=true; S.status='Married';
+    const spouse=makeContact(S.sex==='M'?'F':'M'); spouse.role='spouse'; spouse.npcMarried=false; S.contacts.push(spouse); syncPartnerMirror(); NpcSystem.syncLegacy(World,S,Lineage);
+    const household=HouseholdSystem.findByMember(World,S.npcId), npc=World.npcs[spouse.npcId]; npc.employment.status='employed'; npc.employment.income=10; npc.wealth.cash=0; npc.wealth.debt=0;
+    const before=npc.wealth.cash-npc.wealth.debt; NpcSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,deferHousehold:true}); HouseholdSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,subjectIncome:1000}); const after=npc.wealth.cash-npc.wealth.debt;
+    const html=PersistentPeopleUI.householdPanel(World,S);
+    return JSON.stringify({gross:household.finances.otherMemberGrossIncome,personalExpenses:household.finances.otherMemberPersonalExpenses,contribution:household.finances.otherMemberIncome,wealthChange:after-before,reported:household.finances.npcPersonalWealthChange,html,balance:household.finances.lastBalance,identity:household.finances.accountingIdentity,violations:HouseholdSystem.checkInvariants(World,S)});
+  })()`));
+  assert.equal(result.contribution,0);
+  assert.ok(result.wealthChange<0);
+  assert.equal(result.reported,result.wealthChange);
+  assert.equal(result.gross-result.personalExpenses-result.contribution,result.wealthChange);
+  assert.ok(result.html.includes('NPC personal wealth change -$'));
+  assert.equal(result.balance,result.identity);
   assert.equal(result.violations.length,0);
 });
 
