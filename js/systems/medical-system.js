@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 (function(root){
   const SCHEMA_VERSION=2;
   const STATES=new Set(['latent','symptomatic','diagnosed','treated','remission','chronic','resolved']);
