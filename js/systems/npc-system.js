@@ -620,7 +620,7 @@
       npc.wealth.cash=Math.round(finite(npc.wealth.cash,0));npc.wealth.debt=Math.max(0,Math.round(finite(npc.wealth.debt,0)));
       const afterNet=npc.wealth.cash-npc.wealth.debt;
       npc.__householdPersonalWealthChangeYear=year;
-      npc.__householdPersonalWealthChange=contributesThroughHousehold?Math.round(afterNet-beforeNet):0;
+      npc.__householdPersonalWealthChange=contributesThroughHousehold&&balance>=0?Math.round(afterNet-beforeNet):0;
       relationshipTick(world,npc,year);
       if(rng.chance(mortalityProbability(npc,age,runtime))) markDeath(world,npc,year,age<1?'infant illness':healthPressure(runtime)>.55?'illness during a healthcare crisis':'natural causes',notices);
     });

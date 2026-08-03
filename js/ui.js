@@ -217,6 +217,9 @@ function renderInventory(){
     h+='<div class="frow"><span class="flabel">DEPENDENTS</span><span class="fval">'+care.icon+' '+care.name+' · '+money(care.costPerKid)+'/yr × '+S.kids+'</span></div>';
     h+='<div class="hh-risk">'+fxSummary(care.fx)+' · '+care.risk+'</div>'; }
   const totalOutlay=house.rent+food.cost+(S.kids>0?currentChildcare().costPerKid*S.kids:0)+S.liabilities.reduce((a,l)=>a+l.annualPayment,0);
+  const subjectHousehold=typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.findByMember==='function'?HouseholdSystem.findByMember(World,S.npcId):null;
+  const additionalHouseholdCosts=subjectHousehold&&subjectHousehold.finances?Math.max(0,Number(subjectHousehold.finances.memberExpenses)||0):0;
+  const projectedHouseholdOutlay=totalOutlay+additionalHouseholdCosts;
   h+='<div class="sec-h">LIABILITIES <span>'+(S.liabilities.length||'NONE')+'</span></div>';
   if(S.liabilities.length){
     S.liabilities.forEach(l=>{ h+='<div class="arow"><div class="ar-grade">'+l.icon+'</div><div style="flex:1"><div class="ar-name">'+l.name+'</div><div class="ar-meta">'+money(l.annualPayment)+'/yr · '+l.yearsLeft+'y remaining</div></div></div>'; });
@@ -224,6 +227,7 @@ function renderInventory(){
     h+='<div class="aempty">No debts on file.</div>';
   }
   h+='<div class="frow moneyrow hotspot" data-hotspot="outlay"><span class="flabel">ANNUAL OUTLAY</span><span class="fval big">'+money(totalOutlay)+'</span></div>';
+  if(additionalHouseholdCosts>0) h+='<div class="frow moneyrow"><span class="flabel">PROJECTED HOUSEHOLD OUTLAY</span><span class="fval big">'+money(projectedHouseholdOutlay)+'</span></div><div class="hh-risk">Includes '+money(additionalHouseholdCosts)+' in additional living-member and medical costs.</div>';
   h+='<button class="btn small" id="invOpenMedical" style="width:100%;margin-top:8px">Open Medical File ▸</button>';
   h+='<button class="btn small" id="invOpenHousehold" style="width:100%;margin-top:8px">Manage the Household ▸</button>';
   el.innerHTML=standing+h;
