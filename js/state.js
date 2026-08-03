@@ -243,10 +243,10 @@ function newHold(){
 
 /* Personal systems intentionally do not depend on Hold enrollment. */
 function baseMedicalState(legacyConditions){
-  return {schemaVersion:1,resilience:50,prevention:{sanitation:0,vaccination:0,screening:0},
+  return {schemaVersion:2,resilience:50,prevention:{sanitation:0,vaccination:0,screening:0},
     conditions:Array.isArray(legacyConditions)?legacyConditions:[],history:[],
     exposure:{currentRisk:0,lastSource:null,lastYear:null},lastCheckupAge:null,lastTreatmentAge:null,
-    yearHoursPenalty:0};
+    lastHealthSource:null,lastHealthAge:null,lastTickYear:null,instanceCounter:0,actionCounter:0,yearHoursPenalty:0};
 }
 function ensurePersonalSystems(s){
   if(!s) return;
