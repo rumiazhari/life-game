@@ -368,7 +368,7 @@ function markSpouseDeath(s,cause){
   if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.markNpcDeath==='function'){
     if(!spouse.npcId&&typeof NpcSystem.registerContact==='function') NpcSystem.registerContact(World,subject,spouse);
     const npc=spouse.npcId&&World.npcs&&World.npcs[spouse.npcId];
-    if(npc) NpcSystem.markNpcDeath(World,npc,year,deathCause,World.npcNotices);
+    if(npc) NpcSystem.markNpcDeath(World,npc,year,deathCause,[]);
     if(npc) npc.partnerId=null;
     Object.values(World.npcs||{}).forEach(candidate=>{
       if(candidate&&candidate.partnerId===spouse.npcId) candidate.partnerId=null;
