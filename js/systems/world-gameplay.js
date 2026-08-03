@@ -51,8 +51,6 @@
     originals.rollJobVacancies=root.rollJobVacancies;
     originals.travelCost=root.travelCost;
     originals.scheduleTravel=root.scheduleTravel;
-    originals.medicalAccessFor=root.medicalAccessFor;
-    originals.medicalExposureRisk=root.medicalExposureRisk;
     originals.medicalStartOutbreak=root.medicalStartOutbreak;
     originals.educationOptionsForStage=root.educationOptionsForStage;
     originals.educationAnnualPayment=root.educationAnnualPayment;
@@ -85,22 +83,6 @@
         subject.traveling.permitRisk=clamp((subject.traveling.permitRisk||0)+pressure*.42,0,.95);
       }
       return result;
-    };
-    if(typeof originals.medicalAccessFor==='function') root.medicalAccessFor=function(subject,context){
-      const access=Object.assign({},originals.medicalAccessFor.apply(this,arguments));
-      const runtime=state(), pressure=healthPressure(runtime);
-      if(!runtime||!access) return access;
-      access.quality=clamp((Number(access.quality)||0)*(1-pressure*.62),.03,1);
-      access.costMultiplier=(Number(access.costMultiplier)||1)*(1+pressure*.9);
-      access.delay=(Number(access.delay)||0)+(pressure>=.4?1:0);
-      access.exposureRisk=clamp(pressure*.55,0,.7);
-      access.healthcarePressure=pressure;
-      return access;
-    };
-    if(typeof originals.medicalExposureRisk==='function') root.medicalExposureRisk=function(subject,conditionId,context){
-      const base=Number(originals.medicalExposureRisk.apply(this,arguments))||0;
-      const runtime=state(), pressure=healthPressure(runtime);
-      return clamp(base+pressure*.12,0,.5);
     };
     if(typeof originals.medicalStartOutbreak==='function') root.medicalStartOutbreak=function(id,severity,years){
       const result=originals.medicalStartOutbreak.apply(this,arguments);
