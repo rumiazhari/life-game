@@ -177,6 +177,7 @@ function newWorld(){
   const homeBuilding=home.buildings.find(b=>b.type==='residence')||home.buildings[0];
   World={year,seed:'karsen:'+year+':'+home.id,simulationSchemaVersion:2,place:home.name,activeSettlementId:home.id,activeBuildingId:homeBuilding.id,map:{discoveredSettlementIds:[home.id],visitedSettlementIds:[home.id],selectedSettlementId:home.id,selectedBuildingId:homeBuilding.id,mode:'national'},publicHealth:{outbreak:null,lastNoticeYear:null,activeSettlementId:home.id},mandate:'continuity'};
   if(typeof WorldSimulation==='object'&&WorldSimulation&&typeof WorldSimulation.initialize==='function') WorldSimulation.initialize(World);
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.migrate==='function') NpcSystem.migrate(World,null,null);
 }
 function currentYear(){ return World?World.year:(S?S.dob+S.age:0); }
 function currentSettlement(){ return World&&World.activeSettlementId?settlementById(World.activeSettlementId):settlementById('branec'); }
@@ -232,7 +233,7 @@ function resolveTravel(){
 function renderMapIfOpen(){ if(typeof renderMap==='function'&&$('#mapWrap')&&!$('#mapWrap').classList.contains('hidden')) renderMap(); }
 function newLineage(){
   Lineage={id:'LINE-'+currentYear()+'-'+String(RI(1,9999)).padStart(4,'0'),name:null,place:World.place,
-    founded:currentYear(),members:[],activeSubjectId:null,generation:1,pastSubjects:[]};
+    founded:currentYear(),members:[],activeSubjectId:null,activeSubjectNpcId:null,generation:1,pastSubjects:[]};
 }
 function newHold(){
   Hold={id:'HOLD-'+currentYear()+'-'+String(RI(1,9999)).padStart(4,'0'),name:null,place:World.place,
@@ -285,7 +286,12 @@ function updatePersonalStanding(){
   S.freedom=clamp(Math.round(88-restriction+Math.min(8,S.bureauFavor*2)),0,100);
 }
 function makeKin(m){ return Object.assign({mid:'K'+Random.next().toString(36).slice(2,9),alive:true,bond:70,holdMember:false,holdLoyalty:0,holdInviteCooldown:0},m); }
-function addKin(m){ const rec=makeKin(m); Lineage.members.push(rec); return rec; }
+function addKin(m){
+  const rec=makeKin(m);
+  Lineage.members.push(rec);
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.registerKinNow==='function') NpcSystem.registerKinNow(World,S,Lineage,rec);
+  return rec;
+}
 function makeHoldMember(m){ return Object.assign({mid:'H'+Random.next().toString(36).slice(2,9),alive:true,loyalty:50,role:'',holdMember:true,holdInviteCooldown:0},m); }
 function addHoldMember(m){ const rec=makeHoldMember(m); Hold.members.push(rec); return rec; }
 function bearChild(){
@@ -301,7 +307,12 @@ function findHoldMember(mid){ return (Hold&&Hold.members.find(m=>m.mid===mid))||
 function holdLoyalty(m){ return m?(m.holdMember&&m.holdLoyalty!=null?m.holdLoyalty:(m.loyalty??50)):0; }
 function changeHoldLoyalty(m,delta){ if(!m) return; if(m.holdMember&&m.holdLoyalty!=null) m.holdLoyalty=clamp(m.holdLoyalty+delta,0,100); else m.loyalty=clamp((m.loyalty||50)+delta,0,100); }
 function enrollKinInHold(m,loyalty){ if(!m) return; m.holdMember=true; m.holdLoyalty=loyalty==null?50:loyalty; }
-function killKin(m){ if(!m||!m.alive) return; m.alive=false; if(m.relation==='child'&&S.kids>0) S.kids--; }
+function killKin(m){
+  if(!m||!m.alive) return;
+  m.alive=false;
+  if(m.relation==='child'&&S.kids>0) S.kids--;
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.markLegacyKinDeath==='function') NpcSystem.markLegacyKinDeath(World,S,Lineage,m);
+}
 function killHoldMember(m){
   if(!m||!m.alive) return;
   if(m.relation==='child'&&Lineage&&Lineage.members.includes(m)){ killKin(m); return; }
@@ -323,13 +334,15 @@ function makeContact(sex,bias){
   const npcMarried=chance(0.3);
   const b=bias||{};
   const rt=(key,def)=>b[key]?RI(b[key][0],b[key][1]):RI(def[0],def[1]);
-  return {cid:'N'+Random.next().toString(36).slice(2,9), name:pick(sex==='M'?MALE:FEMALE)+' '+last, sex,
+  const contact={cid:'N'+Random.next().toString(36).slice(2,9), name:pick(sex==='M'?MALE:FEMALE)+' '+last, sex,
     role:'friend', mood:RI(55,75), metAge:S.age,
     temperament:rt('temperament',[0,100]), fidelity:rt('fidelity',[15,95]), charm:rt('charm',[15,95]),
     kindness:rt('kindness',[5,95]), intellect:rt('intellect',[5,95]),
     npcMarried, npcSpouseName: npcMarried?(pick(sex==='M'?FEMALE:MALE)+' '+pick(LAST)):null,
     npcSpouseTemperament: npcMarried?RI(0,100):null,
     affair:null, reverseAffair:null};
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.registerContact==='function') NpcSystem.registerContact(World,S,contact);
+  return contact;
 }
 function startAffairWith(c,heat){
   if(!S.activeAffairCids) S.activeAffairCids=[];
@@ -342,6 +355,7 @@ function startAffairWith(c,heat){
 function syncPartnerMirror(){
   const p=S.contacts.find(c=>c.role==='partner'||c.role==='spouse');
   S.partner=p?p.name:null; S.partnerMood=p?p.mood:0;
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.syncLegacy==='function') NpcSystem.syncLegacy(World,S,Lineage);
 }
 function activePartnerContact(){ return S.contacts.find(c=>c.role==='partner'||c.role==='spouse')||null; }
 function hasPartner(s){ return !!activePartnerContact(); }
@@ -389,4 +403,7 @@ function newSubject(){
   if(!Lineage.name) Lineage.name='The '+last+' Family';
   Lineage.activeSubjectId=S.id;
   updatePersonalStanding();
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.bootstrapSubject==='function'){
+    NpcSystem.bootstrapSubject(World,S,Lineage,{openingReset:Lineage.generation===1&&(!Lineage.pastSubjects||!Lineage.pastSubjects.length)});
+  }
 }

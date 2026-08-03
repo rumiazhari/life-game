@@ -288,6 +288,9 @@ function renderHousehold(){
   if(!filterCat||filterCat==='housing') h+='<div class="ps-catlab">HOUSING</div><div class="lifegrid">'+lifeToggle(HOUSING,S.lifestyle.housing,'house',it=>it.rent?money(it.rent)+'/yr':'free')+'</div>';
   if(!filterCat||filterCat==='food') h+='<div class="ps-catlab">FOOD</div><div class="lifegrid">'+lifeToggle(FOOD,S.lifestyle.food,'food',it=>money(it.cost)+'/yr')+'</div>';
   if(!filterCat&&S.kids>0) h+='<div class="ps-catlab">CHILDCARE</div><div class="lifegrid">'+lifeToggle(CHILDCARE,S.lifestyle.childcare,'childcare',it=>money(it.costPerKid)+'/yr per kid')+'</div>';
+  if(!filterCat&&typeof PersistentPeopleUI==='object'&&PersistentPeopleUI&&typeof PersistentPeopleUI.householdPanel==='function'){
+    h+=PersistentPeopleUI.householdPanel(World,S);
+  }
   const title=filterCat==='housing'?'HOUSING':filterCat==='food'?'FOOD':'HOUSEHOLD & GROCERIES';
   $('#householdSheet').innerHTML='<div class="ps-head"><span>'+title+'</span><span>FORM H-1</span></div>'+
     '<div class="aempty" style="margin:6px 2px 12px">Standing choices — no hours spent, changed as often as you like. Every rung shows what it costs, and what it does to the subject, every single year.</div>'+
@@ -2221,6 +2224,15 @@ function advanceYear(suppressBurst,quiet){
   // and personal systems. It establishes this year's settlement conditions;
   // every existing yearly call remains in its original order after this point.
   if(typeof WorldSimulation==='object'&&WorldSimulation&&typeof WorldSimulation.tick==='function') WorldSimulation.tick(World,{random:Random,year:World.year});
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.tick==='function'){
+    NpcSystem.tick(World,{year:World.year,subject:S,lineage:Lineage});
+    const npcNotices=typeof NpcSystem.drainNotices==='function'?NpcSystem.drainNotices(World):[];
+    npcNotices.slice(0,4).forEach(notice=>{
+      const cls=notice.type==='death'?'crisis':'milestone';
+      logEv('CONNECTED LIFE. '+NpcSystem.noticeText(World,notice),{},cls,'HOUSEHOLD FILE · YEAR '+S.age);
+    });
+    if(npcNotices.length>4) logEv((npcNotices.length-4)+' other connected-life changes were filed in summary.',{},'milestone','HOUSEHOLD FILE · YEAR '+S.age);
+  }
   resolveTravel(); runHoldTick(); snd('stamp'); shake(); window.C={};
   runFollowups(); runHistory(); runMilestones(); runEconomy(); runPersonalYearTick();
   if(S.jobTier===0&&S.age>=16&&S.age<65) rollJobVacancies();
@@ -2321,6 +2333,7 @@ function showNextToast(){
 function handleDeath(){
   evaluateYearStreak(true);
   const g=grade(), ir=intentResult(), legacy=computeParentingLegacy();
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.markSubjectDeath==='function') NpcSystem.markSubjectDeath(World,S,Lineage);
   Lineage.pastSubjects.push({name:S.first+' '+S.last,dob:S.dob,deathYear:currentYear(),age:S.age,cause:S.cause,grade:g.g,intentName:ir.lab,intentStars:ir.stars,
     parentWarmth:legacy.warmth,parentStability:legacy.stability,parentYears:legacy.years,
     education:S.education?{completed:Object.assign({},S.education.completed||{}),majorId:S.education.majorId||null,certificates:Object.keys(S.education.certificates||{})}:null});
@@ -2329,6 +2342,7 @@ function handleDeath(){
   else { closeFile(); }
 }
 function promoteToLeader(member){
+  const previousSubjectNpcId=S&&S.npcId?S.npcId:null;
   const age=currentYear()-member.dob;
   const inheritedLocation=S&&S.location?Object.assign({},S.location):{settlementId:World.activeSettlementId,buildingId:World.activeBuildingId};
   const departedName=S?(S.first+' '+S.last):null, departedSex=S?S.sex:null;
@@ -2392,6 +2406,7 @@ function promoteToLeader(member){
     S.mother=randomParent('F'); S.father=randomParent('M',member.last);
   }
   Lineage.activeSubjectId=S.id; Lineage.generation++; updatePersonalStanding();
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.promoteSubject==='function') NpcSystem.promoteSubject(World,S,member,Lineage,previousSubjectNpcId);
 }
 function openSuccession(candidates){
   const slip=$('#intentSlip');

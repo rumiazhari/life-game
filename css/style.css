@@ -804,3 +804,29 @@ body{background:var(--olive);color:var(--ink)}
 .slipbtn,.chipbtn,.lifebtn,.household-tile,.autotrain-toggle,.cstamp,.map-tool{transition:background-color .12s,border-color .12s,box-shadow .12s}
 .slipbtn:active,.chipbtn:active,.lifebtn:active,.household-tile:active,.cstamp:active,.map-tool:active{transform:translateY(1px)}
 .btn-plan:active{transform:translateY(1px)}
+/* ================= PHASE 3: PERSISTENT PEOPLE ================= */
+.persistent-household-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px;margin:8px 0 10px;padding:9px 10px;background:rgba(255,255,255,.28);border:1px solid rgba(74,65,50,.16)}
+.persistent-household-summary div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.persistent-household-summary b{font:700 8px 'Archivo';letter-spacing:.1em;color:var(--blue)}
+.persistent-household-summary span{font:11px 'Special Elite';color:#5f4b31;overflow-wrap:anywhere}
+.persistent-household-finance{display:flex;flex-wrap:wrap;gap:5px 8px;margin:0 0 12px}
+.persistent-household-finance span{padding:4px 7px;background:rgba(44,79,143,.08);border:1px solid rgba(44,79,143,.13);font:10px 'Special Elite';color:#58462f}
+.persistent-people-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:7px 0 12px}
+.persistent-person{min-width:0;padding:8px 9px;background:rgba(255,255,255,.24);border-left:3px solid rgba(44,79,143,.55);box-shadow:inset 0 0 0 1px rgba(74,65,50,.1)}
+.persistent-person.is-deceased{opacity:.68;border-left-color:rgba(110,55,45,.55)}
+.persistent-person-head{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.persistent-person-head b{font:700 11px 'Archivo';color:#3f3427;overflow-wrap:anywhere}
+.persistent-person-head span{font:700 7px 'Archivo';letter-spacing:.08em;text-transform:uppercase;color:var(--blue);text-align:right}
+.persistent-person-meta{display:flex;flex-wrap:wrap;gap:3px 7px;margin-top:4px;font:9px 'Special Elite';color:#756044}
+.persistent-person-work,.persistent-person-note{margin-top:4px;font:10px/1.35 'Special Elite';color:#5d4b35;overflow-wrap:anywhere}
+.persistent-person-note{color:#7a4035}
+.persistent-memory-list{display:flex;flex-direction:column;gap:5px;margin:7px 0 12px}
+.persistent-memory-list div{display:grid;grid-template-columns:44px minmax(0,1fr);gap:7px;padding:6px 8px;background:rgba(255,255,255,.22);border-bottom:1px dashed rgba(74,65,50,.22)}
+.persistent-memory-list b{font:700 8px 'Archivo';color:var(--blue)}
+.persistent-memory-list span{font:10px/1.4 'Special Elite';color:#5d4b35;overflow-wrap:anywhere}
+@media(max-width:520px){
+  .persistent-people-grid,.persistent-household-summary{grid-template-columns:1fr}
+  .persistent-person-head{align-items:flex-start}
+  .plansheet,.intentslip,.slipcard{box-sizing:border-box;max-width:100%;overflow-x:hidden}
+  .recent-record-body{white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+}
