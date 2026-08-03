@@ -303,28 +303,23 @@
       const startingDebt=Math.max(0,Math.round(finite(household.finances.debt,0)));
       const subjectAssetsBefore=subjectMember?finite(ctx.subjectAssetsBefore,finite(subject.assets,0)):0;
       if(subjectMember&&!ctx.subjectEconomySettled){ subject.assets=finite(subject.assets,0)+subjectIncome-model.subjectExpenses; }
-      const sharedCoverage=Math.min(otherMemberIncome,model.memberExpenses);
-      const memberDeficit=Math.max(0,model.memberExpenses-sharedCoverage);
       let savingsUsed=0, personalAssetsUsed=0, householdDebtRepaid=0, newHouseholdDebt=0, sharedSavingsAdded=0;
-      let remainingDeficit=memberDeficit;
-      if(remainingDeficit>0){
-        savingsUsed=Math.min(startingSavings,remainingDeficit);
-        remainingDeficit-=savingsUsed;
-        if(subjectMember){
-          personalAssetsUsed=Math.min(Math.max(0,finite(subject.assets,0)),remainingDeficit);
-          subject.assets-=personalAssetsUsed;
-          remainingDeficit-=personalAssetsUsed;
-        }
-        newHouseholdDebt+=remainingDeficit;
+      const subjectAssetsAfterEconomy=subjectMember?finite(subject.assets,0):0;
+      const subjectDeficit=Math.max(0,-subjectAssetsAfterEconomy);
+      const currentHouseholdDeficit=subjectDeficit+model.memberExpenses;
+      const contributionApplied=Math.min(otherMemberIncome,currentHouseholdDeficit);
+      const deficitAfterContribution=currentHouseholdDeficit-contributionApplied;
+      savingsUsed=Math.min(startingSavings,deficitAfterContribution);
+      let remainingDeficit=deficitAfterContribution-savingsUsed;
+      if(subjectMember){
+        personalAssetsUsed=Math.min(Math.max(0,subjectAssetsAfterEconomy),remainingDeficit);
+        remainingDeficit-=personalAssetsUsed;
+        subject.assets=Math.max(0,subjectAssetsAfterEconomy-personalAssetsUsed);
       }
-      const sharedSurplus=Math.max(0,otherMemberIncome-model.memberExpenses);
+      newHouseholdDebt=Math.max(0,remainingDeficit);
+      const sharedSurplus=Math.max(0,otherMemberIncome-currentHouseholdDeficit);
       householdDebtRepaid=Math.min(startingDebt,sharedSurplus);
       sharedSavingsAdded=Math.max(0,sharedSurplus-householdDebtRepaid);
-      if(subjectMember&&finite(subject.assets,0)<0){
-        const baseDeficit=Math.abs(Math.round(subject.assets));
-        subject.assets=0;
-        newHouseholdDebt+=baseDeficit;
-      }
       const endingSavings=Math.max(0,startingSavings-savingsUsed+sharedSavingsAdded);
       const endingDebt=Math.max(0,startingDebt-householdDebtRepaid+newHouseholdDebt);
       const personalAssetChange=subjectMember?Math.round(finite(subject.assets,0)-subjectAssetsBefore):0;

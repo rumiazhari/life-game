@@ -10,6 +10,12 @@ function newContext(seed,files=[]){
   return context;
 }
 
+function assertUnifiedAccounting(result){
+  assert.equal(result.balance,result.subjectIncome+result.otherMemberIncome+result.otherSubjectCashFlow-result.subjectExpenses-result.memberExpenses);
+  assert.equal(result.identity,result.balance);
+  assert.equal(result.violations.length,0);
+}
+
 test('an NPC cannot belong to two households',()=>{
   const context=newContext('household-unique');
   const result=JSON.parse(expose(context,`(function(){
@@ -188,6 +194,80 @@ test('existing household debt is repaid before shared savings are added',()=>{
   assert.ok(result.savings>0);
   assert.equal(result.identity,result.balance);
   assert.equal(result.violations.length,0);
+});
+
+test('shared savings covers a subject lifestyle deficit before new household debt',()=>{
+  const context=newContext('allocation-subject-savings');
+  const result=JSON.parse(expose(context,`(function(){
+    S.age=30; World.year=S.dob+S.age; S.livingAtHome=false; S.assets=0; S.lifestyle.housing='room'; S.lifestyle.food='basic'; NpcSystem.syncLegacy(World,S,Lineage);
+    const household=HouseholdSystem.findByMember(World,S.npcId); household.finances.savings=10000; const before=household.finances.savings;
+    HouseholdSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,subjectIncome:0}); const f=household.finances;
+    return JSON.stringify({before,savings:f.savings,savingsUsed:f.savingsUsed,newDebt:f.newHouseholdDebt,subjectIncome:f.subjectIncome,otherMemberIncome:f.otherMemberIncome,otherSubjectCashFlow:f.otherSubjectCashFlow,subjectExpenses:f.subjectExpenses,memberExpenses:f.memberExpenses,balance:f.lastBalance,identity:f.accountingIdentity,violations:HouseholdSystem.checkInvariants(World,S)});
+  })()`));
+  assert.ok(result.savingsUsed>0);
+  assert.ok(result.savings<result.before);
+  assert.equal(result.newDebt,0);
+  assertUnifiedAccounting(result);
+});
+
+test('spouse contribution covers zero-income subject and member costs before savings',()=>{
+  const context=newContext('allocation-spouse-covers-all');
+  const result=JSON.parse(expose(context,`(function(){
+    S.age=30; World.year=S.dob+S.age; S.livingAtHome=false; S.assets=0; S.lifestyle.housing='room'; S.lifestyle.food='basic'; S.married=true; S.status='Married';
+    const spouse=makeContact(S.sex==='M'?'F':'M'); spouse.role='spouse'; S.contacts.push(spouse); syncPartnerMirror(); NpcSystem.syncLegacy(World,S,Lineage);
+    const household=HouseholdSystem.findByMember(World,S.npcId), npc=World.npcs[spouse.npcId]; npc.employment.status='employed'; npc.employment.income=10000; npc.__householdContributionYear=World.year; npc.__householdContribution=10000;
+    HouseholdSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,subjectIncome:0}); const f=household.finances;
+    return JSON.stringify({savings:f.savings,added:f.sharedSavingsAdded,newDebt:f.newHouseholdDebt,subjectIncome:f.subjectIncome,otherMemberIncome:f.otherMemberIncome,otherSubjectCashFlow:f.otherSubjectCashFlow,subjectExpenses:f.subjectExpenses,memberExpenses:f.memberExpenses,balance:f.lastBalance,identity:f.accountingIdentity,violations:HouseholdSystem.checkInvariants(World,S)});
+  })()`));
+  assert.equal(result.newDebt,0);
+  assert.equal(result.added,result.otherMemberIncome-result.subjectExpenses-result.memberExpenses);
+  assert.equal(result.savings,result.added);
+  assertUnifiedAccounting(result);
+});
+
+test('positive total household balance never creates new debt',()=>{
+  const context=newContext('allocation-positive-balance');
+  const result=JSON.parse(expose(context,`(function(){
+    S.age=30; World.year=S.dob+S.age; S.livingAtHome=false; S.assets=5000; S.lifestyle.housing='room'; S.lifestyle.food='basic'; S.married=true; S.status='Married';
+    const spouse=makeContact(S.sex==='M'?'F':'M'); spouse.role='spouse'; S.contacts.push(spouse); syncPartnerMirror(); NpcSystem.syncLegacy(World,S,Lineage);
+    const household=HouseholdSystem.findByMember(World,S.npcId), npc=World.npcs[spouse.npcId]; npc.employment.status='employed'; npc.employment.income=2000; npc.__householdContributionYear=World.year; npc.__householdContribution=2000;
+    HouseholdSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,subjectIncome:2000}); const f=household.finances;
+    return JSON.stringify({newDebt:f.newHouseholdDebt,subjectIncome:f.subjectIncome,otherMemberIncome:f.otherMemberIncome,otherSubjectCashFlow:f.otherSubjectCashFlow,subjectExpenses:f.subjectExpenses,memberExpenses:f.memberExpenses,balance:f.lastBalance,identity:f.accountingIdentity,violations:HouseholdSystem.checkInvariants(World,S)});
+  })()`));
+  assert.ok(result.balance>0);
+  assert.equal(result.newDebt,0);
+  assertUnifiedAccounting(result);
+});
+
+test('shared savings covers combined subject and member deficit once',()=>{
+  const context=newContext('allocation-combined-deficit');
+  const result=JSON.parse(expose(context,`(function(){
+    S.age=30; World.year=S.dob+S.age; S.livingAtHome=false; S.assets=0; S.lifestyle.housing='room'; S.lifestyle.food='basic'; S.married=true; S.status='Married';
+    const spouse=makeContact(S.sex==='M'?'F':'M'); spouse.role='spouse'; S.contacts.push(spouse); syncPartnerMirror(); NpcSystem.syncLegacy(World,S,Lineage);
+    const household=HouseholdSystem.findByMember(World,S.npcId), npc=World.npcs[spouse.npcId]; npc.employment.status='unemployed'; npc.employment.income=0; household.finances.savings=10000; const before=household.finances.savings;
+    HouseholdSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,subjectIncome:0}); const f=household.finances;
+    return JSON.stringify({before,savings:f.savings,savingsUsed:f.savingsUsed,newDebt:f.newHouseholdDebt,subjectIncome:f.subjectIncome,otherMemberIncome:f.otherMemberIncome,otherSubjectCashFlow:f.otherSubjectCashFlow,subjectExpenses:f.subjectExpenses,memberExpenses:f.memberExpenses,balance:f.lastBalance,identity:f.accountingIdentity,violations:HouseholdSystem.checkInvariants(World,S)});
+  })()`));
+  assert.equal(result.savingsUsed,result.subjectExpenses+result.memberExpenses);
+  assert.equal(result.savings,result.before-result.savingsUsed);
+  assert.equal(result.newDebt,0);
+  assertUnifiedAccounting(result);
+});
+
+test('genuine surplus repays existing debt only after current expenses',()=>{
+  const context=newContext('allocation-debt-then-savings');
+  const result=JSON.parse(expose(context,`(function(){
+    S.age=30; World.year=S.dob+S.age; S.livingAtHome=false; S.assets=5000; S.lifestyle.housing='room'; S.lifestyle.food='basic'; S.married=true; S.status='Married';
+    const spouse=makeContact(S.sex==='M'?'F':'M'); spouse.role='spouse'; S.contacts.push(spouse); syncPartnerMirror(); NpcSystem.syncLegacy(World,S,Lineage);
+    const household=HouseholdSystem.findByMember(World,S.npcId), npc=World.npcs[spouse.npcId]; npc.employment.status='employed'; npc.employment.income=10000; npc.__householdContributionYear=World.year; npc.__householdContribution=10000; household.finances.debt=250;
+    HouseholdSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,subjectIncome:1000}); const f=household.finances;
+    return JSON.stringify({repaid:f.householdDebtRepaid,added:f.sharedSavingsAdded,debt:f.debt,newDebt:f.newHouseholdDebt,subjectIncome:f.subjectIncome,otherMemberIncome:f.otherMemberIncome,otherSubjectCashFlow:f.otherSubjectCashFlow,subjectExpenses:f.subjectExpenses,memberExpenses:f.memberExpenses,balance:f.lastBalance,identity:f.accountingIdentity,violations:HouseholdSystem.checkInvariants(World,S)});
+  })()`));
+  assert.equal(result.newDebt,0);
+  assert.equal(result.repaid,250);
+  assert.equal(result.added,result.otherMemberIncome-result.memberExpenses-result.repaid);
+  assert.equal(result.debt,0);
+  assertUnifiedAccounting(result);
 });
 
 test('NPC-only household creates debt when contribution is below expenses',()=>{
