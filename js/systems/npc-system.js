@@ -608,11 +608,21 @@
       educationTick(npc,age,runtime,rng,year);
       employmentTick(npc,age,runtime,rng,year,notices);
       const expenses=personalExpenses(runtime,age), balance=npc.employment.income-expenses;
-      if(balance>=0) npc.wealth.cash+=balance; else {
+      const household=root.HouseholdSystem&&root.HouseholdSystem.findByMember?root.HouseholdSystem.findByMember(world,npc.id):null;
+      const contributesThroughHousehold=!!(household&&household.memberIds.includes(npc.id));
+      const beforeNet=finite(npc.wealth.cash,0)-finite(npc.wealth.debt,0);
+      npc.__householdContributionYear=year;
+      npc.__householdContribution=contributesThroughHousehold?Math.max(0,Math.round(balance)):0;
+      npc.__householdPersonalExpensesYear=year;
+      npc.__householdPersonalExpenses=contributesThroughHousehold?Math.round(expenses):0;
+      if(balance>=0) { if(!contributesThroughHousehold) npc.wealth.cash+=balance; } else {
         const paid=Math.min(Math.max(0,npc.wealth.cash),Math.abs(balance));
         npc.wealth.cash-=paid;npc.wealth.debt+=Math.abs(balance)-paid;
       }
       npc.wealth.cash=Math.round(finite(npc.wealth.cash,0));npc.wealth.debt=Math.max(0,Math.round(finite(npc.wealth.debt,0)));
+      const afterNet=npc.wealth.cash-npc.wealth.debt;
+      npc.__householdPersonalWealthChangeYear=year;
+      npc.__householdPersonalWealthChange=contributesThroughHousehold?Math.round(afterNet-beforeNet):0;
       relationshipTick(world,npc,year);
       if(rng.chance(mortalityProbability(npc,age,runtime))) markDeath(world,npc,year,age<1?'infant illness':healthPressure(runtime)>.55?'illness during a healthcare crisis':'natural causes',notices);
     });
