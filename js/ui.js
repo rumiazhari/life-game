@@ -1001,7 +1001,7 @@ function openTrainingPicker(){
   }
   $('#skillSheet').innerHTML='<div class="ps-head"><span>VOCATIONAL TRAINING</span><span>DECISION · 2 HOURS</span></div>'+
     '<div class="aempty" style="margin:6px 2px 10px">Short credentials turn practical skills into a clearer route through care, trade, transport, and business. The fee is paid from assets first; any shortfall becomes education debt.</div>'+body+
-    '<div class="ps-foot"><button class="btn" id="trainingCancel">Never Mind â–¸</button></div>';
+    '<div class="ps-foot"><button class="btn" id="trainingCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
     const b=e.target.closest('[data-training]');
     if(b){queueAdd('d','learntrade',{program:b.dataset.training});$('#skillWrap').classList.add('hidden');return;}
