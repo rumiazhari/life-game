@@ -9,7 +9,13 @@ const scenarios=[
   {name:'outbreak',setup:"const rt=World.settlements[World.activeSettlementId]; PublicHealth.triggerShock(rt,'outbreak',1,8,World.year); PublicHealth.triggerShock(rt,'clinicClosure',.8,6,World.year);"},
   {name:'prosperous-destination',setup:"World.settlements.veskar.economy.employmentIndex=1; World.settlements.veskar.economy.wageIndex=1.5; World.settlements.veskar.economy.rentIndex=.65; World.settlements.veskar.publicHealth.sanitation=1; World.settlements.veskar.security.unrest=0;"},
   {name:'high-surveillance',setup:"World.nationalModifiers={surveillancePressure:.3,unrestPressure:.18};"},
-  {name:'legacy-repair',setup:"World.npcSchemaVersion=0; World.npcs={broken:{id:'broken',birthYear:'bad',health:{general:NaN},employment:{status:'employed',income:Infinity}}}; World.households={bad:{id:'bad',settlementId:World.activeSettlementId,memberIds:['broken','broken'],dependentIds:['missing'],finances:{income:NaN}}};"}
+  {name:'legacy-repair',setup:"World.npcSchemaVersion=0; World.npcs={broken:{id:'broken',birthYear:'bad',health:{general:NaN},employment:{status:'employed',income:Infinity}}}; World.households={bad:{id:'bad',settlementId:World.activeSettlementId,memberIds:['broken','broken'],dependentIds:['missing'],finances:{income:NaN}}};"},
+  // 4B-2: minimal persistent NPC medical progression scenarios. A healthy household with no
+  // pre-existing conditions (medical progression should run quietly, no forced deaths), and a
+  // household where a connected NPC carries a severe untreated condition that is expected to
+  // eventually produce a condition-aware medical death via NpcSystem's existing death pathway.
+  {name:'medical-healthy-household',setup:''},
+  {name:'medical-severe-illness-death',setup:'',postMigrateSetup:"if(S.mother&&S.mother.npcId&&World.npcs[S.mother.npcId]){ const sick=World.npcs[S.mother.npcId]; MedicalSystem.addCondition(sick,'chronic',5,{world:World,year:World.year,known:true,state:'diagnosed'}); const cond=MedicalSystem.activeConditions(sick).find(c=>c.definitionId==='chronic'); if(cond) cond.yearsActive=200; }"}
 ];
 
 function runScenario(scenario){
@@ -19,6 +25,7 @@ function runScenario(scenario){
     newWorld(); newLineage(); newHold(); newSubject();
     ${scenario.setup}
     NpcSystem.migrate(World,S,Lineage);
+    ${scenario.postMigrateSetup||''}
     const openingIds=Object.keys(World.npcs).sort().join('|');
     const friend=makeContact(S.sex==='M'?'F':'M'); S.contacts.push(friend);
     const friend2=makeContact(S.sex==='M'?'F':'M'); S.contacts.push(friend2);
@@ -31,13 +38,16 @@ function runScenario(scenario){
     NpcSystem.tick(World,{year:World.year,subject:S,lineage:Lineage});
     const personalAfter=Random.next();
     Random.setSeed('personal-phase3'); Random.next(); const personalExpected=Random.next();
-    let peakNpcs=Object.keys(World.npcs).length, peakHouseholds=Object.keys(World.households).length, deaths=0, births=0, moves=0, invariantFailures=[];
+    const genericCauses=new Set(['infant illness','illness during a healthcare crisis','natural causes']);
+    let peakNpcs=Object.keys(World.npcs).length, peakHouseholds=Object.keys(World.households).length, deaths=0, births=0, moves=0, invariantFailures=[], medicalDeaths=0, medicalNotices=0;
     for(let i=0;i<99;i++){
       World.year++; S.age++;
       WorldSimulation.tick(World,{year:World.year});
       NpcSystem.tick(World,{year:World.year,subject:S,lineage:Lineage});
       const notices=NpcSystem.drainNotices(World);
       deaths+=notices.filter(n=>n.type==='death').length;
+      medicalDeaths+=notices.filter(n=>n.type==='death'&&!genericCauses.has(n.cause)).length;
+      medicalNotices+=notices.filter(n=>String(n.type).indexOf('medical_')===0).length;
       births+=notices.filter(n=>n.type==='birth').length;
       moves+=notices.filter(n=>n.type==='household_migration').length;
       peakNpcs=Math.max(peakNpcs,Object.keys(World.npcs).length);
@@ -45,6 +55,7 @@ function runScenario(scenario){
       const check=Invariants.check(S,World);
       if(!check.ok) invariantFailures.push(...check.violations.map(v=>'year '+World.year+': '+v));
     }
+    const medicalInvariantFailures=invariantFailures.filter(v=>v.indexOf(' medical: ')!==-1).length;
     const stableBefore=JSON.stringify({npcs:World.npcs,households:World.households,memories:World.relationshipMemories});
     NpcSystem.migrate(World,S,Lineage);
     const stableAfter=JSON.stringify({npcs:World.npcs,households:World.households,memories:World.relationshipMemories});
@@ -54,7 +65,8 @@ function runScenario(scenario){
       peakNpcs,peakHouseholds,deaths,births,moves,personalRngIsolated:personalAfter===personalExpected,
       migrationIdempotent:stableBefore===stableAfter,invariantFailures,
       deceasedWithJobs:Object.values(World.npcs).filter(n=>!n.alive&&n.employment.status!=='deceased').length,
-      duplicateMemberships:(function(){const c={};Object.values(World.households).forEach(h=>h.memberIds.forEach(id=>c[id]=(c[id]||0)+1));return Object.values(c).filter(n=>n>1).length;})()
+      duplicateMemberships:(function(){const c={};Object.values(World.households).forEach(h=>h.memberIds.forEach(id=>c[id]=(c[id]||0)+1));return Object.values(c).filter(n=>n>1).length;})(),
+      medicalDeaths,medicalNotices,medicalInvariantFailures
     });
   })()`);
   const result=JSON.parse(payload);
@@ -64,7 +76,9 @@ function runScenario(scenario){
   assert.equal(result.invariantFailures.length,0,result.invariantFailures.join('\n'));
   assert.equal(result.deceasedWithJobs,0);
   assert.equal(result.duplicateMemberships,0);
+  assert.equal(result.medicalInvariantFailures,0);
   assert.ok(result.peakNpcs<=96);
+  if(scenario.name==='medical-severe-illness-death') assert.ok(result.medicalDeaths>0,'expected the severe illness scenario to eventually produce a condition-aware medical death');
   return result;
 }
 

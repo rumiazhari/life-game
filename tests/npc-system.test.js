@@ -101,6 +101,21 @@ test('partnered death clears both links and allows later widowhood transition',(
   assert.equal(result.violations.length,0);
 });
 
+test('NPC annual tick wires MedicalSystem progression into every alive non-subject NPC without breaking invariants',()=>{
+  const context=newContext('npc-medical-wiring');
+  const result=JSON.parse(expose(context,`(function(){
+    for(let i=0;i<10;i++){ World.year++; S.age++; WorldSimulation.tick(World,{year:World.year}); NpcSystem.tick(World,{year:World.year,subject:S,lineage:Lineage}); }
+    const aliveNonSubject=Object.values(World.npcs).filter(n=>!n.isSubject&&n.alive!==false);
+    const wired=aliveNonSubject.every(n=>n.health&&n.health.medical&&n.health.medical.lastTickYear===World.year);
+    const subjectMirror=World.npcs[S.npcId];
+    return JSON.stringify({wired,aliveCount:aliveNonSubject.length,subjectMirrorUntouched:subjectMirror.health.medical.lastTickYear===null,violations:NpcSystem.checkInvariants(World,S,Lineage)});
+  })()`));
+  assert.equal(result.wired,true);
+  assert.ok(result.aliveCount>0);
+  assert.equal(result.subjectMirrorUntouched,true);
+  assert.equal(result.violations.length,0);
+});
+
 test('a 100-year persistent NPC simulation remains finite and bounded',()=>{
   const context=newContext('npc-century');
   const result=JSON.parse(expose(context,`(function(){
