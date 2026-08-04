@@ -114,6 +114,12 @@
       .forEach(npc=>{delete npcs[npc.id];});
   }
 
+  function preservedHealth(world,id,general){
+    const existing=world&&world.npcs&&world.npcs[id];
+    if(existing&&existing.health&&typeof existing.health==='object') return Object.assign({},existing.health,{general});
+    return {general,conditions:[]};
+  }
+
   function relationship(npc,otherId,defaults){
     const id=String(otherId||'');
     if(!id) return null;
@@ -201,7 +207,7 @@
       notable:true,
       source:'legacy-parent',
       personality:{warmth:finite(parent.warmth,50)/100,ambition:finite(parent.grip,50)/100,loyalty:finite(parent.stability,50)/100,volatility:1-finite(parent.stability,50)/100},
-      health:{general:parent.alive===false?0:clamp(finite(parent.health,72)),conditions:[]},
+      health:preservedHealth(world,id,parent.alive===false?0:clamp(finite(parent.health,72))),
       employment:{status:parent.alive===false?'deceased':'employed',sector:parent.skill||null,income:parent.alive===false?0:650},
       flags:{present:parent.present!==false,estranged:!!parent.estranged,legacyRelation:relation}
     });
@@ -228,7 +234,7 @@
       roleTags:[kin.relation||'relative','family'],
       notable:true,
       source:'legacy-kin',
-      health:{general:kin.alive===false?0:finite(kin.health,72),conditions:[]},
+      health:preservedHealth(world,id,kin.alive===false?0:finite(kin.health,72)),
       employment:{status:kin.alive===false?'deceased':'unemployed',sector:null,income:0},
       flags:{legacyMid:kin.mid||null,motherName:kin.motherName||null,fatherName:kin.fatherName||null,parentSubjectId:kin.relation==='child'&&subject?subject.npcId:null,allowAutonomousFamily:true}
     });
@@ -257,6 +263,7 @@
       notable:true,
       source:'legacy-contact-spouse',
       personality:{warmth:.5,ambition:.5,loyalty:unit(finite(contact.fidelity,50)/100),volatility:unit(finite(contact.npcSpouseTemperament,50)/100)},
+      health:preservedHealth(world,id,(world.npcs&&world.npcs[id]&&world.npcs[id].health&&world.npcs[id].health.general)!=null?world.npcs[id].health.general:74),
       flags:{allowAutonomousFamily:true}
     });
     npc.partnerId=spouse.id;
@@ -286,7 +293,7 @@
       notable:true,
       source:'legacy-contact',
       personality:{warmth:finite(contact.kindness,50)/100,ambition:finite(contact.charm,50)/100,loyalty:finite(contact.fidelity,50)/100,volatility:finite(contact.temperament,50)/100},
-      health:{general:contact.alive===false?0:finite(contact.health,74),conditions:[]},
+      health:preservedHealth(world,id,contact.alive===false?0:finite(contact.health,74)),
       employment:{status:contact.alive===false?'deceased':'unemployed',sector:null,income:0},
       householdId:existing&&existing.householdId||null,
       partnerId:existing&&existing.partnerId||null,
@@ -516,6 +523,74 @@
     npc.health.lastChangeYear=year;
   }
 
+  function medicalContextFor(world,npc,runtime,year){
+    if(!root.MedicalSystem) return null;
+    return root.MedicalSystem.contextFor(world,npc,{year,runtime,healthcarePressure:healthPressure(runtime)});
+  }
+
+  function applyMedicalTick(world,npc,runtime,year){
+    if(!root.MedicalSystem) return null;
+    const ctx=medicalContextFor(world,npc,runtime,year);
+    const result=root.MedicalSystem.tickPerson(world,npc,ctx);
+    if(result.applied&&result.healthDelta){
+      npc.health.general=clamp(npc.health.general+result.healthDelta,0,100);
+      npc.health.lastChangeYear=year;
+    }
+    return result;
+  }
+
+  const RELEVANT_ROLE_TAGS=new Set(['mother','father','parent','spouse','partner','child','sibling','relative','friend']);
+
+  function isRelevantToSubject(world,npc,subject,lineage){
+    if(!subject||!subject.npcId||!npc) return false;
+    const subjectNpc=world.npcs&&world.npcs[subject.npcId];
+    if(subjectNpc&&npc.householdId&&subjectNpc.householdId&&npc.householdId===subjectNpc.householdId) return true;
+    if(npc.relationships&&npc.relationships[subject.npcId]) return true;
+    if(subjectNpc&&subjectNpc.relationships&&subjectNpc.relationships[npc.id]) return true;
+    if(Array.isArray(npc.roleTags)&&npc.roleTags.some(tag=>RELEVANT_ROLE_TAGS.has(tag))) return true;
+    if(subject.mother&&subject.mother.npcId===npc.id) return true;
+    if(subject.father&&subject.father.npcId===npc.id) return true;
+    if(Array.isArray(subject.contacts)&&subject.contacts.some(contact=>contact&&contact.npcId===npc.id)) return true;
+    if(lineage&&Array.isArray(lineage.members)&&lineage.members.some(member=>member&&member.npcId===npc.id)) return true;
+    return false;
+  }
+
+  function conditionName(definitionId){
+    const info=root.ConditionRegistry&&root.ConditionRegistry.condition(definitionId);
+    return (info?info.name:'Unrecognized condition').toLowerCase();
+  }
+
+  function findCondition(npc,instanceId){
+    const conditions=npc.health&&npc.health.medical&&Array.isArray(npc.health.medical.conditions)?npc.health.medical.conditions:[];
+    return conditions.find(condition=>condition.instanceId===instanceId)||null;
+  }
+
+  function emitMedicalNotices(npc,relevant,year,result,notices,seenKeys){
+    if(!relevant||!result||!result.applied) return;
+    const name=fullName(npc);
+    const emit=(type,instanceId,text)=>{
+      const key=npc.id+'|'+instanceId+'|'+type+'|'+year;
+      if(seenKeys.has(key)) return;
+      seenKeys.add(key);
+      notices.push({type,npcId:npc.id,name,conditionInstanceId:instanceId,text});
+      historyPush(npc,{year,type,summary:text});
+    };
+    (result.newConditions||[]).filter(condition=>condition.state!=='latent').forEach(condition=>{
+      emit('medical_condition',condition.instanceId,name+' developed '+conditionName(condition.definitionId)+'.');
+    });
+    (result.transitions||[]).forEach(transition=>{
+      if(transition.kind==='symptom'){
+        const condition=findCondition(npc,transition.instanceId);
+        emit('medical_symptom',transition.instanceId,name+' began showing symptoms of '+conditionName(condition&&condition.definitionId)+'.');
+      } else if(transition.kind==='chronic'){
+        emit('medical_chronic',transition.instanceId,name+' now has a chronic condition on file.');
+      } else if(transition.kind==='resolved'){
+        const condition=findCondition(npc,transition.instanceId);
+        emit('medical_recovery',transition.instanceId,name+' recovered from '+conditionName(condition&&condition.definitionId)+'.');
+      }
+    });
+  }
+
   function mortalityProbability(npc,age,runtime){
     let base=age<1?.012:age<16?.0008:age<45?.0015:age<60?.005:age<70?.016:age<80?.045:age<90?.11:.24;
     base+=(100-npc.health.general)/100*.08+healthPressure(runtime)*.035;
@@ -597,15 +672,243 @@
     });
   }
 
+  // Raises a connected-life notice for one household case, mirroring
+  // emitMedicalNotices()'s dedup-key/history-mirror discipline above. The
+  // subject's own case is deliberately excluded -- that's surfaced through
+  // the personal medical file/MEDICAL REVIEW log, not household notices --
+  // and, like emitMedicalNotices, relevance is gated by isRelevantToSubject.
+  function emitHouseholdCaseNotice(world,subject,lineage,year,notices,seenKeys,caseRecord,type,textBuilder){
+    if(subject&&subject.npcId&&String(caseRecord.npcId)===String(subject.npcId))return;
+    const npc=world.npcs&&world.npcs[caseRecord.npcId];
+    if(!npc||npc.alive===false)return;
+    if(!isRelevantToSubject(world,npc,subject,lineage))return;
+    const key=npc.id+'|'+caseRecord.conditionInstanceId+'|'+type+'|'+year;
+    if(seenKeys.has(key))return;
+    seenKeys.add(key);
+    const name=fullName(npc), text=textBuilder(name,caseRecord);
+    notices.push({type,npcId:npc.id,name,conditionInstanceId:caseRecord.conditionInstanceId,text});
+    historyPush(npc,{year,type,summary:text});
+  }
+
+  function flushHouseholdNotices(world,notices){
+    if(!notices.length)return;
+    ensure(world);
+    world.npcNotices.push(...notices);
+    if(world.npcNotices.length>120) world.npcNotices=world.npcNotices.slice(-120);
+  }
+
+  // Phase 1 of the annual household-health pipeline: prepares this year's
+  // medical cases (from conditions already known/diagnosed as of last year's
+  // close) and lets autonomous (non-subject) households decide on treatment,
+  // BEFORE any NPC's own annual medical progression has run this year. This
+  // must run before the tick() loop below (and before ui.js calls
+  // NpcSystem.tick at all, in production) so a condition treated this year
+  // is already in 'treated' state by the time that NPC's own progression and
+  // mortality roll happen -- getting this year's relief/mortality-reduction
+  // benefit instead of one year late. migrate() is called here (in addition
+  // to tick()'s own call) because production code invokes this before
+  // NpcSystem.tick() ever runs for the year.
+  //
+  // Also raises 'medical_diagnosis' notices for newly-created cases and
+  // 'medical_treatment' notices for cases an autonomous household just
+  // decided on (fund-recommended-care/home-care only -- leave-untreated is
+  // a non-event). Pending-before/after case-status comparison is used
+  // rather than applyAutonomousDecisions()'s own return value so this stays
+  // independent of that function's result shape.
+  // Natural (non-player) diagnosis pass: gives every living non-subject NPC a
+  // chance to have an already-symptomatic-but-unknown condition surface as
+  // diagnosed, using MedicalSystem.naturalDiagnosis (isolated deterministic
+  // RNG, incrementActionCounter:false -- see medical-system.js). Runs once per
+  // NPC per year, before any household's cases are prepared below, so a
+  // condition newly diagnosed this way is already 'known' in time for
+  // prepareCases to create a case for it this same year.
+  function applyNaturalDiagnosis(world,year){
+    if(!root.MedicalSystem||typeof root.MedicalSystem.naturalDiagnosis!=='function')return;
+    Object.values(world.npcs).filter(npc=>npc&&npc.alive&&!npc.isSubject).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(npc=>{
+      const runtime=settlementState(world,npc);
+      const ctx=medicalContextFor(world,npc,runtime,year);
+      root.MedicalSystem.naturalDiagnosis(world,npc,ctx);
+    });
+  }
+
+  function prepareAndResolveHouseholdCases(world,year,subject,lineage){
+    if(!root.HouseholdHealthSystem||!root.HouseholdSystem||typeof root.HouseholdSystem.all!=='function')return;
+    migrate(world,subject,lineage);
+    applyNaturalDiagnosis(world,year);
+    const notices=[], seenKeys=new Set();
+    root.HouseholdSystem.all(world).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(household=>{
+      root.HouseholdHealthSystem.reconcileCases(world,household,{year,subject,lineage});
+      const newCases=root.HouseholdHealthSystem.prepareCases(world,household,{year,subject,lineage});
+      newCases.forEach(caseRecord=>{
+        emitHouseholdCaseNotice(world,subject,lineage,year,notices,seenKeys,caseRecord,'medical_diagnosis',
+          (name,c)=>name+' was diagnosed with '+conditionName(c.conditionId)+'.');
+      });
+      const stateBefore=root.HouseholdHealthSystem.ensure(household);
+      const pendingBefore=new Set(stateBefore.cases.filter(c=>c.status==='pending').map(c=>c.caseId));
+      if(!pendingBefore.size)return;
+      root.HouseholdHealthSystem.applyAutonomousDecisions(world,household,year,{subject,lineage});
+      const stateAfter=root.HouseholdHealthSystem.ensure(household);
+      stateAfter.cases.filter(c=>pendingBefore.has(c.caseId)&&c.status!=='pending').forEach(caseRecord=>{
+        if(caseRecord.status==='treated'){
+          emitHouseholdCaseNotice(world,subject,lineage,year,notices,seenKeys,caseRecord,'medical_treatment',
+            (name,c)=>name+' received treatment for '+conditionName(c.conditionId)+'.');
+        }else if(caseRecord.status==='home-care'){
+          emitHouseholdCaseNotice(world,subject,lineage,year,notices,seenKeys,caseRecord,'medical_treatment',
+            (name,c)=>name+' is receiving home care for '+conditionName(c.conditionId)+'.');
+        }
+      });
+    });
+    flushHouseholdNotices(world,notices);
+  }
+
+  // Resolves family medical decisions the player queued (via a household
+  // health UI, not part of NpcSystem itself) during planning, before this
+  // year's NPC medical progression runs -- so a case the player funds this
+  // year is already 'treated' by the time that NPC's own progression/
+  // mortality roll happens this same year, matching
+  // prepareAndResolveHouseholdCases()'s ordering rationale above. Queue
+  // entries are {npcId,conditionInstanceId,decision,treatmentId} -- NOT
+  // {householdId,caseId}: a household id/caseId pair captured while the
+  // player was planning can go stale by the time this runs, because
+  // prepareAndResolveHouseholdCases() just above already called migrate()/
+  // reconcile() for the year -- a subject who stopped living at home, for
+  // instance, gets moved into a freshly-created household there, orphaning
+  // (and eventually pruning) their old one along with any case queued
+  // against it. npcId+conditionInstanceId stay valid across that reshuffle
+  // (they're tied to the person's own medical record, not household
+  // membership), so the household/case are re-resolved fresh here via
+  // HouseholdSystem.findByMember() rather than trusted from the queue.
+  // A case that's no longer resolvable (member/household/case since
+  // removed, or already decided) is simply skipped rather than throwing,
+  // since the queue may be stale (e.g. the member died) by the time this
+  // runs.
+  function resolveQueuedFamilyDecisions(world,year,subject,lineage,queue){
+    const results=[];
+    if(!root.HouseholdHealthSystem||!root.HouseholdSystem||!Array.isArray(queue)||!queue.length)return results;
+    const notices=[], seenKeys=new Set();
+    queue.forEach(item=>{
+      const npcId=item&&item.npcId, conditionInstanceId=item&&item.conditionInstanceId;
+      if(!npcId||!conditionInstanceId){results.push({applied:false,reason:'case-not-found',npcId,conditionInstanceId});return;}
+      const household=typeof root.HouseholdSystem.findByMember==='function'?root.HouseholdSystem.findByMember(world,npcId):null;
+      if(!household){results.push({applied:false,reason:'household-not-found',npcId,conditionInstanceId});return;}
+      const state=root.HouseholdHealthSystem.ensure(household);
+      const caseRecord=state.cases.find(c=>c.npcId===npcId&&c.conditionInstanceId===conditionInstanceId&&!c.resolved);
+      if(!caseRecord){results.push({applied:false,reason:'case-not-found',npcId,conditionInstanceId,householdId:household.id});return;}
+      const result=root.HouseholdHealthSystem.resolveDecision(world,household,caseRecord.caseId,{decision:item.decision,treatmentId:item.treatmentId},{year,subject,lineage});
+      results.push(Object.assign({npcId,conditionInstanceId,caseId:caseRecord.caseId,householdId:household.id},result));
+      if(!result.applied||(result.reason!=='funded-care'&&result.reason!=='home-care'))return;
+      const updatedCase=root.HouseholdHealthSystem.ensure(household).cases.find(c=>c.caseId===caseRecord.caseId);
+      if(!updatedCase)return;
+      emitHouseholdCaseNotice(world,subject,lineage,year,notices,seenKeys,updatedCase,'medical_treatment',
+        (name,c)=>result.reason==='funded-care'?name+' received treatment for '+conditionName(c.conditionId)+'.':name+' is receiving home care for '+conditionName(c.conditionId)+'.');
+    });
+    flushHouseholdNotices(world,notices);
+    return results;
+  }
+
+  // Phase 2: settles this year's treatment charges (created by phase 1) into
+  // annual.treatmentCosts. Runs after NPC medical progression but before
+  // HouseholdSystem.tick()'s finance settlement, so that pass sees this
+  // year's charges rather than reading a stale prior-year value.
+  function settleHouseholdTreatmentCharges(world,year){
+    if(!root.HouseholdHealthSystem||!root.HouseholdSystem||typeof root.HouseholdSystem.all!=='function')return;
+    root.HouseholdSystem.all(world).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(household=>{
+      root.HouseholdHealthSystem.settleTreatmentCharges(world,household,{year});
+    });
+  }
+
+  // Phase 3 (late): household transmission + caregiving, once per household
+  // per year, after every living NPC's own annual medical progression has
+  // already run above in this same tick(). This is the minimal non-UI
+  // integration point available: ui.js's advanceYear() calls NpcSystem.tick
+  // with deferHousehold:true and only calls HouseholdSystem.tick (finance)
+  // itself afterward, so household medical logic is invoked here instead of
+  // being deferred, since there is no later non-UI call site that would run
+  // it after the subject's own annual medical tick (which happens later in
+  // ui.js's advanceYear via runPersonalYearTick). See the phase 4B-3 report
+  // for the ordering trade-off this implies for the subject specifically.
+  function applyHouseholdHealthTick(world,year,subject,lineage,notices,medicalNoticeKeys,subjectCareHoursByHousehold){
+    if(!root.HouseholdHealthSystem||!root.HouseholdSystem||typeof root.HouseholdSystem.all!=='function')return;
+
+    const requestedByHousehold=
+      subjectCareHoursByHousehold&&typeof subjectCareHoursByHousehold==='object'
+        ?subjectCareHoursByHousehold
+        :{};
+
+    let remainingSubjectCareHours=3;
+
+    root.HouseholdSystem.all(world)
+      .sort((a,b)=>String(a.id).localeCompare(String(b.id)))
+      .forEach(household=>{
+        const requestedHours=Math.max(
+          0,
+          Math.min(3,Number(requestedByHousehold[household.id])||0)
+        );
+        const householdSubjectCareHours=Math.min(
+          requestedHours,
+          remainingSubjectCareHours
+        );
+        remainingSubjectCareHours-=householdSubjectCareHours;
+
+        const result=root.HouseholdHealthSystem.tickHouseholdCaregivingAndTransmission(
+          world,
+          household,
+          {
+            year,
+            subject,
+            lineage,
+            subjectCareHours:householdSubjectCareHours
+          }
+        );
+
+        if(!result||!result.applied)return;
+
+        (result.transmissions||[]).forEach(entry=>{
+          const parties=[entry.sourceId,entry.targetId]
+            .filter((id,index,array)=>array.indexOf(id)===index);
+
+          parties.forEach(id=>{
+            if(subject&&subject.npcId&&id===subject.npcId)return;
+
+            const npc=world.npcs&&world.npcs[id];
+            if(!npc||npc.alive===false)return;
+            if(!isRelevantToSubject(world,npc,subject,lineage))return;
+
+            const key=npc.id+'|'+entry.instanceId+'|medical_transmission|'+year;
+            if(medicalNoticeKeys.has(key))return;
+
+            medicalNoticeKeys.add(key);
+
+            const text='Illness spread within '+fullName(npc)+'’s household.';
+            notices.push({
+              type:'medical_transmission',
+              npcId:npc.id,
+              name:fullName(npc),
+              conditionInstanceId:entry.instanceId,
+              text
+            });
+            historyPush(npc,{
+              year,
+              type:'medical_transmission',
+              summary:text
+            });
+          });
+        });
+      });
+  }
+
   function tick(world,context){
-    const ctx=context||{}, subject=ctx.subject||null, lineage=ctx.lineage||null, year=Number(ctx.year)||Number(world.year)||0;
+    const ctx=context||{}, subject=ctx.subject||null, lineage=ctx.lineage||null, year=Number(ctx.year)||Number(world.year)||0, deferHousehold=ctx.deferHousehold||false;
     migrate(world,subject,lineage);
     if(world.npcLastTickYear===year){syncRegistryToLegacy(world,subject,lineage);return world.npcs;}
-    const notices=[];
+    const notices=[], medicalNoticeKeys=new Set();
+    if(!deferHousehold) prepareAndResolveHouseholdCases(world,year,subject,lineage);
     Object.values(world.npcs).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(npc=>{
       if(!npc||npc.isSubject||npc.alive===false) return;
       const age=Math.max(0,year-npc.birthYear), runtime=settlementState(world,npc), rng=stream(world,year,npc.id,'annual');
       healthTick(npc,age,runtime,rng,year);
+      const medicalResult=applyMedicalTick(world,npc,runtime,year);
+      if(medicalResult) emitMedicalNotices(npc,isRelevantToSubject(world,npc,subject,lineage),year,medicalResult,notices,medicalNoticeKeys);
       educationTick(npc,age,runtime,rng,year);
       employmentTick(npc,age,runtime,rng,year,notices);
       const expenses=personalExpenses(runtime,age), balance=npc.employment.income-expenses;
@@ -625,10 +928,21 @@
       npc.__householdPersonalWealthChangeYear=year;
       npc.__householdPersonalWealthChange=contributesThroughHousehold?Math.round(afterNet-beforeNet):0;
       relationshipTick(world,npc,year);
-      if(rng.chance(mortalityProbability(npc,age,runtime))) markDeath(world,npc,year,age<1?'infant illness':healthPressure(runtime)>.55?'illness during a healthcare crisis':'natural causes',notices);
+      let medicalDied=false;
+      if(root.MedicalSystem){
+        const mortalityCtx=medicalContextFor(world,npc,runtime,year);
+        const mortalityRoll=root.MedicalSystem.rollMortality(world,npc,mortalityCtx);
+        if(mortalityRoll.died){
+          medicalDied=true;
+          markDeath(world,npc,year,mortalityRoll.cause||'complications from a long illness',notices);
+        }
+      }
+      if(!medicalDied&&rng.chance(mortalityProbability(npc,age,runtime))) markDeath(world,npc,year,age<1?'infant illness':healthPressure(runtime)>.55?'illness during a healthcare crisis':'natural causes',notices);
     });
     autonomousFamilyTransitions(world,year,notices);
-    if(root.HouseholdSystem&&!ctx.deferHousehold){
+    if(!deferHousehold) settleHouseholdTreatmentCharges(world,year);
+    if(!deferHousehold) applyHouseholdHealthTick(world,year,subject,lineage,notices,medicalNoticeKeys);
+    if(root.HouseholdSystem&&!deferHousehold){
       root.HouseholdSystem.tick(world,{year,subject,lineage}).forEach(notice=>notices.push(notice));
     }
     if(root.RelationshipMemory) root.RelationshipMemory.tick(world,year);
@@ -716,6 +1030,13 @@
   }
 
   function noticeText(world,notice){
+    // Medical/household-health notices (medical_condition, medical_symptom,
+    // medical_chronic, medical_recovery, medical_transmission,
+    // medical_diagnosis, medical_treatment) are built with their own text at
+    // the point they're raised, since that's where condition/treatment
+    // detail lives. Use it directly rather than re-deriving generic text
+    // here; only notices with no pre-built text fall through below.
+    if(notice.text) return notice.text;
     const settlement=notice.settlementId&&root.settlementById?root.settlementById(notice.settlementId):null;
     if(notice.type==='death') return notice.name+' died of '+notice.cause+'.';
     if(notice.type==='birth') return notice.name+' was born into a connected household.';
@@ -748,6 +1069,7 @@
       if(npc.alive===false&&npc.employment&&npc.employment.status!=='deceased') violations.push('deceased NPC '+id+' must not retain normal employment');
       if(npc.alive===false&&!Number.isFinite(Number(npc.deathYear))) violations.push('deceased NPC '+id+' requires deathYear');
       if(npc.partnerId&&(!npcs[npc.partnerId]||npcs[npc.partnerId].partnerId!==id)) violations.push('NPC '+id+' partner link must be reciprocal');
+      if(root.MedicalSystem) root.MedicalSystem.checkInvariants(npc).forEach(v=>violations.push('NPC '+id+' medical: '+v));
       Object.keys(npc.relationships||{}).forEach(otherId=>{
         const rel=npc.relationships[otherId];
         ['closeness','trust','conflict'].forEach(key=>{if(!Number.isFinite(Number(rel[key]))||Number(rel[key])<0||Number(rel[key])>100) violations.push('NPC '+id+' relationship '+otherId+' '+key+' must be between 0 and 100');});
@@ -758,6 +1080,11 @@
     if(subject&&subject.npcId&&!npcs[subject.npcId]) violations.push('subject NPC id must exist in registry');
     if(subject&&npcs[subject.npcId]&&Number(world.year)!==Number(subject.dob)+Number(subject.age)) violations.push('subject age must match world year');
     if(root.HouseholdSystem) violations.push(...root.HouseholdSystem.checkInvariants(world,subject));
+    if(root.HouseholdHealthSystem&&world&&world.households){
+      Object.keys(world.households).forEach(id=>{
+        root.HouseholdHealthSystem.checkInvariants(world.households[id]).forEach(v=>violations.push('household '+id+' medical: '+v));
+      });
+    }
     if(lineage&&Array.isArray(lineage.members)) lineage.members.forEach(member=>{if(member.npcId&&!npcs[member.npcId]) violations.push('legacy kin '+member.mid+' references missing NPC '+member.npcId);});
     return violations;
   }
@@ -785,6 +1112,10 @@
     syncRegistryToLegacy,
     ensureSubjectHousehold,
     tick,
+    prepareAndResolveHouseholdCases,
+    resolveQueuedFamilyDecisions,
+    settleHouseholdTreatmentCharges,
+    applyHouseholdHealthTick,
     drainNotices,
     noticeText,
     subjectSummary,

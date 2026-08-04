@@ -229,6 +229,8 @@ function renderInventory(){
   h+='<div class="frow moneyrow"><span class="flabel">PROJECTED TOTAL OUTLAY</span><span class="fval big">'+money(outlay.projectedTotalOutlay)+'</span></div>';
   h+='<button class="btn small" id="invOpenMedical" style="width:100%;margin-top:8px">Open Medical File ▸</button>';
   h+='<button class="btn small" id="invOpenHousehold" style="width:100%;margin-top:8px">Manage the Household ▸</button>';
+  const familyPendingCount=familyHealthPendingCount();
+  h+='<button class="btn small" id="invOpenFamilyHealth" style="width:100%;margin-top:8px">Family Health ▸'+(familyPendingCount?' <span class="family-health-badge">'+familyPendingCount+'</span>':'')+'</button>';
   el.innerHTML=standing+h;
 }
 function openMedicalTreatmentPicker(conditionId){
@@ -265,6 +267,78 @@ $('#medicalSheet').addEventListener('click',e=>{
   const treatment=e.target.closest('[data-medical-treat]');
   if(treatment){ openMedicalTreatmentPicker(treatment.dataset.medicalTreat); return; }
   if(e.target.id==='medicalClose') $('#medicalWrap').classList.add('hidden');
+});
+/* ================= FAMILY HEALTH (household medical decisions) ================= */
+// Decisions the player picks here are queued (id-only, matching the
+// S.__pending* convention used elsewhere) and resolved by
+// NpcSystem.resolveQueuedFamilyDecisions() early in advanceYear, before that
+// member's own annual medical progression runs -- see advanceYear.
+function familyMedicalQueue(){ return S.__familyMedicalQueue||(S.__familyMedicalQueue={}); }
+function familyHealthPendingCases(){
+  if(!S||typeof HouseholdSystem!=='object'||!HouseholdSystem||typeof HouseholdSystem.findByMember!=='function') return [];
+  if(typeof HouseholdHealthSystem!=='object'||!HouseholdHealthSystem) return [];
+  const household=HouseholdSystem.findByMember(World,S.npcId);
+  if(!household) return [];
+  return HouseholdHealthSystem.pendingCases(World,household,{year:World.year,subject:S}).filter(c=>c.status==='pending');
+}
+function familyMedicalQueueKey(npcId,conditionInstanceId){ return npcId+'|'+conditionInstanceId; }
+function familyHealthPendingCount(){
+  const queue=S&&S.__familyMedicalQueue||{};
+  return familyHealthPendingCases().filter(c=>!queue[familyMedicalQueueKey(c.npcId,c.conditionInstanceId)]).length;
+}
+function openFamilyHealth(){ renderFamilyHealth(); $('#familyMedicalWrap').classList.remove('hidden'); }
+function renderFamilyHealth(){
+  const panel=typeof PersistentPeopleUI==='object'&&PersistentPeopleUI&&typeof PersistentPeopleUI.householdHealthPanel==='function'?PersistentPeopleUI.householdHealthPanel(World,S,familyMedicalQueue()):'<div class="aempty">Household health records are unavailable.</div>';
+  $('#familyMedicalSheet').innerHTML='<div class="ps-head"><span>FAMILY HEALTH</span><span>FORM M-3</span></div>'+
+    '<div class="aempty" style="margin:6px 2px 12px">The family’s own medical file. A decision made here settles before that member’s own annual review, so funded care already shows on their record before the year is out.</div>'+
+    panel+
+    '<div class="ps-foot"><button class="btn" id="familyHealthClose">Close the File ▸</button></div>';
+  $('#familyMedicalWrap').classList.remove('hidden');
+}
+function openFamilyMedicalDecision(householdId,caseId){
+  if(!householdId||!caseId||typeof HouseholdSystem!=='object'||!HouseholdSystem||typeof HouseholdHealthSystem!=='object'||!HouseholdHealthSystem) return;
+  const household=HouseholdSystem.ensure(World)[householdId];
+  if(!household) return;
+  const state=HouseholdHealthSystem.ensure(household);
+  const caseRecord=state.cases.find(c=>c.caseId===caseId);
+  if(!caseRecord) return;
+  const P=PersistentPeopleUI;
+  const memberName=P&&typeof P.memberNameFor==='function'?P.memberNameFor(World,S,caseRecord.npcId):'a family member';
+  const conditionLabel=P&&typeof P.conditionName==='function'?P.conditionName(caseRecord.conditionId):'Unrecognized condition';
+  const options=typeof HouseholdHealthSystem.treatmentOptionsFor==='function'?HouseholdHealthSystem.treatmentOptionsFor(World,household,caseRecord,{year:World.year,subject:S}):[];
+  const funded=options.find(o=>o.id===caseRecord.recommendedTreatmentId)||options.find(o=>o.id==='basic')||options.find(o=>o.id!=='rest');
+  const restOption=options.find(o=>o.id==='rest');
+  // Queued by npcId+conditionInstanceId, not householdId+caseId -- see
+  // NpcSystem.resolveQueuedFamilyDecisions for why a household/case id
+  // captured now can go stale by the time the queue is resolved.
+  const queue=familyMedicalQueue(), queueKey=familyMedicalQueueKey(caseRecord.npcId,caseRecord.conditionInstanceId), queued=queue[queueKey];
+  const chip=(decision,treatmentId,label,sub)=>'<button class="chipbtn'+(queued&&queued.decision===decision?' sel':'')+'" data-family-decision="'+decision+'" data-family-treatment="'+(treatmentId||'')+'"><b>'+label+'</b><span>'+sub+'</span></button>';
+  const rows=[
+    funded?chip('fund-recommended-care',funded.id,'Fund Recommended Care',money(funded.cost)+' · '+Math.round(funded.success*100)+'% course success'):'',
+    restOption?chip('home-care',restOption.id,'Home Care','free · rest and caregiving hours at home'):'',
+    chip('leave-untreated',null,'Leave Untreated','no cost, no care — the condition runs its course')
+  ].filter(Boolean).join('');
+  $('#skillSheet').innerHTML='<div class="ps-head"><span>FAMILY MEDICAL DECISION</span><span>'+conditionLabel.toUpperCase()+'</span></div>'+
+    '<div class="aempty" style="margin:6px 2px 10px">'+memberName+' — '+conditionLabel.toLowerCase()+'. This decision settles before the household’s next annual medical review.</div>'+
+    '<div class="chips">'+rows+'</div><div class="ps-foot"><button class="btn" id="familyMedicalDecisionCancel">Back ▸</button></div>';
+  $('#skillSheet').onclick=e=>{
+    const choice=e.target.closest('[data-family-decision]');
+    if(choice){
+      familyMedicalQueue()[queueKey]={npcId:caseRecord.npcId,conditionInstanceId:caseRecord.conditionInstanceId,decision:choice.dataset.familyDecision,treatmentId:choice.dataset.familyTreatment||null};
+      snd('stamp');
+      $('#skillWrap').classList.add('hidden');
+      if(!$('#familyMedicalWrap').classList.contains('hidden')) renderFamilyHealth();
+      renderInventory();
+      return;
+    }
+    if(e.target.id==='familyMedicalDecisionCancel') $('#skillWrap').classList.add('hidden');
+  };
+  $('#skillWrap').classList.remove('hidden');
+}
+$('#familyMedicalWrap').addEventListener('click',e=>{
+  if(e.target.id==='familyHealthClose'||e.target.id==='familyMedicalWrap'){ $('#familyMedicalWrap').classList.add('hidden'); return; }
+  const decide=e.target.closest('[data-family-case]');
+  if(decide){ openFamilyMedicalDecision(decide.dataset.familyHousehold,decide.dataset.familyCase); return; }
 });
 function setLifestyle(cat,id){
   if(!S||!S.lifestyle) return;
@@ -2241,6 +2315,44 @@ function advanceYear(suppressBurst,quiet){
   // and personal systems. It establishes this year's settlement conditions;
   // every existing yearly call remains in its original order after this point.
   if(typeof WorldSimulation==='object'&&WorldSimulation&&typeof WorldSimulation.tick==='function') WorldSimulation.tick(World,{random:Random,year:World.year});
+  // Household medical cases are prepared and family/autonomous treatment
+  // decisions resolved before any NPC's own annual medical progression runs
+  // below, so a condition treated this year is already 'treated' by the
+  // time that NPC's progression/mortality roll happens this same year.
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.prepareAndResolveHouseholdCases==='function'){
+    NpcSystem.prepareAndResolveHouseholdCases(World,World.year,S,Lineage);
+  }
+  // The player's own queued family medical decisions (Family Health ▸)
+  // resolve here too -- still before NpcSystem.tick below -- so a member the
+  // player chose to fund this year is already 'treated' for that same
+  // member's own annual progression/mortality roll a few lines down.
+  let __subjectHomeCareHoursByHousehold={};
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.resolveQueuedFamilyDecisions==='function'&&S.__familyMedicalQueue){
+    const queue=Object.values(S.__familyMedicalQueue);
+    if(queue.length){
+      const results=NpcSystem.resolveQueuedFamilyDecisions(World,World.year,S,Lineage,queue);
+      const appliedHomeCare=Array.isArray(results)
+        ?results.filter(result=>result&&result.applied&&result.reason==='home-care'&&result.householdId)
+        :[];
+
+      const usedPlanHours=S.queue.reduce(
+        (total,item)=>total+(PUR_MAP[item.id]?PUR_MAP[item.id].cost:(DEC_MAP[item.id]?DEC_MAP[item.id].cost:0)),
+        0
+      );
+      const remainingPlanHours=Math.max(0,planHours()-usedPlanHours);
+      let remainingCareHours=Math.max(0,Math.min(3,remainingPlanHours));
+
+      appliedHomeCare.forEach(result=>{
+        if(remainingCareHours<=0)return;
+        const householdId=String(result.householdId);
+        __subjectHomeCareHoursByHousehold[householdId]=
+          (__subjectHomeCareHoursByHousehold[householdId]||0)+1;
+        remainingCareHours-=1;
+      });
+
+      S.__familyMedicalQueue={};
+    }
+  }
   if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.tick==='function'){
     NpcSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,deferHousehold:true});
     const npcNotices=typeof NpcSystem.drainNotices==='function'?NpcSystem.drainNotices(World):[];
@@ -2249,6 +2361,12 @@ function advanceYear(suppressBurst,quiet){
       logEv('CONNECTED LIFE. '+NpcSystem.noticeText(World,notice),{},cls,'HOUSEHOLD FILE · YEAR '+S.age);
     });
     if(npcNotices.length>4) logEv((npcNotices.length-4)+' other connected-life changes were filed in summary.',{},'milestone','HOUSEHOLD FILE · YEAR '+S.age);
+  }
+  // Charges created above are settled into household.finances.treatmentCosts
+  // now, before HouseholdSystem.tick()'s finance settlement below reads it,
+  // so this year's treatment is reflected the same year it was incurred.
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.settleHouseholdTreatmentCharges==='function'){
+    NpcSystem.settleHouseholdTreatmentCharges(World,World.year);
   }
   resolveTravel(); runHoldTick(); snd('stamp'); shake(); window.C={};
   runFollowups(); runHistory(); runMilestones(); runEconomy();
@@ -2261,6 +2379,17 @@ function advanceYear(suppressBurst,quiet){
   if(__newStage!==S.stage){ S.stage=__newStage; queueChapterCard(__newStage); renderStage(); }
   resolvePlan();
   runPersonalYearTick();
+  // Household transmission + caregiving run last, after both the NPC medical
+  // progression above and the player's own annual medical tick just above,
+  // so transmission risk reflects everyone's post-progression state.
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.applyHouseholdHealthTick==='function'){
+    const householdHealthNotices=[];
+    NpcSystem.applyHouseholdHealthTick(World,World.year,S,Lineage,householdHealthNotices,new Set(),__subjectHomeCareHoursByHousehold);
+    householdHealthNotices.slice(0,4).forEach(notice=>{
+      logEv('CONNECTED LIFE. '+NpcSystem.noticeText(World,notice),{},'milestone','HOUSEHOLD FILE · YEAR '+S.age);
+    });
+    if(householdHealthNotices.length>4) logEv((householdHealthNotices.length-4)+' other connected-life changes were filed in summary.',{},'milestone','HOUSEHOLD FILE · YEAR '+S.age);
+  }
   runAffairs();
   runReverseAffairs();
   tickSkills();
