@@ -192,7 +192,7 @@ function renderInventory(){
   const standing='<div class="personal-ledger"><div class="sec-h">PERSONAL STANDING <span>LIVE FILE</span></div>'+ 
     '<div class="standing-grid"><div><b>FREEDOM</b><span>'+S.freedom+' · '+freedomLabel(S.freedom)+'</span></div><div><b>SCRUTINY</b><span>'+S.scrutiny+' · '+scrutinyLabel(S.scrutiny)+'</span></div>'+ 
     '<div><b>BUREAU FAVOR</b><span>'+S.bureauFavor+' / 3</span></div><div><b>SECURITY</b><span>'+securityLabel(Math.min(S.housingSecurity,S.financialSecurity))+'</span></div></div>'+ 
-    '<div class="medical-line"><b>MEDICAL FILE</b><span>'+(conditions.length?conditions.map(c=>MEDICAL_CONDITIONS[c.id].name+(c.known?'':' · unexamined')).join(' · '):(S.medicalRecord?'no active condition':'not yet opened'))+'</span></div>'+ 
+    '<div class="medical-line"><b>MEDICAL FILE</b><span>'+(conditions.length?conditions.map(c=>medicalInfo(c.id).name+(c.known?'':' · unexamined')).join(' · '):(S.medicalRecord?'no active condition':'not yet opened'))+'</span></div>'+
     '<div class="location-line"><b>LOCATION</b><span>'+location.name+' · '+(building?building.name:'address pending')+(travel?' · travelling to '+travel.name:'')+'</span></div>'+
     (settlementConditions?'<div class="settlement-conditions"><div class="sec-h">SETTLEMENT CONDITIONS <span>SIMULATION</span></div><div class="condition-grid"><div><b>EMPLOYMENT</b><span>'+settlementConditions.employment+'</span></div><div><b>COST OF LIVING</b><span>'+settlementConditions.costOfLiving+'</span></div><div><b>HEALTHCARE PRESSURE</b><span>'+settlementConditions.healthcare+'</span></div><div><b>UNREST</b><span>'+settlementConditions.unrest+'</span></div><div><b>SURVEILLANCE</b><span>'+settlementConditions.surveillance+'</span></div></div></div>':'')+'</div>';
   if(S.age<16||S.livingAtHome){
@@ -232,9 +232,9 @@ function renderInventory(){
   el.innerHTML=standing+h;
 }
 function openMedicalTreatmentPicker(conditionId){
-  const condition=conditionById(conditionId||((activeConditions()[0]||{}).id));
+  const condition=conditionById(conditionId||((activeConditions()[0]||{}).instanceId));
   if(!condition||!condition.known) return;
-  const options=medicalTreatmentOptions(condition.id);
+  const options=medicalTreatmentOptions(condition.instanceId);
   const access=medicalAccessFor(S,medicalContext(S));
   const rows=options.length?options.map(option=>'<button class="chipbtn" data-medical-treatment="'+option.id+'"><b>'+option.name+'</b><span>'+money(option.cost)+' · '+Math.round(option.success*100)+'% course success</span></button>').join(''):'<div class="qempty">No treatment is available through '+access.facility+'.</div>';
   $('#skillSheet').innerHTML='<div class="ps-head"><span>TREATMENT ORDER</span><span>'+medicalInfo(condition.id).name.toUpperCase()+'</span></div>'+
@@ -242,7 +242,7 @@ function openMedicalTreatmentPicker(conditionId){
     '<div class="chips">'+rows+'</div><div class="ps-foot"><button class="btn" id="medicalTreatmentCancel">Back ▸</button></div>';
   $('#skillSheet').onclick=e=>{
     const choice=e.target.closest('[data-medical-treatment]');
-    if(choice){ queueAdd('d','treatment',{condition:condition.id,treatment:choice.dataset.medicalTreatment}); $('#skillWrap').classList.add('hidden'); return; }
+    if(choice){ queueAdd('d','treatment',{condition:condition.instanceId,treatment:choice.dataset.medicalTreatment}); $('#skillWrap').classList.add('hidden'); return; }
     if(e.target.id==='medicalTreatmentCancel') $('#skillWrap').classList.add('hidden');
   };
   $('#skillWrap').classList.remove('hidden');
@@ -251,7 +251,7 @@ function openMedicalFile(){
   if(!S) return;
   const summary=medicalSummary(S), conditions=summary.conditions, access=summary.access;
   const rows=conditions.length?conditions.map(c=>{
-    const treatment=c.known?'<button class="btn small" data-medical-treat="'+c.id+'">File treatment · 1h ▸</button>':'<span class="ar-meta">Diagnosis required before treatment.</span>';
+    const treatment=c.known?'<button class="btn small" data-medical-treat="'+c.instanceId+'">File treatment · 1h ▸</button>':'<span class="ar-meta">Diagnosis required before treatment.</span>';
     return '<div class="medical-card"><div class="arow"><div class="ar-grade">'+c.severity+'</div><div style="flex:1"><div class="ar-name">'+medicalInfo(c.id).name+'</div><div class="ar-meta">'+medicalSeverityLabel(c.severity)+' · '+medicalStateLabel(c)+' · since age '+c.onsetAge+'</div><div class="ar-meta">'+(c.source||'unclassified')+(c.treatment?' · last care: '+(MEDICAL_TREATMENTS[c.treatment]||{}).name:'')+'</div></div></div>'+treatment+'</div>';
   }).join(''):'<div class="aempty">No active condition is recorded. A healthy-looking file is still only a file; use a doctor visit when something feels wrong.</div>';
   $('#medicalSheet').innerHTML='<div class="ps-head"><span>MEDICAL FILE</span><span>FORM M-2</span></div>'+
@@ -398,13 +398,13 @@ function renderNationalMapClean(){
   const nodes=KARSEN_SETTLEMENTS.map(s=>{const p=KARSEN_MAP_LABELS[s.id]||{dx:3,dy:1,anchor:'start'},radius=s.kind==='city'?2.35:s.kind==='town'?1.85:1.35,current=World.activeSettlementId===s.id;return '<g class="map-node '+s.kind+(current?' current':'')+'" data-map-settlement="'+s.id+'" tabindex="0" role="button" aria-label="'+s.name+'"><circle class="map-node-hit" cx="'+s.x+'" cy="'+s.y+'" r="4.2"></circle><circle class="map-node-dot" cx="'+s.x+'" cy="'+s.y+'" r="'+radius+'"></circle><text x="'+(s.x+p.dx)+'" y="'+(s.y+p.dy)+'" text-anchor="'+p.anchor+'">'+s.name+'</text></g>';}).join('');
   const regionLabels='<g class="map-region-labels" aria-hidden="true"><text x="18" y="35">WESTERN MARCHES</text><text x="52" y="22">CENTRAL KARSEN</text><text x="73" y="38">EASTERN LINE</text><text x="50" y="64">SOUTHERN FARMLAND</text></g>';
   const routes=KARSEN_ROUTES.map(mapRouteClean).join('');
-  return '<div class="map-kicker"><span>COMMONWEALTH OF KARSEN</span><span>OFFICIAL SURVEY Â· '+currentYear()+'</span></div>'+ 
-    '<div class="map-toolbar"><button class="map-tool active" data-map-mode="national">NATIONAL</button><span>'+KARSEN_SETTLEMENTS.length+' SETTLEMENTS Â· '+World.map.visitedSettlementIds.length+' VISITED</span></div>'+ 
+  return '<div class="map-kicker"><span>COMMONWEALTH OF KARSEN</span><span>OFFICIAL SURVEY · '+currentYear()+'</span></div>'+
+    '<div class="map-toolbar"><button class="map-tool active" data-map-mode="national">NATIONAL</button><span>'+KARSEN_SETTLEMENTS.length+' SETTLEMENTS · '+World.map.visitedSettlementIds.length+' VISITED</span></div>'+
     '<div class="map-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 100 82" aria-label="National map of Karsen"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')"><path class="map-border" d="M 10 17 C 20 9 34 8 47 10 C 60 7 76 8 89 17 C 95 27 96 43 92 57 C 88 70 77 76 63 77 C 49 80 34 77 20 78 C 10 70 6 56 7 42 C 6 30 7 22 10 17 Z"></path><path class="map-relief" d="M 13 31 C 23 26 33 27 42 31 S 61 36 72 27 S 85 22 92 26 M 11 60 C 24 55 35 59 45 63 S 67 68 87 59"></path><path class="map-river" d="M 7 47 C 20 40 29 42 39 47 C 50 53 59 49 67 40 C 76 30 84 31 95 25"></path>'+regionLabels+routes+nodes+'</g></svg><div class="map-compass">N</div></div>'+ 
     '<div class="map-legend"><span><i class="legend-city"></i> city</span><span><i class="legend-town"></i> town</span><span><i class="legend-village"></i> village</span><span><i class="legend-road"></i> road</span><span><i class="legend-rail"></i> rail</span><span><i class="legend-river"></i> river</span></div>'+ 
-    '<div class="map-selection"><div class="map-selection-copy"><b>'+selected.name+'</b><span>'+mapSettlementBadge(selected)+' Â· '+selected.region+' Â· population '+selected.population+'</span><em>'+selected.description+'</em></div><button class="btn small" data-map-open="'+selected.id+'">Open Settlement Map â–¸</button></div>';
+    '<div class="map-selection"><div class="map-selection-copy"><b>'+selected.name+'</b><span>'+mapSettlementBadge(selected)+' · '+selected.region+' · population '+selected.population+'</span><em>'+selected.description+'</em></div><button class="btn small" data-map-open="'+selected.id+'">Open Settlement Map ▸</button></div>';
 }
-function cleanNationalMapMarkup(markup){return markup.replace(/(?:Ã‚Â·|Â·)/g,' - ').replace(/(?:Ã¢â€“Â¸|â€“Â¸|â–¸|▸)/g,' > ');}
+function cleanNationalMapMarkup(markup){return markup.replace(/·/g,' - ').replace(/▸/g,' > ');}
 function mapMinorRoadsSvg(){
   const roads=[
     'M 18 49 C 24 45 30 42 38 40 C 43 38 45 38 48 37',
