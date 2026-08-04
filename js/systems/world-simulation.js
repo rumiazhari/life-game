@@ -96,6 +96,7 @@
     });
     defs.forEach(settlement=>{world.settlements[settlement.id]=repairRuntime(world.settlements[settlement.id]||runtimeState(settlement),settlement);});
     world.simulationSchemaVersion=SIMULATION_SCHEMA_VERSION;
+    if(root.BusinessSystem&&typeof root.BusinessSystem.migrate==='function') root.BusinessSystem.migrate(world,defs);
     return world;
   }
   function initialize(world){ return migrate(world).settlements; }
