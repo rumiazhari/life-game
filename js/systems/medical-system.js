@@ -5,6 +5,18 @@
   const KNOWN_STATES=new Set(['diagnosed','treated','remission','chronic']);
   const number=(value,fallback=0)=>Number.isFinite(Number(value))?Number(value):fallback;
   const integer=(value,fallback=0)=>Math.round(number(value,fallback));
+  function optionalInteger(value){
+    if(
+      value==null||
+      (typeof value==='string'&&value.trim()==='')
+    ){
+      return null;
+    }
+    const numeric=Number(value);
+    return Number.isFinite(numeric)
+      ?Math.round(numeric)
+      :null;
+  }
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,number(value,min)));
   const subjectLike=person=>!!person&&typeof person.health==='number';
   const personKey=person=>String(person&&(person.npcId||person.id)||'subject').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'subject';
@@ -24,7 +36,8 @@
     condition.known=KNOWN_STATES.has(condition.state)?true:Boolean(condition.known);
     condition.treated=condition.state==='treated';condition.resolved=condition.state==='resolved';
     condition.onsetAge=number(condition.onsetAge,ageOf(person,world));condition.onsetYear=integer(condition.onsetYear,yearOf(person,world));
-    ['diagnosedAge','diagnosedYear','resolvedAge','resolvedYear','lastProgressionYear','lastTreatmentYear'].forEach(key=>{condition[key]=condition[key]==null?null:number(condition[key]);});
+    ['diagnosedAge','diagnosedYear','resolvedAge','resolvedYear','lastTreatmentYear'].forEach(key=>{condition[key]=condition[key]==null?null:number(condition[key]);});
+    condition.lastProgressionYear=optionalInteger(condition.lastProgressionYear);
     condition.source=String(condition.source||'unclassified');condition.exposureType=String(condition.exposureType||(info?info.kind:'unknown'));condition.contagious=condition.contagious==null?(info?!!info.contagious:false):!!condition.contagious;
     condition.treatment=condition.treatment||null;condition.adherence=number(condition.adherence);condition.yearsActive=Math.max(0,number(condition.yearsActive,condition.years));condition.years=condition.yearsActive;
     condition.incubationLeft=Math.max(0,number(condition.incubationLeft,condition.state==='latent'&&info?info.incubation:0));condition.complications=Array.isArray(condition.complications)?condition.complications:[];
@@ -43,7 +56,7 @@
     if(!state||typeof state!=='object'){state={conditions:Array.isArray(legacy)?legacy:[]};setMedical(person,state);}
     state.schemaVersion=SCHEMA_VERSION;state.resilience=clamp(number(state.resilience,50),0,100);state.prevention=Object.assign({sanitation:0,vaccination:0,screening:0},state.prevention||{});state.exposure=Object.assign({currentRisk:0,lastSource:null,lastYear:null},state.exposure||{});
     state.history=Array.isArray(state.history)?state.history.slice(-24):[];state.conditions=Array.isArray(state.conditions)?state.conditions:(Array.isArray(legacy)?legacy:[]);state.yearHoursPenalty=Math.max(0,Math.min(2,number(state.yearHoursPenalty)));
-    ['lastCheckupAge','lastTreatmentAge','lastHealthSource','lastHealthAge','lastTickYear'].forEach(key=>{if(state[key]===undefined)state[key]=null;});state.instanceCounter=Math.max(0,Math.floor(number(state.instanceCounter)));state.actionCounter=Math.max(0,Math.floor(number(state.actionCounter)));
+    ['lastCheckupAge','lastTreatmentAge','lastHealthSource','lastHealthAge'].forEach(key=>{if(state[key]===undefined)state[key]=null;});state.lastTickYear=optionalInteger(state.lastTickYear);state.instanceCounter=Math.max(0,Math.floor(number(state.instanceCounter)));state.actionCounter=Math.max(0,Math.floor(number(state.actionCounter)));
     state.conditions.forEach(condition=>normalizeCondition(person,condition,options));reconcileInstanceIds(person,state.conditions,state);return syncLegacy(person);
   }
   function syncLegacy(person){const state=medical(person)||ensureMedicalState(person);state.conditions.forEach(condition=>{condition.id=condition.definitionId;condition.years=condition.yearsActive;condition.treated=condition.state==='treated';condition.resolved=condition.state==='resolved';});if(subjectLike(person))person.conditions=state.conditions;else person.health.conditions=state.conditions;return state;}
@@ -156,6 +169,47 @@
     transitions.push({instanceId:existingChronic.instanceId,kind:'chronic-merged',from:'chronic',to:'chronic'});
     return true;
   }
+  function reconcileChronicDuplicates(world,person,ctx,year,transitions){
+    const active=activeConditions(person).filter(condition=>condition.definitionId==='chronic');
+    if(active.length<2)return;
+    const sorted=active.slice().sort((a,b)=>String(a.instanceId||'').localeCompare(String(b.instanceId||'')));
+    const canonical=sorted[0],duplicates=sorted.slice(1);
+    const finiteSeverities=active.map(condition=>Number(condition.severity)).filter(Number.isFinite);
+    const maxSeverity=finiteSeverities.length?Math.max(...finiteSeverities):canonical.severity;
+    const finiteOnsetYears=active.map(condition=>Number(condition.onsetYear)).filter(Number.isFinite);
+    const earliestOnsetYear=finiteOnsetYears.length?Math.min(...finiteOnsetYears):canonical.onsetYear;
+    const finiteOnsetAges=active.map(condition=>Number(condition.onsetAge)).filter(Number.isFinite);
+    const earliestOnsetAge=finiteOnsetAges.length?Math.min(...finiteOnsetAges):canonical.onsetAge;
+    canonical.severity=clamp(maxSeverity,0,5);
+    canonical.known=true;canonical.contagious=false;canonical.exposureType='chronic';canonical.incubationLeft=0;
+    canonical.onsetYear=earliestOnsetYear;canonical.onsetAge=earliestOnsetAge;
+    const treatedDuplicates=active.filter(condition=>condition.state==='treated');
+    if(treatedDuplicates.length){
+      const best=treatedDuplicates.slice().sort((a,b)=>{
+        const ay=Number.isFinite(Number(a.lastTreatmentYear))?Number(a.lastTreatmentYear):-Infinity;
+        const by=Number.isFinite(Number(b.lastTreatmentYear))?Number(b.lastTreatmentYear):-Infinity;
+        if(ay!==by)return by-ay;
+        return String(a.instanceId||'').localeCompare(String(b.instanceId||''));
+      })[0];
+      canonical.treatment=best.treatment;canonical.adherence=best.adherence;canonical.lastTreatmentYear=best.lastTreatmentYear;
+      canonical.state='treated';canonical.treated=true;canonical.resolved=false;
+    }else if(active.some(condition=>condition.state==='remission')){
+      canonical.state='remission';canonical.treated=false;canonical.resolved=false;
+    }else{
+      canonical.state='chronic';canonical.treated=false;canonical.resolved=false;
+    }
+    const mergedIds=[];
+    duplicates.forEach(duplicate=>{
+      mergedIds.push(duplicate.instanceId);
+      duplicate.state='resolved';duplicate.resolved=true;duplicate.treated=false;
+      duplicate.resolvedAge=ctx.age;duplicate.resolvedYear=year;
+      history(person,'resolved',duplicate,'merged into chronic instance '+canonical.instanceId,{world,year});
+      transitions.push({instanceId:duplicate.instanceId,kind:'chronic-reconciled',from:'chronic',to:'resolved'});
+    });
+    history(person,'chronic',canonical,'merged duplicate chronic instances: '+mergedIds.join(', '),{world,year});
+    transitions.push({instanceId:canonical.instanceId,kind:'chronic-reconciled',from:'chronic',to:'chronic'});
+    syncLegacy(person);
+  }
   function tickPerson(world,person,context,options={}){
     const ctx=context||contextFor(world,person);
     const year=integer(ctx.year);
@@ -164,6 +218,7 @@
     if(state.lastTickYear!=null&&year<state.lastTickYear)return progressionResult({applied:false,reason:'stale-year',year,yearHoursPenalty:state.yearHoursPenalty});
     const newConditions=[],progressedConditions=[],transitions=[];
     const result=progressionResult({applied:true,reason:'applied',year,newConditions,progressedConditions,transitions});
+    reconcileChronicDuplicates(world,person,ctx,year,transitions);
     attemptAnnualExposures(world,person,ctx,year,options,state,newConditions);
     state.yearHoursPenalty=0;
     sortedActiveConditions(person).forEach(condition=>{
@@ -230,6 +285,6 @@
     const roll=readRandom(rng);
     return Object.assign({died:roll<details.risk,roll},details);
   }
-  function checkInvariants(person){const state=ensureMedicalState(person),violations=[],key=personKey(person),pattern=new RegExp('^condition:'+key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+':-?\\d+:\\d+$');if(state.schemaVersion!==SCHEMA_VERSION)violations.push('medical schema must be version 2');if((subjectLike(person)?person.conditions:person.health.conditions)!==state.conditions)violations.push('compatibility condition array is not synchronized');const ids=new Set();state.conditions.forEach((condition,index)=>{const tag=condition.instanceId||'index '+index;if(!root.ConditionRegistry.isConditionId(condition.definitionId))violations.push('unknown condition definition: '+condition.definitionId);if(!pattern.test(String(condition.instanceId))||ids.has(condition.instanceId))violations.push('invalid or duplicate instance ID: '+tag);ids.add(condition.instanceId);if(!Number.isFinite(condition.severity)||condition.severity<0||condition.severity>5)violations.push('condition severity must be bounded: '+tag);if(!STATES.has(condition.state))violations.push('condition has invalid state: '+tag);if(condition.resolved!==(condition.state==='resolved')||condition.treated!==(condition.state==='treated')||(KNOWN_STATES.has(condition.state)&&condition.known!==true))violations.push('condition state flags inconsistent: '+tag);if(condition.years!==condition.yearsActive||!Number.isFinite(condition.yearsActive)||condition.yearsActive<0||!Number.isFinite(condition.incubationLeft)||condition.incubationLeft<0||!Array.isArray(condition.complications))violations.push('condition lifecycle fields invalid: '+tag);});if(!Array.isArray(state.history)||state.history.length>24)violations.push('medical history must contain at most 24 entries');if(!Number.isInteger(state.instanceCounter)||state.instanceCounter<0||!Number.isInteger(state.actionCounter)||state.actionCounter<0)violations.push('medical counters must be nonnegative integers');if(!Number.isFinite(getHealth(person))||getHealth(person)<0||getHealth(person)>getHealthCap(person))violations.push('health must be within bounds');if(state.lastTickYear!==null&&!Number.isInteger(state.lastTickYear))violations.push('medical.lastTickYear must be null or a finite integer');state.conditions.forEach((condition,index)=>{const tag=condition.instanceId||'index '+index;if(condition.lastProgressionYear!==null&&!Number.isInteger(condition.lastProgressionYear))violations.push('condition.lastProgressionYear must be null or a finite integer: '+tag);if(state.lastTickYear!=null&&condition.lastProgressionYear!=null&&condition.lastProgressionYear>state.lastTickYear)violations.push('condition.lastProgressionYear cannot be later than medical.lastTickYear: '+tag);});return violations;}
+  function checkInvariants(person){const state=ensureMedicalState(person),violations=[],key=personKey(person),pattern=new RegExp('^condition:'+key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+':-?\\d+:\\d+$');if(state.schemaVersion!==SCHEMA_VERSION)violations.push('medical schema must be version 2');if((subjectLike(person)?person.conditions:person.health.conditions)!==state.conditions)violations.push('compatibility condition array is not synchronized');const ids=new Set();state.conditions.forEach((condition,index)=>{const tag=condition.instanceId||'index '+index;if(!root.ConditionRegistry.isConditionId(condition.definitionId))violations.push('unknown condition definition: '+condition.definitionId);if(!pattern.test(String(condition.instanceId))||ids.has(condition.instanceId))violations.push('invalid or duplicate instance ID: '+tag);ids.add(condition.instanceId);if(!Number.isFinite(condition.severity)||condition.severity<0||condition.severity>5)violations.push('condition severity must be bounded: '+tag);if(!STATES.has(condition.state))violations.push('condition has invalid state: '+tag);if(condition.resolved!==(condition.state==='resolved')||condition.treated!==(condition.state==='treated')||(KNOWN_STATES.has(condition.state)&&condition.known!==true))violations.push('condition state flags inconsistent: '+tag);if(condition.years!==condition.yearsActive||!Number.isFinite(condition.yearsActive)||condition.yearsActive<0||!Number.isFinite(condition.incubationLeft)||condition.incubationLeft<0||!Array.isArray(condition.complications))violations.push('condition lifecycle fields invalid: '+tag);});if(!Array.isArray(state.history)||state.history.length>24)violations.push('medical history must contain at most 24 entries');if(!Number.isInteger(state.instanceCounter)||state.instanceCounter<0||!Number.isInteger(state.actionCounter)||state.actionCounter<0)violations.push('medical counters must be nonnegative integers');if(!Number.isFinite(getHealth(person))||getHealth(person)<0||getHealth(person)>getHealthCap(person))violations.push('health must be within bounds');if(state.lastTickYear!==null&&!Number.isInteger(state.lastTickYear))violations.push('medical.lastTickYear must be null or a finite integer');state.conditions.forEach((condition,index)=>{const tag=condition.instanceId||'index '+index;if(condition.lastProgressionYear!==null&&!Number.isInteger(condition.lastProgressionYear))violations.push('condition.lastProgressionYear must be null or a finite integer: '+tag);if(state.lastTickYear!=null&&condition.lastProgressionYear!=null&&condition.lastProgressionYear>state.lastTickYear)violations.push('condition.lastProgressionYear cannot be later than medical.lastTickYear: '+tag);});if(activeConditions(person).filter(condition=>condition.definitionId==='chronic').length>1)violations.push('multiple active chronic conditions');return violations;}
   root.MedicalSystem={SCHEMA_VERSION,personKey,ageOf,yearOf,isSubjectLike:subjectLike,getHealth,getHealthCap,setHealth,applyHealthDelta:(person,amount,source,worldOrYear)=>setHealth(person,getHealth(person)+amount,source,worldOrYear),ensureMedicalState,normalizeCondition,syncLegacy,migrate:ensureMedicalState,checkInvariants,activeConditions,conditionByRef,addCondition,history,stream,contextFor,accessFor,exposureRisk,expose,examine,treatmentOptions,treatmentCost,treat,hoursPenalty,educationPenalty,workPenalty,summary,tickPerson,mortalityDetails,rollMortality};
 })(globalThis);
