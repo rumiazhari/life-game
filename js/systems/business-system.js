@@ -106,14 +106,38 @@
     return out;
   }
 
-  function nextBusinessId(world){
-    world.businessCounter=(Number.isFinite(Number(world.businessCounter))?Number(world.businessCounter):0)+1;
-    return 'business:'+String(world.businessCounter).padStart(5,'0');
-  }
-
   function businessIdNumber(id){
     const match=/^business:(\d{5,})$/.exec(String(id||''));
     return match?Number(match[1]):null;
+  }
+
+  function isValidBusinessId(id){
+    return typeof id==='string'&&/^business:\d{5,}$/.test(id);
+  }
+
+  function highestBusinessIdNumber(world){
+    let highest=0;
+    Object.keys(world.businesses).forEach(key=>{
+      const record=world.businesses[key];
+      const keyNum=businessIdNumber(key);
+      if(keyNum!=null) highest=Math.max(highest,keyNum);
+      const idNum=businessIdNumber(record&&record.id);
+      if(idNum!=null) highest=Math.max(highest,idNum);
+    });
+    return highest;
+  }
+
+  function nextBusinessId(world){
+    const highest=highestBusinessIdNumber(world);
+    let counter=Number.isFinite(Number(world.businessCounter))?Number(world.businessCounter):0;
+    if(counter<highest) counter=highest;
+    let id;
+    do{
+      counter+=1;
+      id='business:'+String(counter).padStart(5,'0');
+    } while(Object.prototype.hasOwnProperty.call(world.businesses,id));
+    world.businessCounter=counter;
+    return id;
   }
 
   function ensure(world){
@@ -193,6 +217,18 @@
     return occurrence>1?base+' No. '+occurrence:base;
   }
 
+  function sectorOccurrenceKeys(settlementId,businesses){
+    const sorted=businesses.slice().sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+    const occupiedKeys=new Set();
+    const sectorCounts={};
+    sorted.forEach(business=>{
+      sectorCounts[business.sector]=(sectorCounts[business.sector]||0)+1;
+      const occurrence=sectorCounts[business.sector];
+      occupiedKeys.add(settlementId+'|'+business.sector+'|'+occurrence);
+    });
+    return occupiedKeys;
+  }
+
   function seedSettlement(world,settlement){
     ensure(world);
     if(!settlement||!settlement.id) return [];
@@ -201,7 +237,7 @@
     const target=targetCountForPopulation(populationOf(settlement));
     if(existing.length>=target) return existing;
 
-    const usedNames=new Set(existing.map(b=>b.name));
+    const occupiedKeys=sectorOccurrenceKeys(settlementId,existing);
     const created=existing.slice();
     let sectorIndex=0;
     const occurrenceBySector={};
@@ -210,10 +246,11 @@
       sectorIndex++;
       occurrenceBySector[sector]=(occurrenceBySector[sector]||0)+1;
       const occurrence=occurrenceBySector[sector];
+      const key=settlementId+'|'+sector+'|'+occurrence;
+      if(occupiedKeys.has(key)) continue;
       const name=seedName(settlement.name||settlementId,sector,occurrence);
-      if(usedNames.has(name)) continue;
       const record=create(world,{settlementId,sector,name,foundedYear:settlement.foundedYear});
-      usedNames.add(name);
+      occupiedKeys.add(key);
       created.push(record);
     }
     return created;
@@ -246,18 +283,35 @@
 
   function migrate(world,settlementDefinitions){
     ensure(world);
+    const highest=highestBusinessIdNumber(world);
+    if(!Number.isFinite(Number(world.businessCounter))||Number(world.businessCounter)<highest) world.businessCounter=highest;
+
+    const rawKeys=Object.keys(world.businesses).sort();
     const normalized={};
-    let highestId=0;
-    Object.keys(world.businesses).forEach(key=>{
+    const usedIds=new Set();
+    rawKeys.forEach(key=>{
       const record=world.businesses[key];
-      const id=(record&&record.id)||key;
-      const normal=normalizeRecord(id,record,record&&record.settlementId);
-      normalized[id]=normal;
-      const num=businessIdNumber(id);
-      if(num!=null) highestId=Math.max(highestId,num);
+      if(!record||typeof record!=='object') return;
+      const recordId=record.id;
+      let finalId=null;
+      if(isValidBusinessId(recordId)&&!usedIds.has(recordId)){
+        finalId=recordId;
+      } else if(isValidBusinessId(key)&&!usedIds.has(key)){
+        finalId=key;
+      } else {
+        let counter=world.businessCounter;
+        let candidate;
+        do{
+          counter+=1;
+          candidate='business:'+String(counter).padStart(5,'0');
+        } while(usedIds.has(candidate));
+        world.businessCounter=counter;
+        finalId=candidate;
+      }
+      usedIds.add(finalId);
+      normalized[finalId]=normalizeRecord(finalId,record,record.settlementId);
     });
     world.businesses=normalized;
-    if(world.businessCounter<highestId) world.businessCounter=highestId;
     const defs=Array.isArray(settlementDefinitions)?settlementDefinitions:[];
     seedWorld(world,defs);
     world.businessSchemaVersion=SCHEMA_VERSION;
@@ -269,6 +323,9 @@
     if(!world||typeof world!=='object'||!world.businesses||typeof world.businesses!=='object'||Array.isArray(world.businesses)){
       issues.push('businesses must be an object');
       return issues;
+    }
+    if(typeof world.businessCounter!=='number'||!Number.isFinite(world.businessCounter)||world.businessCounter<0||!Number.isInteger(world.businessCounter)){
+      issues.push('businessCounter must be a finite non-negative integer');
     }
     const ids=new Set();
     const perSettlementCount={};
@@ -288,9 +345,14 @@
       else if(new Set(business.employeeIds.map(String)).size!==business.employeeIds.length) issues.push('business '+key+' has duplicate employeeIds');
       if(!Array.isArray(business.vacancies)) issues.push('business '+key+' vacancies must be an array');
       if(!business.finances||typeof business.finances!=='object') issues.push('business '+key+' missing finances');
-      else ['cash','debt','revenue','expenses','payroll','profit'].forEach(field=>{
-        if(!Number.isFinite(Number(business.finances[field]))) issues.push('business '+key+' has non-finite finances.'+field);
-      });
+      else {
+        ['cash','debt','revenue','expenses','payroll','profit'].forEach(field=>{
+          const value=business.finances[field];
+          if(typeof value!=='number'||!Number.isFinite(value)) issues.push('business '+key+' has non-finite finances.'+field);
+        });
+        const lastYear=business.finances.lastYear;
+        if(lastYear!=null&&(typeof lastYear!=='number'||!Number.isFinite(lastYear))) issues.push('business '+key+' has invalid finances.lastYear');
+      }
       if(!Array.isArray(business.history)) issues.push('business '+key+' history must be an array');
       else if(business.history.length>HISTORY_LIMIT) issues.push('business '+key+' history exceeds limit of '+HISTORY_LIMIT);
       if(business.settlementId){

@@ -281,3 +281,137 @@ test('repeated WorldSimulation.migrate calls do not change serialized business s
   })()`);
   assert.equal(JSON.parse(result),true);
 });
+
+test('create never reuses an existing ID even when businessCounter is behind',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['business:00007']={id:'business:00007',name:'Existing Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businessCounter=0;
+    const created=BusinessSystem.create(World,{settlementId:'branec',sector:'retail'});
+    return JSON.stringify({newId:created.id,existingName:World.businesses['business:00007'].name,existingUnchanged:JSON.stringify(World.businesses['business:00007'])});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.newId,'business:00008');
+  assert.equal(parsed.existingName,'Existing Co');
+});
+
+test('migration repairs a malformed record ID into a valid business:NNNNN ID',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['not-a-valid-id']={id:'not-a-valid-id',name:'Odd Shop',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    BusinessSystem.migrate(World,[]);
+    const ids=Object.keys(World.businesses).filter(id=>/^business:\\d{5,}$/.test(id));
+    const record=World.businesses[ids.find(id=>World.businesses[id].name==='Odd Shop')];
+    return JSON.stringify({id:record.id,valid:/^business:\\d{5,}$/.test(record.id),keyMatchesId:World.businesses[record.id]===record});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.valid);
+  assert.ok(parsed.keyMatchesId);
+});
+
+test('two records claiming business:00001 are repaired into two separate businesses',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['business:00001']={id:'business:00001',name:'First Claimant',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businesses['second-claimant']={id:'business:00001',name:'Second Claimant',settlementId:'veskar',sector:'finance',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    BusinessSystem.migrate(World,[]);
+    const names=Object.values(World.businesses).map(b=>b.name).filter(name=>name==='First Claimant'||name==='Second Claimant');
+    const ids=Object.values(World.businesses).filter(b=>names.includes(b.name)).map(b=>b.id);
+    return JSON.stringify({names:names.sort(),uniqueIds:new Set(ids).size===2});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.deepEqual(parsed.names,['First Claimant','Second Claimant']);
+  assert.ok(parsed.uniqueIds);
+});
+
+test('migration is idempotent after repairing malformed and duplicate IDs',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['business:00001']={id:'business:00001',name:'First Claimant',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businesses['second-claimant']={id:'business:00001',name:'Second Claimant',settlementId:'veskar',sector:'finance',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    BusinessSystem.migrate(World,[]);
+    const first=JSON.stringify(World.businesses);
+    const firstCounter=World.businessCounter;
+    BusinessSystem.migrate(World,[]);
+    BusinessSystem.migrate(World,[]);
+    const second=JSON.stringify(World.businesses);
+    return JSON.stringify({equal:first===second,counterEqual:firstCounter===World.businessCounter});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.equal);
+  assert.ok(parsed.counterEqual);
+});
+
+test('checkInvariants returns no violations after repairing malformed and duplicate IDs',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['business:00001']={id:'business:00001',name:'First Claimant',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businesses['second-claimant']={id:'business:00001',name:'Second Claimant',settlementId:'veskar',sector:'finance',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    BusinessSystem.migrate(World,[]);
+    return JSON.stringify(BusinessSystem.checkInvariants(World));
+  })()`);
+  assert.deepEqual(JSON.parse(result),[]);
+});
+
+test('a custom renamed retail business occupies retail occurrence 1 and blocks reseeding it',()=>{
+  const context=freshWorld();
+  const settlement=`{id:'krasnava',name:'Krasnava',kind:'village',population:'3,800'}`;
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    const custom=BusinessSystem.create(World,{settlementId:'krasnava',sector:'retail',name:'Totally Custom Shop'});
+    BusinessSystem.seedSettlement(World,${settlement});
+    const retailBusinesses=BusinessSystem.forSettlement(World,'krasnava').filter(b=>b.sector==='retail');
+    return JSON.stringify({retailCount:retailBusinesses.length,firstRetailName:retailBusinesses.sort((a,b)=>a.id.localeCompare(b.id))[0].name});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.firstRetailName,'Totally Custom Shop');
+  assert.equal(parsed.retailCount,1);
+});
+
+test('repeated seedWorld remains byte-for-byte idempotent with a custom pre-existing business',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    BusinessSystem.create(World,{settlementId:'branec',sector:'retail',name:'Totally Custom Shop'});
+    BusinessSystem.seedWorld(World,KARSEN_SETTLEMENTS);
+    const first=JSON.stringify(World.businesses);
+    const firstCounter=World.businessCounter;
+    BusinessSystem.seedWorld(World,KARSEN_SETTLEMENTS);
+    BusinessSystem.seedWorld(World,KARSEN_SETTLEMENTS);
+    const second=JSON.stringify(World.businesses);
+    return JSON.stringify({equal:first===second,counterEqual:firstCounter===World.businessCounter});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.equal);
+  assert.ok(parsed.counterEqual);
+});
+
+test('checkInvariants detects non-finite/malformed businessCounter',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.migrate(World,KARSEN_SETTLEMENTS);
+    World.businessCounter='oops';
+    return JSON.stringify(BusinessSystem.checkInvariants(World));
+  })()`);
+  const issues=JSON.parse(result);
+  assert.ok(issues.some(msg=>/businessCounter/i.test(msg)));
+});
+
+test('checkInvariants rejects null, empty-string, and numeric-string finance values',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['business:00001']={id:'business:00001',name:'Stringy Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:null,debt:'',revenue:'500',expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businessCounter=1;
+    return JSON.stringify(BusinessSystem.checkInvariants(World));
+  })()`);
+  const issues=JSON.parse(result);
+  assert.ok(issues.some(msg=>/finances\.cash/.test(msg)));
+  assert.ok(issues.some(msg=>/finances\.debt/.test(msg)));
+  assert.ok(issues.some(msg=>/finances\.revenue/.test(msg)));
+});
