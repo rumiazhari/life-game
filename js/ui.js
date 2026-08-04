@@ -1650,6 +1650,18 @@ function runRandomEvents(){
     if(e.follow) pushFollow(e.follow(S)); S.cool[e.id]=S.age+(e.once?999:(e.cd||6));
   }
 }
+function runPersonalStandingYearTick(){
+  if(!S) return;
+  const misconduct=(S.record?7:0)+S.crime*4+S.vice*1.5;
+  const cooling=S.bureauFavor>0?2:4;
+  S.scrutiny=clamp(Math.round(S.scrutiny+misconduct-cooling),0,100);
+  if(S.age>=18&&!S.record&&S.vice<=1&&S.scrutiny<20&&currentYear()-S.lastFavorYear>=5){
+    S.bureauFavor=Math.min(3,S.bureauFavor+1);
+    S.lastFavorYear=currentYear();
+    if(typeof logEv==='function') logEv('The file remained unremarkable long enough to earn a small Bureau Favor. It is not kindness, but it can be spent.',{},'ruling','PERSONAL STANDING');
+  }
+  updatePersonalStanding();
+}
 function checkMortality(){
   let dead=false, cause='';
   if(S.jailUntil<=S.age){
@@ -1667,8 +1679,8 @@ function checkMortality(){
         : pick(['a hunger the body could not recover from','a sickness a fuller table might have survived']);
     }
   }
-  const medicalMortality=typeof medicalMortalityDetails==='function'?medicalMortalityDetails(S):null;
-  if(!dead&&medicalMortality&&medicalMortality.risk>0&&chance(medicalMortality.risk)){dead=true;cause=medicalMortality.cause||'complications from a long illness';}
+  const medicalMortality=typeof medicalMortalityRoll==='function'?medicalMortalityRoll(S):null;
+  if(!dead&&medicalMortality&&medicalMortality.died){dead=true;cause=medicalMortality.cause||'complications from a long illness';}
   if(!dead&&S.health<=0){dead=true;cause=pick(['heart failure','a long illness, patiently endured','sudden collapse at the kitchen table']);}
   else if(!dead&&S.happiness<=0&&chance(0.07)){dead=true;cause='a despair the file does not fully document';}
   else if(!dead&&S.age>=56){const p=0.006*(S.age-55)+Math.max(0,70-S.health)*0.0012; if(chance(p)){dead=true;cause=S.age>=84?'natural causes, in sleep':'heart failure';}}
@@ -2243,11 +2255,12 @@ function advanceYear(suppressBurst,quiet){
   if(typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.tick==='function') HouseholdSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,subjectIncome:S.__worldWagePaid,subjectAssetsBefore:S.__householdAssetsBeforeEconomy,subjectAssetsAfterEconomy:S.assets,subjectExpensesPaid:S.__householdSubjectExpensesPaid,subjectEconomySettled:true}).forEach(notice=>{
     if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.noticeText==='function') logEv('CONNECTED LIFE. '+NpcSystem.noticeText(World,notice),{},'milestone','HOUSEHOLD FILE · YEAR '+S.age);
   });
-  runPersonalYearTick();
+  runPersonalStandingYearTick();
   if(S.jobTier===0&&S.age>=16&&S.age<65) rollJobVacancies();
   const __newStage=stageForAge(S.age);
   if(__newStage!==S.stage){ S.stage=__newStage; queueChapterCard(__newStage); renderStage(); }
   resolvePlan();
+  runPersonalYearTick();
   runAffairs();
   runReverseAffairs();
   tickSkills();

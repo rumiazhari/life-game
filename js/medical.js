@@ -34,20 +34,30 @@ function medicalSummary(subject){ const person=medicalSubject(subject); return p
 function medicalStartOutbreak(id,severity,years){ if(!medicalWorld()) return null; const conditions=id==='influenza'?['respiratory','infection']:(id==='waterborne'?['infection']:[id||'respiratory']); World.publicHealth={outbreak:{id:id||'seasonal illness',severity:severity||1,conditions,endYear:medicalNow()+(years||1)},lastNoticeYear:medicalNow()}; return World.publicHealth.outbreak; }
 function medicalTickOutbreak(){ if(!medicalWorld()||!World.publicHealth||!World.publicHealth.outbreak) return; if(medicalNow()>World.publicHealth.outbreak.endYear) World.publicHealth.outbreak=null; }
 function runPersonalYearTick(){
-  if(!S) return; ensurePersonalSystems(S); const m=ensureMedicalState(S), ctx=medicalContext(S); m.yearHoursPenalty=0; medicalTickOutbreak();
-  const newConditions=[];
-  ['respiratory','infection','injury','strain','chronic'].forEach(id=>{ if(conditionById(id,S)) return; const source=id==='injury'?'occupational strain':(ctx.outbreak?'public-health outbreak':'living conditions'); const c=medicalExpose(S,{conditionId:id,source},ctx); if(c) newConditions.push(c); });
-  let healthHit=0, happinessHit=0;
-  activeConditions(S).forEach(c=>{
-    const info=medicalInfo(c.id); c.yearsActive++; c.years=c.yearsActive;
-    if(c.state==='latent'){ c.incubationLeft--; if(c.incubationLeft<=0){ c.state='symptomatic'; c.known=false; medicalHistory(S,'symptom',c,info.name); } return; }
-    if(c.state==='treated'&&c.treated){ c.severity=Math.max(0,c.severity-(MEDICAL_TREATMENTS[c.treatment]||MEDICAL_TREATMENTS.basic).annualRelief); c.treated=false; if(c.severity===0){ c.state='resolved'; c.resolved=true; c.resolvedAge=S.age; medicalHistory(S,'recovery',c,'treatment held'); return; } c.state=c.id==='chronic'?'chronic':'remission'; return; }
-    const burden=Math.max(1,Math.ceil(c.severity/2)); healthHit-=burden; happinessHit-=c.id==='strain'?burden:Math.max(0,burden-1); if(c.severity>=4) m.yearHoursPenalty=Math.max(m.yearHoursPenalty,1); if(c.severity>=5) m.yearHoursPenalty=2;
-    if((c.id==='respiratory'||c.id==='infection')&&c.yearsActive>=3&&chance(0.12)){ c.state='chronic'; c.id='chronic'; c.definitionId='chronic'; c.severity=Math.max(2,c.severity-1); c.known=true; medicalHistory(S,'chronic',c,'repeated untreated illness'); }
+  if(!S) return;
+  if(typeof ensurePersonalSystems==='function') ensurePersonalSystems(S);
+  medicalTickOutbreak();
+  const ctx=medicalContext(S);
+  const result=MedicalSystem.tickPerson(medicalWorld(),S,ctx);
+  if(!result.applied) return result;
+  const healthHit=result.healthDelta, happinessHit=result.happinessDelta;
+  if(healthHit||happinessHit){
+    const fx={};
+    if(healthHit) fx.health=healthHit;
+    if(happinessHit) fx.happiness=happinessHit;
+    if(typeof applyFx==='function'){
+      const chips=applyFx(fx);
+      if(typeof logChips==='function') logChips('The medical file recorded an ongoing burden on the subject’s body.',chips,'medical','MEDICAL REVIEW · YEAR '+S.age);
+    }else{
+      if(healthHit) medicalApplyHealthDelta(S,healthHit,'medical progression');
+      if(happinessHit) S.happiness=clamp(S.happiness+happinessHit,0,100);
+    }
+  }
+  result.newConditions.filter(c=>c.state!=='latent').forEach(c=>{
+    if(typeof logEv==='function') logEv('MEDICAL NOTICE. '+medicalInfo(c.id).name+' was entered as a new concern. The symptoms are not yet fully understood.',{},'medical','MEDICAL REVIEW · YEAR '+S.age);
   });
-  if(healthHit||happinessHit){ const fx={}; if(healthHit) fx.health=healthHit; if(happinessHit) fx.happiness=happinessHit; if(typeof applyFx==='function'){ const chips=applyFx(fx); if(typeof logChips==='function') logChips('The medical file recorded an ongoing burden on the subject’s body.',chips,'medical','MEDICAL REVIEW · YEAR '+S.age); }else { if(healthHit) medicalApplyHealthDelta(S,healthHit,'medical progression'); if(happinessHit) S.happiness=clamp(S.happiness+happinessHit,0,100); } }
-  newConditions.filter(c=>c.state!=='latent').forEach(c=>{ if(typeof logEv==='function') logEv('MEDICAL NOTICE. '+medicalInfo(c.id).name+' was entered as a new concern. The symptoms are not yet fully understood.',{},'medical','MEDICAL REVIEW · YEAR '+S.age); });
-  const misconduct=(S.record?7:0)+S.crime*4+S.vice*1.5, cooling=S.bureauFavor>0?2:4; S.scrutiny=clamp(Math.round(S.scrutiny+misconduct-cooling),0,100); if(S.age>=18&&!S.record&&S.vice<=1&&S.scrutiny<20&&medicalNow()-S.lastFavorYear>=5){ S.bureauFavor=Math.min(3,S.bureauFavor+1); S.lastFavorYear=medicalNow(); if(typeof logEv==='function') logEv('The file remained unremarkable long enough to earn a small Bureau Favor. It is not kindness, but it can be spent.',{},'ruling','PERSONAL STANDING'); }
-  medicalSyncLegacy(S); updatePersonalStanding();
+  medicalSyncLegacy(S);
+  return result;
 }
-function medicalMortalityDetails(subject){ const person=medicalSubject(subject),conditions=activeConditions(person); let risk=0,cause=null; conditions.forEach(c=>{const severe=c.severity>=4,untreated=c.state!=='treated'&&c.state!=='remission';if(severe&&untreated){risk+=(c.severity-3)*.007+(c.yearsActive||0)*.0015;cause=c.id==='injury'?'complications from an untreated injury':c.id==='chronic'?'complications from a chronic condition':'an untreated '+medicalInfo(c.id).name.toLowerCase();}});return {risk:clamp(risk,0,.16),cause}; }
+function medicalMortalityDetails(subject){ const person=medicalSubject(subject); return MedicalSystem.mortalityDetails(medicalWorld(),person,medicalContext(person)); }
+function medicalMortalityRoll(subject){ const person=medicalSubject(subject); return MedicalSystem.rollMortality(medicalWorld(),person,medicalContext(person)); }
