@@ -672,6 +672,31 @@
     });
   }
 
+  // Raises a connected-life notice for one household case, mirroring
+  // emitMedicalNotices()'s dedup-key/history-mirror discipline above. The
+  // subject's own case is deliberately excluded -- that's surfaced through
+  // the personal medical file/MEDICAL REVIEW log, not household notices --
+  // and, like emitMedicalNotices, relevance is gated by isRelevantToSubject.
+  function emitHouseholdCaseNotice(world,subject,lineage,year,notices,seenKeys,caseRecord,type,textBuilder){
+    if(subject&&subject.npcId&&String(caseRecord.npcId)===String(subject.npcId))return;
+    const npc=world.npcs&&world.npcs[caseRecord.npcId];
+    if(!npc||npc.alive===false)return;
+    if(!isRelevantToSubject(world,npc,subject,lineage))return;
+    const key=npc.id+'|'+caseRecord.conditionInstanceId+'|'+type+'|'+year;
+    if(seenKeys.has(key))return;
+    seenKeys.add(key);
+    const name=fullName(npc), text=textBuilder(name,caseRecord);
+    notices.push({type,npcId:npc.id,name,conditionInstanceId:caseRecord.conditionInstanceId,text});
+    historyPush(npc,{year,type,summary:text});
+  }
+
+  function flushHouseholdNotices(world,notices){
+    if(!notices.length)return;
+    ensure(world);
+    world.npcNotices.push(...notices);
+    if(world.npcNotices.length>120) world.npcNotices=world.npcNotices.slice(-120);
+  }
+
   // Phase 1 of the annual household-health pipeline: prepares this year's
   // medical cases (from conditions already known/diagnosed as of last year's
   // close) and lets autonomous (non-subject) households decide on treatment,
@@ -683,13 +708,84 @@
   // benefit instead of one year late. migrate() is called here (in addition
   // to tick()'s own call) because production code invokes this before
   // NpcSystem.tick() ever runs for the year.
+  //
+  // Also raises 'medical_diagnosis' notices for newly-created cases and
+  // 'medical_treatment' notices for cases an autonomous household just
+  // decided on (fund-recommended-care/home-care only -- leave-untreated is
+  // a non-event). Pending-before/after case-status comparison is used
+  // rather than applyAutonomousDecisions()'s own return value so this stays
+  // independent of that function's result shape.
   function prepareAndResolveHouseholdCases(world,year,subject,lineage){
     if(!root.HouseholdHealthSystem||!root.HouseholdSystem||typeof root.HouseholdSystem.all!=='function')return;
     migrate(world,subject,lineage);
+    const notices=[], seenKeys=new Set();
     root.HouseholdSystem.all(world).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(household=>{
-      root.HouseholdHealthSystem.prepareCases(world,household,{year,subject,lineage});
+      const newCases=root.HouseholdHealthSystem.prepareCases(world,household,{year,subject,lineage});
+      newCases.forEach(caseRecord=>{
+        emitHouseholdCaseNotice(world,subject,lineage,year,notices,seenKeys,caseRecord,'medical_diagnosis',
+          (name,c)=>name+' was diagnosed with '+conditionName(c.conditionId)+'.');
+      });
+      const stateBefore=root.HouseholdHealthSystem.ensure(household);
+      const pendingBefore=new Set(stateBefore.cases.filter(c=>c.status==='pending').map(c=>c.caseId));
+      if(!pendingBefore.size)return;
       root.HouseholdHealthSystem.applyAutonomousDecisions(world,household,year,{subject,lineage});
+      const stateAfter=root.HouseholdHealthSystem.ensure(household);
+      stateAfter.cases.filter(c=>pendingBefore.has(c.caseId)&&c.status!=='pending').forEach(caseRecord=>{
+        if(caseRecord.status==='treated'){
+          emitHouseholdCaseNotice(world,subject,lineage,year,notices,seenKeys,caseRecord,'medical_treatment',
+            (name,c)=>name+' received treatment for '+conditionName(c.conditionId)+'.');
+        }else if(caseRecord.status==='home-care'){
+          emitHouseholdCaseNotice(world,subject,lineage,year,notices,seenKeys,caseRecord,'medical_treatment',
+            (name,c)=>name+' is receiving home care for '+conditionName(c.conditionId)+'.');
+        }
+      });
     });
+    flushHouseholdNotices(world,notices);
+  }
+
+  // Resolves family medical decisions the player queued (via a household
+  // health UI, not part of NpcSystem itself) during planning, before this
+  // year's NPC medical progression runs -- so a case the player funds this
+  // year is already 'treated' by the time that NPC's own progression/
+  // mortality roll happens this same year, matching
+  // prepareAndResolveHouseholdCases()'s ordering rationale above. Queue
+  // entries are {npcId,conditionInstanceId,decision,treatmentId} -- NOT
+  // {householdId,caseId}: a household id/caseId pair captured while the
+  // player was planning can go stale by the time this runs, because
+  // prepareAndResolveHouseholdCases() just above already called migrate()/
+  // reconcile() for the year -- a subject who stopped living at home, for
+  // instance, gets moved into a freshly-created household there, orphaning
+  // (and eventually pruning) their old one along with any case queued
+  // against it. npcId+conditionInstanceId stay valid across that reshuffle
+  // (they're tied to the person's own medical record, not household
+  // membership), so the household/case are re-resolved fresh here via
+  // HouseholdSystem.findByMember() rather than trusted from the queue.
+  // A case that's no longer resolvable (member/household/case since
+  // removed, or already decided) is simply skipped rather than throwing,
+  // since the queue may be stale (e.g. the member died) by the time this
+  // runs.
+  function resolveQueuedFamilyDecisions(world,year,subject,lineage,queue){
+    const results=[];
+    if(!root.HouseholdHealthSystem||!root.HouseholdSystem||!Array.isArray(queue)||!queue.length)return results;
+    const notices=[], seenKeys=new Set();
+    queue.forEach(item=>{
+      const npcId=item&&item.npcId, conditionInstanceId=item&&item.conditionInstanceId;
+      if(!npcId||!conditionInstanceId){results.push({applied:false,reason:'case-not-found',npcId,conditionInstanceId});return;}
+      const household=typeof root.HouseholdSystem.findByMember==='function'?root.HouseholdSystem.findByMember(world,npcId):null;
+      if(!household){results.push({applied:false,reason:'household-not-found',npcId,conditionInstanceId});return;}
+      const state=root.HouseholdHealthSystem.ensure(household);
+      const caseRecord=state.cases.find(c=>c.npcId===npcId&&c.conditionInstanceId===conditionInstanceId&&!c.resolved);
+      if(!caseRecord){results.push({applied:false,reason:'case-not-found',npcId,conditionInstanceId,householdId:household.id});return;}
+      const result=root.HouseholdHealthSystem.resolveDecision(world,household,caseRecord.caseId,{decision:item.decision,treatmentId:item.treatmentId},{year,subject,lineage});
+      results.push(Object.assign({npcId,conditionInstanceId,caseId:caseRecord.caseId,householdId:household.id},result));
+      if(!result.applied||(result.reason!=='funded-care'&&result.reason!=='home-care'))return;
+      const updatedCase=root.HouseholdHealthSystem.ensure(household).cases.find(c=>c.caseId===caseRecord.caseId);
+      if(!updatedCase)return;
+      emitHouseholdCaseNotice(world,subject,lineage,year,notices,seenKeys,updatedCase,'medical_treatment',
+        (name,c)=>result.reason==='funded-care'?name+' received treatment for '+conditionName(c.conditionId)+'.':name+' is receiving home care for '+conditionName(c.conditionId)+'.');
+    });
+    flushHouseholdNotices(world,notices);
+    return results;
   }
 
   // Phase 2: settles this year's treatment charges (created by phase 1) into
@@ -869,6 +965,13 @@
   }
 
   function noticeText(world,notice){
+    // Medical/household-health notices (medical_condition, medical_symptom,
+    // medical_chronic, medical_recovery, medical_transmission,
+    // medical_diagnosis, medical_treatment) are built with their own text at
+    // the point they're raised, since that's where condition/treatment
+    // detail lives. Use it directly rather than re-deriving generic text
+    // here; only notices with no pre-built text fall through below.
+    if(notice.text) return notice.text;
     const settlement=notice.settlementId&&root.settlementById?root.settlementById(notice.settlementId):null;
     if(notice.type==='death') return notice.name+' died of '+notice.cause+'.';
     if(notice.type==='birth') return notice.name+' was born into a connected household.';
@@ -945,6 +1048,7 @@
     ensureSubjectHousehold,
     tick,
     prepareAndResolveHouseholdCases,
+    resolveQueuedFamilyDecisions,
     settleHouseholdTreatmentCharges,
     applyHouseholdHealthTick,
     drainNotices,

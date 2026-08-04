@@ -261,6 +261,20 @@
     return getActiveDecisions(state,year);
   }
 
+  // Public read for UI callers: the treatment options (with cost) actually
+  // available for one case, resolved through the household's real settlement
+  // (see medicalContextForMember above) rather than whatever the caller
+  // happens to be looking at -- a family medical decision window must not
+  // silently price a member's care using the player's own location.
+  function treatmentOptionsFor(world,household,caseRecord,context){
+    if(!household||!caseRecord)return [];
+    const ctx=medicalContextForMember(world,household,context);
+    const members=livingHouseholdMembers(world,household,ctx);
+    const member=members.find(m=>m.id===caseRecord.npcId);
+    if(!member)return [];
+    return root.MedicalSystem.treatmentOptions(world,member.person,caseRecord.conditionInstanceId,ctx);
+  }
+
   // Household savings alone (never debt) back a severity 3-4 decision;
   // "resources" for those tiers means the treatment's cost fits inside what
   // the household already has saved.
@@ -774,6 +788,7 @@
     migrate,
     prepareCases,
     pendingCases,
+    treatmentOptionsFor,
     resolveDecision,
     autonomousDecisionFor,
     applyAutonomousDecisions,

@@ -45,10 +45,10 @@ $('#btn-sound').addEventListener('click',e=>{ soundOn=!soundOn; e.target.textCon
 $('#btn-hold').addEventListener('click',()=>{ snd('paper'); openHold(); });
 $('#btn-caselog').addEventListener('click',()=>{ snd('paper'); openCaseLog(); });
 $('#recentRecordOpen').addEventListener('click',()=>{ snd('paper'); openCaseLog(); });
-$('#inventory').addEventListener('click',e=>{ if(e.target.closest('#invOpenHousehold')){ snd('paper'); openHousehold(); return; } if(e.target.closest('#invOpenMedical')){ snd('paper'); openMedicalFile(); } });
+$('#inventory').addEventListener('click',e=>{ if(e.target.closest('#invOpenHousehold')){ snd('paper'); openHousehold(); return; } if(e.target.closest('#invOpenMedical')){ snd('paper'); openMedicalFile(); return; } if(e.target.closest('#invOpenFamilyHealth')){ snd('paper'); openFamilyHealth(); } });
 $('#logClose').addEventListener('click',()=>{ $('#logWrap').classList.add('hidden'); });
 document.addEventListener('keydown',e=>{
-  if(e.code==='Space'&&!$('#dossier').classList.contains('hidden')&&$('#planWrap').classList.contains('hidden')&&$('#slipWrap').classList.contains('hidden')&&$('#closedWrap').classList.contains('hidden')&&$('#intentWrap').classList.contains('hidden')&&$('#mapWrap').classList.contains('hidden')&&$('#medicalWrap').classList.contains('hidden')){ e.preventDefault(); advance(); }
+  if(e.code==='Space'&&!$('#dossier').classList.contains('hidden')&&$('#planWrap').classList.contains('hidden')&&$('#slipWrap').classList.contains('hidden')&&$('#closedWrap').classList.contains('hidden')&&$('#intentWrap').classList.contains('hidden')&&$('#mapWrap').classList.contains('hidden')&&$('#medicalWrap').classList.contains('hidden')&&$('#familyMedicalWrap').classList.contains('hidden')){ e.preventDefault(); advance(); }
 });
 
 (function(){
