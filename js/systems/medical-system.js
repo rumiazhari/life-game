@@ -194,6 +194,42 @@
     result.yearHoursPenalty=state.yearHoursPenalty;
     return result;
   }
+  function mortalityCauseText(definitionId){
+    if(definitionId==='injury')return 'complications from an untreated injury';
+    if(definitionId==='chronic')return 'complications from a chronic condition';
+    const info=root.ConditionRegistry.condition(definitionId);
+    return info?'an untreated '+info.name.toLowerCase():'complications from an unrecognized condition';
+  }
+  function mortalityContribution(condition){
+    if(condition.severity<4)return 0;
+    if(condition.state==='treated'||condition.state==='remission')return 0;
+    return (condition.severity-3)*0.007+(condition.yearsActive||0)*0.0015;
+  }
+  function mortalityDetails(world,person,context){
+    const conditions=activeConditions(person);
+    let best=null,bestContribution=0,total=0;
+    conditions.forEach(condition=>{
+      const contribution=mortalityContribution(condition);
+      if(contribution<=0)return;
+      total+=contribution;
+      const better=!best
+        ||contribution>bestContribution
+        ||(contribution===bestContribution&&condition.severity>best.severity)
+        ||(contribution===bestContribution&&condition.severity===best.severity&&condition.yearsActive>best.yearsActive)
+        ||(contribution===bestContribution&&condition.severity===best.severity&&condition.yearsActive===best.yearsActive&&String(condition.instanceId).localeCompare(String(best.instanceId))<0);
+      if(better){best=condition;bestContribution=contribution;}
+    });
+    if(!best)return {risk:0,cause:null,conditionInstanceId:null,definitionId:null};
+    return {risk:clamp(total,0,0.16),cause:mortalityCauseText(best.definitionId),conditionInstanceId:best.instanceId,definitionId:best.definitionId};
+  }
+  function rollMortality(world,person,context,options={}){
+    const details=mortalityDetails(world,person,context);
+    if(details.risk<=0)return Object.assign({died:false,roll:null},details);
+    const ctx=context||contextFor(world,person);
+    const rng=options.rng||stream(world,person,integer(ctx.year),'annual-mortality','medical');
+    const roll=readRandom(rng);
+    return Object.assign({died:roll<details.risk,roll},details);
+  }
   function checkInvariants(person){const state=ensureMedicalState(person),violations=[],key=personKey(person),pattern=new RegExp('^condition:'+key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+':-?\\d+:\\d+$');if(state.schemaVersion!==SCHEMA_VERSION)violations.push('medical schema must be version 2');if((subjectLike(person)?person.conditions:person.health.conditions)!==state.conditions)violations.push('compatibility condition array is not synchronized');const ids=new Set();state.conditions.forEach((condition,index)=>{const tag=condition.instanceId||'index '+index;if(!root.ConditionRegistry.isConditionId(condition.definitionId))violations.push('unknown condition definition: '+condition.definitionId);if(!pattern.test(String(condition.instanceId))||ids.has(condition.instanceId))violations.push('invalid or duplicate instance ID: '+tag);ids.add(condition.instanceId);if(!Number.isFinite(condition.severity)||condition.severity<0||condition.severity>5)violations.push('condition severity must be bounded: '+tag);if(!STATES.has(condition.state))violations.push('condition has invalid state: '+tag);if(condition.resolved!==(condition.state==='resolved')||condition.treated!==(condition.state==='treated')||(KNOWN_STATES.has(condition.state)&&condition.known!==true))violations.push('condition state flags inconsistent: '+tag);if(condition.years!==condition.yearsActive||!Number.isFinite(condition.yearsActive)||condition.yearsActive<0||!Number.isFinite(condition.incubationLeft)||condition.incubationLeft<0||!Array.isArray(condition.complications))violations.push('condition lifecycle fields invalid: '+tag);});if(!Array.isArray(state.history)||state.history.length>24)violations.push('medical history must contain at most 24 entries');if(!Number.isInteger(state.instanceCounter)||state.instanceCounter<0||!Number.isInteger(state.actionCounter)||state.actionCounter<0)violations.push('medical counters must be nonnegative integers');if(!Number.isFinite(getHealth(person))||getHealth(person)<0||getHealth(person)>getHealthCap(person))violations.push('health must be within bounds');if(state.lastTickYear!==null&&!Number.isInteger(state.lastTickYear))violations.push('medical.lastTickYear must be null or a finite integer');state.conditions.forEach((condition,index)=>{const tag=condition.instanceId||'index '+index;if(condition.lastProgressionYear!==null&&!Number.isInteger(condition.lastProgressionYear))violations.push('condition.lastProgressionYear must be null or a finite integer: '+tag);if(state.lastTickYear!=null&&condition.lastProgressionYear!=null&&condition.lastProgressionYear>state.lastTickYear)violations.push('condition.lastProgressionYear cannot be later than medical.lastTickYear: '+tag);});return violations;}
-  root.MedicalSystem={SCHEMA_VERSION,personKey,ageOf,yearOf,isSubjectLike:subjectLike,getHealth,getHealthCap,setHealth,applyHealthDelta:(person,amount,source,worldOrYear)=>setHealth(person,getHealth(person)+amount,source,worldOrYear),ensureMedicalState,normalizeCondition,syncLegacy,migrate:ensureMedicalState,checkInvariants,activeConditions,conditionByRef,addCondition,history,stream,contextFor,accessFor,exposureRisk,expose,examine,treatmentOptions,treatmentCost,treat,hoursPenalty,educationPenalty,workPenalty,summary,tickPerson};
+  root.MedicalSystem={SCHEMA_VERSION,personKey,ageOf,yearOf,isSubjectLike:subjectLike,getHealth,getHealthCap,setHealth,applyHealthDelta:(person,amount,source,worldOrYear)=>setHealth(person,getHealth(person)+amount,source,worldOrYear),ensureMedicalState,normalizeCondition,syncLegacy,migrate:ensureMedicalState,checkInvariants,activeConditions,conditionByRef,addCondition,history,stream,contextFor,accessFor,exposureRisk,expose,examine,treatmentOptions,treatmentCost,treat,hoursPenalty,educationPenalty,workPenalty,summary,tickPerson,mortalityDetails,rollMortality};
 })(globalThis);
