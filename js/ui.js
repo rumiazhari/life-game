@@ -2241,6 +2241,13 @@ function advanceYear(suppressBurst,quiet){
   // and personal systems. It establishes this year's settlement conditions;
   // every existing yearly call remains in its original order after this point.
   if(typeof WorldSimulation==='object'&&WorldSimulation&&typeof WorldSimulation.tick==='function') WorldSimulation.tick(World,{random:Random,year:World.year});
+  // Household medical cases are prepared and family/autonomous treatment
+  // decisions resolved before any NPC's own annual medical progression runs
+  // below, so a condition treated this year is already 'treated' by the
+  // time that NPC's progression/mortality roll happens this same year.
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.prepareAndResolveHouseholdCases==='function'){
+    NpcSystem.prepareAndResolveHouseholdCases(World,World.year,S,Lineage);
+  }
   if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.tick==='function'){
     NpcSystem.tick(World,{year:World.year,subject:S,lineage:Lineage,deferHousehold:true});
     const npcNotices=typeof NpcSystem.drainNotices==='function'?NpcSystem.drainNotices(World):[];
@@ -2249,6 +2256,12 @@ function advanceYear(suppressBurst,quiet){
       logEv('CONNECTED LIFE. '+NpcSystem.noticeText(World,notice),{},cls,'HOUSEHOLD FILE · YEAR '+S.age);
     });
     if(npcNotices.length>4) logEv((npcNotices.length-4)+' other connected-life changes were filed in summary.',{},'milestone','HOUSEHOLD FILE · YEAR '+S.age);
+  }
+  // Charges created above are settled into household.finances.treatmentCosts
+  // now, before HouseholdSystem.tick()'s finance settlement below reads it,
+  // so this year's treatment is reflected the same year it was incurred.
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.settleHouseholdTreatmentCharges==='function'){
+    NpcSystem.settleHouseholdTreatmentCharges(World,World.year);
   }
   resolveTravel(); runHoldTick(); snd('stamp'); shake(); window.C={};
   runFollowups(); runHistory(); runMilestones(); runEconomy();
@@ -2261,6 +2274,12 @@ function advanceYear(suppressBurst,quiet){
   if(__newStage!==S.stage){ S.stage=__newStage; queueChapterCard(__newStage); renderStage(); }
   resolvePlan();
   runPersonalYearTick();
+  // Household transmission + caregiving run last, after both the NPC medical
+  // progression above and the player's own annual medical tick just above,
+  // so transmission risk reflects everyone's post-progression state.
+  if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.applyHouseholdHealthTick==='function'){
+    NpcSystem.applyHouseholdHealthTick(World,World.year,S,Lineage,[],new Set());
+  }
   runAffairs();
   runReverseAffairs();
   tickSkills();

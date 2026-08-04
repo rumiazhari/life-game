@@ -672,7 +672,38 @@
     });
   }
 
-  // Runs household transmission + caregiving (slice 4B-3) once per household
+  // Phase 1 of the annual household-health pipeline: prepares this year's
+  // medical cases (from conditions already known/diagnosed as of last year's
+  // close) and lets autonomous (non-subject) households decide on treatment,
+  // BEFORE any NPC's own annual medical progression has run this year. This
+  // must run before the tick() loop below (and before ui.js calls
+  // NpcSystem.tick at all, in production) so a condition treated this year
+  // is already in 'treated' state by the time that NPC's own progression and
+  // mortality roll happen -- getting this year's relief/mortality-reduction
+  // benefit instead of one year late. migrate() is called here (in addition
+  // to tick()'s own call) because production code invokes this before
+  // NpcSystem.tick() ever runs for the year.
+  function prepareAndResolveHouseholdCases(world,year,subject,lineage){
+    if(!root.HouseholdHealthSystem||!root.HouseholdSystem||typeof root.HouseholdSystem.all!=='function')return;
+    migrate(world,subject,lineage);
+    root.HouseholdSystem.all(world).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(household=>{
+      root.HouseholdHealthSystem.prepareCases(world,household,{year,subject,lineage});
+      root.HouseholdHealthSystem.applyAutonomousDecisions(world,household,year,{subject,lineage});
+    });
+  }
+
+  // Phase 2: settles this year's treatment charges (created by phase 1) into
+  // annual.treatmentCosts. Runs after NPC medical progression but before
+  // HouseholdSystem.tick()'s finance settlement, so that pass sees this
+  // year's charges rather than reading a stale prior-year value.
+  function settleHouseholdTreatmentCharges(world,year){
+    if(!root.HouseholdHealthSystem||!root.HouseholdSystem||typeof root.HouseholdSystem.all!=='function')return;
+    root.HouseholdSystem.all(world).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(household=>{
+      root.HouseholdHealthSystem.settleTreatmentCharges(world,household,{year});
+    });
+  }
+
+  // Phase 3 (late): household transmission + caregiving, once per household
   // per year, after every living NPC's own annual medical progression has
   // already run above in this same tick(). This is the minimal non-UI
   // integration point available: ui.js's advanceYear() calls NpcSystem.tick
@@ -685,7 +716,7 @@
   function applyHouseholdHealthTick(world,year,subject,lineage,notices,medicalNoticeKeys){
     if(!root.HouseholdHealthSystem||!root.HouseholdSystem||typeof root.HouseholdSystem.all!=='function')return;
     root.HouseholdSystem.all(world).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(household=>{
-      const result=root.HouseholdHealthSystem.tickHousehold(world,household,{year,subject,lineage,subjectCareHours:0});
+      const result=root.HouseholdHealthSystem.tickHouseholdCaregivingAndTransmission(world,household,{year,subject,lineage,subjectCareHours:0});
       if(!result||!result.applied)return;
       (result.transmissions||[]).forEach(entry=>{
         const parties=[entry.sourceId,entry.targetId].filter((id,index,arr)=>arr.indexOf(id)===index);
@@ -706,10 +737,11 @@
   }
 
   function tick(world,context){
-    const ctx=context||{}, subject=ctx.subject||null, lineage=ctx.lineage||null, year=Number(ctx.year)||Number(world.year)||0;
+    const ctx=context||{}, subject=ctx.subject||null, lineage=ctx.lineage||null, year=Number(ctx.year)||Number(world.year)||0, deferHousehold=ctx.deferHousehold||false;
     migrate(world,subject,lineage);
     if(world.npcLastTickYear===year){syncRegistryToLegacy(world,subject,lineage);return world.npcs;}
     const notices=[], medicalNoticeKeys=new Set();
+    if(!deferHousehold) prepareAndResolveHouseholdCases(world,year,subject,lineage);
     Object.values(world.npcs).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(npc=>{
       if(!npc||npc.isSubject||npc.alive===false) return;
       const age=Math.max(0,year-npc.birthYear), runtime=settlementState(world,npc), rng=stream(world,year,npc.id,'annual');
@@ -747,8 +779,9 @@
       if(!medicalDied&&rng.chance(mortalityProbability(npc,age,runtime))) markDeath(world,npc,year,age<1?'infant illness':healthPressure(runtime)>.55?'illness during a healthcare crisis':'natural causes',notices);
     });
     autonomousFamilyTransitions(world,year,notices);
-    applyHouseholdHealthTick(world,year,subject,lineage,notices,medicalNoticeKeys);
-    if(root.HouseholdSystem&&!ctx.deferHousehold){
+    if(!deferHousehold) settleHouseholdTreatmentCharges(world,year);
+    if(!deferHousehold) applyHouseholdHealthTick(world,year,subject,lineage,notices,medicalNoticeKeys);
+    if(root.HouseholdSystem&&!deferHousehold){
       root.HouseholdSystem.tick(world,{year,subject,lineage}).forEach(notice=>notices.push(notice));
     }
     if(root.RelationshipMemory) root.RelationshipMemory.tick(world,year);
@@ -911,6 +944,9 @@
     syncRegistryToLegacy,
     ensureSubjectHousehold,
     tick,
+    prepareAndResolveHouseholdCases,
+    settleHouseholdTreatmentCharges,
+    applyHouseholdHealthTick,
     drainNotices,
     noticeText,
     subjectSummary,

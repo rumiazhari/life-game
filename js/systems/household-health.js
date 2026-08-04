@@ -8,6 +8,16 @@
   const SUBJECT_CARE_CAP=3;
   const TRANSMISSION_BASE_RISK={respiratory:0.16,infection:0.12};
   const TRANSMISSION_STATE_MULTIPLIERS={latent:0.35,symptomatic:1.00,diagnosed:0.90,treated:0.40};
+  // Autonomous NPC treatment tiers, by condition severity:
+  //   <3: no paid treatment.
+  //   3:  'basic' if affordable from savings, otherwise 'rest'.
+  //   4:  'basic', or 'specialist' if hospital access and savings allow it.
+  //   5:  'specialist' when available, otherwise 'basic'; the only tier
+  //       allowed to intentionally take on new household debt for care.
+  // "Affordable"/"resources" at severities 3-4 means covered by existing
+  // savings alone -- only severity 5 may push the household into new debt,
+  // and even then only up to AUTONOMOUS_DEBT_CAP.
+  const AUTONOMOUS_DEBT_CAP=2500;
   const number=(value,fallback=0)=>Number.isFinite(Number(value))?Number(value):fallback;
   function optionalInteger(value){
     if(
@@ -137,19 +147,223 @@
     return state;
   }
 
-  // Extended in a later Phase 4B slice: real case preparation logic.
-  function prepareCases(){
-    return [];
+  // household-health.js's callers (NpcSystem.applyHouseholdHealthTick) pass a
+  // plain {year,subject,lineage,...} context with no settlement/pressure
+  // fields, unlike js/medical.js's medicalContext() for the player. Without
+  // resolving the household's real settlement here, accessFor() always falls
+  // back to its no-clinic default (quality .12), so hospital-access checks
+  // could never see an actual local clinic. settlementById is the global
+  // settlement-definition lookup from state.js (has .buildings/.kind);
+  // world.settlements[id] is the WorldSimulation runtime (economy/publicHealth)
+  // used for healthcare pressure, matching household-system.js's own lookup.
+  function medicalContextForMember(world,household,context){
+    const base=context&&typeof context==='object'?context:{};
+    if(base.settlement&&base.healthcarePressure!=null)return base;
+    const settlement=base.settlement||(typeof root.settlementById==='function'?root.settlementById(household.settlementId):null);
+    const runtime=base.runtime||(world&&world.settlements&&world.settlements[household.settlementId])||null;
+    const pressure=base.healthcarePressure!=null?base.healthcarePressure:(runtime&&root.PublicHealth&&typeof root.PublicHealth.pressure==='function'?root.PublicHealth.pressure(runtime):0);
+    return Object.assign({},base,{settlement,runtime,healthcarePressure:pressure});
   }
 
-  // Extended in a later Phase 4B slice: real pending-case retrieval.
-  function pendingCases(){
-    return [];
+  function prepareNewCases(world,household,context){
+    const ctx=medicalContextForMember(world,household,context);
+    const state=ensure(household), year=resolvedYearOf(world,ctx), members=livingHouseholdMembers(world,household,ctx);
+    if(state.lastPreparedYear===year) return state.cases;
+    const newCases=[];
+    members.forEach(member=>{
+      root.MedicalSystem.activeConditions(member.person).forEach(condition=>{
+        if(!condition.known||condition.resolved)return;
+        const existing=state.cases.find(c=>c.npcId===member.id&&c.conditionInstanceId===condition.instanceId&&!c.resolved);
+        if(existing)return;
+        const definition=root.ConditionRegistry.condition(condition.definitionId);
+        const treatments=root.MedicalSystem.treatmentOptions(world,member.person,condition.instanceId,ctx);
+        const recommended=treatments.find(t=>t.id==='basic')||treatments[0];
+        const caseId='case:'+String(state.caseCounter+1).padStart(5,'0');
+        state.caseCounter+=1;
+        const caseRecord=normalizeCase({
+          caseId,year,householdId:household.id,npcId:member.id,conditionInstanceId:condition.instanceId,
+          conditionId:condition.definitionId,status:'pending',
+          careHoursRequired:conditionCareNeed(condition,root.MedicalSystem.ageOf(member.person,world)),
+          recommendedTreatmentId:recommended?recommended.id:null
+        },household.id);
+        state.cases.push(caseRecord);
+        newCases.push(caseRecord);
+      });
+    });
+    state.lastPreparedYear=year;
+    return newCases;
   }
 
-  // Extended in a later Phase 4B slice: real decision resolution (treatment/care selection).
-  function resolveDecision(){
-    return {applied:false,reason:'not-implemented'};
+  function getActiveDecisions(state,year){
+    return (Array.isArray(state.cases)?state.cases:[])
+      .filter(c=>!c.resolved&&['pending','active','diagnosed'].includes(c.status)&&resolvedYearOf(null,{year:c.year})<=year);
+  }
+
+  function applyFundedCareDecision(world,household,state,caseRecord,context){
+    const ctx=medicalContextForMember(world,household,context);
+    const year=resolvedYearOf(world,ctx), members=livingHouseholdMembers(world,household,ctx);
+    const member=members.find(m=>m.id===caseRecord.npcId);
+    if(!member)return {applied:false,reason:'member-not-found'};
+    const condition=root.MedicalSystem.conditionByRef(member.person,caseRecord.conditionInstanceId);
+    if(!condition)return {applied:false,reason:'condition-not-found'};
+    const treatments=root.MedicalSystem.treatmentOptions(world,member.person,condition.instanceId,ctx);
+    const treatment=treatments.find(t=>t.id===caseRecord.selectedTreatmentId)||treatments.find(t=>t.id==='basic')||treatments[0];
+    if(!treatment)return {applied:false,reason:'no-treatment-available'};
+    const cost=root.MedicalSystem.treatmentCost(condition,treatment,root.MedicalSystem.accessFor(world,member.person,ctx));
+    const isolatedRng=root.Random.create([world.seed,year,household.id,caseRecord.npcId,caseRecord.conditionInstanceId,'household-treatment'].join('|'));
+    const result=root.MedicalSystem.treat(world,member.person,condition.instanceId,treatment.id,ctx,{rng:isolatedRng,incrementActionCounter:false});
+    if(result.blocked)return {applied:false,reason:'treatment-blocked'};
+    const chargeKey='medical:'+year+':'+household.id+':'+caseRecord.npcId+':'+caseRecord.conditionInstanceId+':'+treatment.id;
+    if(state.pendingCharges.find(pc=>pc.chargeKey===chargeKey))return {applied:false,reason:'duplicate-charge'};
+    caseRecord.chargeKey=chargeKey;
+    caseRecord.selectedTreatmentId=treatment.id;
+    caseRecord.status='treated';
+    caseRecord.decision='fund-recommended-care';
+    const charge={chargeKey,caseId:caseRecord.caseId,year,amount:cost,npcId:caseRecord.npcId,conditionInstanceId:caseRecord.conditionInstanceId,treatmentId:treatment.id};
+    state.pendingCharges.push(charge);
+    pushHistory(state,{year,kind:'treatment',amount:cost,note:'Treatment cost of '+cost+' (uncovered portion becomes household debt).'});
+    return {applied:true,reason:'funded-care',cost};
+  }
+
+  function applyHomeCareDecision(world,household,state,caseRecord,context){
+    const ctx=medicalContextForMember(world,household,context);
+    const year=resolvedYearOf(world,ctx), members=livingHouseholdMembers(world,household,ctx);
+    const member=members.find(m=>m.id===caseRecord.npcId);
+    if(!member)return {applied:false,reason:'member-not-found'};
+    const condition=root.MedicalSystem.conditionByRef(member.person,caseRecord.conditionInstanceId);
+    if(!condition)return {applied:false,reason:'condition-not-found'};
+    const treatments=root.MedicalSystem.treatmentOptions(world,member.person,condition.instanceId,ctx);
+    const restTreatment=treatments.find(t=>t.id==='rest');
+    if(!restTreatment)return {applied:false,reason:'rest-not-available'};
+    const isolatedRng=root.Random.create([world.seed,year,household.id,caseRecord.npcId,caseRecord.conditionInstanceId,'household-home-care'].join('|'));
+    const result=root.MedicalSystem.treat(world,member.person,condition.instanceId,'rest',ctx,{rng:isolatedRng,incrementActionCounter:false});
+    if(result.blocked)return {applied:false,reason:'treatment-blocked'};
+    caseRecord.selectedTreatmentId='rest';
+    caseRecord.status='home-care';
+    caseRecord.decision='home-care';
+    caseRecord.selectedCareHours=Math.min(3,caseRecord.careHoursRequired);
+    pushHistory(state,{year,kind:'home-care',hours:caseRecord.selectedCareHours,note:'Home rest treatment with '+caseRecord.selectedCareHours+' caregiving hours allocated.'});
+    return {applied:true,reason:'home-care'};
+  }
+
+  function applyUntreatedDecision(world,household,state,caseRecord,context){
+    caseRecord.status='untreated';
+    caseRecord.decision='leave-untreated';
+    return {applied:true,reason:'untreated'};
+  }
+
+  function prepareCases(world,household,context){
+    return prepareNewCases(world,household,context);
+  }
+
+  function pendingCases(world,household,context){
+    const state=ensure(household), year=resolvedYearOf(world,context);
+    return getActiveDecisions(state,year);
+  }
+
+  // Household savings alone (never debt) back a severity 3-4 decision;
+  // "resources" for those tiers means the treatment's cost fits inside what
+  // the household already has saved.
+  function affordableFromSavings(household,cost){
+    const savings=Math.max(0,number(household.finances&&household.finances.savings,0));
+    return cost<=savings;
+  }
+
+  // Autonomous NPC treatment: households the subject is not a member of have
+  // no player to review pendingCases()/resolveDecision(), so each case must
+  // decide for itself. An already-chronic condition is left to the existing
+  // caregiving pass (applyCaregiving) rather than MedicalSystem.treat() --
+  // "chronic" here specifically means an illness that already passed through
+  // (or was created past) the acute-treatment window into a permanent
+  // condition; a single home/family care decision realistically manages it
+  // rather than curing it, and this keeps it within reach of MedicalSystem's
+  // own untreated-condition mortality pathway. For acute conditions, the
+  // tiers are (see AUTONOMOUS_DEBT_CAP comment above for the full rule):
+  // severity <3 no paid treatment; 3 basic-if-affordable else rest; 4 basic,
+  // upgraded to specialist if hospital access and savings allow it; 5
+  // specialist when available else basic, the only tier allowed to borrow.
+  // Returns {decision, treatmentId} so the caller can hand the chosen tier
+  // (not just 'basic') to resolveDecision.
+  function autonomousDecisionFor(world,household,caseRecord,context){
+    const ctx=medicalContextForMember(world,household,context);
+    const members=livingHouseholdMembers(world,household,ctx);
+    const member=members.find(m=>m.id===caseRecord.npcId);
+    if(!member)return {decision:'leave-untreated',treatmentId:null};
+    const condition=root.MedicalSystem.conditionByRef(member.person,caseRecord.conditionInstanceId);
+    if(!condition)return {decision:'leave-untreated',treatmentId:null};
+    if(condition.definitionId==='chronic')return {decision:'leave-untreated',treatmentId:null};
+    const severity=number(condition.severity,0);
+    if(severity<3)return {decision:'leave-untreated',treatmentId:null};
+    const treatments=root.MedicalSystem.treatmentOptions(world,member.person,condition.instanceId,ctx);
+    const restAvailable=treatments.some(t=>t.id==='rest');
+    const basic=treatments.find(t=>t.id==='basic');
+    const specialist=treatments.find(t=>t.id==='specialist');
+    const access=root.MedicalSystem.accessFor(world,member.person,ctx);
+    const costOf=treatment=>root.MedicalSystem.treatmentCost(condition,treatment,access);
+    const fallback=()=>restAvailable?{decision:'home-care',treatmentId:'rest'}:{decision:'leave-untreated',treatmentId:null};
+
+    if(severity===3){
+      if(basic&&affordableFromSavings(household,costOf(basic)))return {decision:'fund-recommended-care',treatmentId:'basic'};
+      return fallback();
+    }
+    if(severity===4){
+      if(specialist&&affordableFromSavings(household,costOf(specialist)))return {decision:'fund-recommended-care',treatmentId:'specialist'};
+      if(basic&&affordableFromSavings(household,costOf(basic)))return {decision:'fund-recommended-care',treatmentId:'basic'};
+      return fallback();
+    }
+    // severity>=5: specialist when available, otherwise basic; the only
+    // tier permitted to intentionally create new household debt, and even
+    // then only up to AUTONOMOUS_DEBT_CAP.
+    const chosen=specialist||basic;
+    if(chosen){
+      const cost=costOf(chosen);
+      const currentDebt=Math.max(0,number(household.finances&&household.finances.debt,0));
+      const savings=Math.max(0,number(household.finances&&household.finances.savings,0));
+      const shortfall=Math.max(0,cost-savings);
+      const projectedDebt=currentDebt+shortfall;
+      if(projectedDebt<=AUTONOMOUS_DEBT_CAP)return {decision:'fund-recommended-care',treatmentId:chosen.id};
+    }
+    return fallback();
+  }
+
+  // Applies autonomousDecisionFor() to every still-pending case in households
+  // the subject is not a member of. Player households keep their cases
+  // pending for pendingCases()/resolveDecision() (a family medical-decision
+  // UI, not part of this slice) rather than deciding on the player's behalf.
+  //
+  // ensure() always rebuilds and reassigns household.medical with fresh case
+  // objects (see ensure() above), so a state snapshot taken before another
+  // ensure()-calling function ran (e.g. prepareNewCases()) would miss cases
+  // that function just added. This calls ensure() itself, right before
+  // reading pending cases, rather than accepting a state object from the
+  // caller, so it always sees the current household.medical.
+  function applyAutonomousDecisions(world,household,resolvedYear,opts){
+    const subject=opts&&opts.subject;
+    const memberIds=Array.isArray(household.memberIds)?household.memberIds:[];
+    const containsSubject=!!(subject&&subject.npcId!=null&&subject.alive!==false&&memberIds.includes(String(subject.npcId)));
+    if(containsSubject)return [];
+    const state=ensure(household);
+    const pending=getActiveDecisions(state,resolvedYear).filter(c=>c.status==='pending');
+    return pending.map(caseRecord=>{
+      const outcome=autonomousDecisionFor(world,household,caseRecord,Object.assign({},opts,{year:resolvedYear}));
+      return resolveDecision(world,household,caseRecord.caseId,{decision:outcome.decision,treatmentId:outcome.treatmentId},Object.assign({},opts,{year:resolvedYear}));
+    });
+  }
+
+  function resolveDecision(world,household,caseId,decisionData,context){
+    const state=ensure(household), year=resolvedYearOf(world,context);
+    const caseRecord=state.cases.find(c=>c.caseId===caseId&&!c.resolved);
+    if(!caseRecord)return {applied:false,reason:'case-not-found'};
+    if(['treated','home-care','untreated'].includes(caseRecord.status))return {applied:false,reason:'already-decided'};
+    const decision=decisionData&&decisionData.decision||'leave-untreated';
+    caseRecord.selectedTreatmentId=decisionData&&decisionData.treatmentId||caseRecord.recommendedTreatmentId;
+    if(decision==='fund-recommended-care'){
+      return applyFundedCareDecision(world,household,state,caseRecord,Object.assign({},context,{year}));
+    }else if(decision==='home-care'){
+      return applyHomeCareDecision(world,household,state,caseRecord,Object.assign({},context,{year}));
+    }else{
+      return applyUntreatedDecision(world,household,state,caseRecord,Object.assign({},context,{year}));
+    }
   }
 
   function resolvedYearOf(world,opts){
@@ -384,7 +598,42 @@
     if(state.history.length>HISTORY_LIMIT)state.history=state.history.slice(-HISTORY_LIMIT);
   }
 
-  function tickHousehold(world,household,context){
+  // Moves every charge behind a 'treated' case from pendingCharges into
+  // settledChargeKeys and totals annual.treatmentCosts, so that whatever
+  // calls HouseholdSystem.tick() next (the household's finance settlement)
+  // sees this year's charges rather than last year's. Naturally idempotent:
+  // a charge already in settledChargeKeys is skipped, so calling this more
+  // than once in a year (or once per phase-split call site) is harmless.
+  function settleTreatmentCharges(world,household,context){
+    const state=ensure(household), year=resolvedYearOf(world,context);
+    let totalTreatmentCosts=0;
+    state.cases.forEach(caseRecord=>{
+      if(caseRecord.status==='treated'&&caseRecord.chargeKey){
+        const charge=state.pendingCharges.find(c=>c.chargeKey===caseRecord.chargeKey);
+        if(charge&&!state.settledChargeKeys.includes(charge.chargeKey)){
+          totalTreatmentCosts+=charge.amount;
+          state.settledChargeKeys.push(charge.chargeKey);
+          const pendingIndex=state.pendingCharges.indexOf(charge);
+          if(pendingIndex!==-1) state.pendingCharges.splice(pendingIndex,1);
+        }
+      }
+    });
+    state.annual.treatmentCosts=totalTreatmentCosts;
+    return {treatmentCosts:totalTreatmentCosts};
+  }
+
+  // Late phase of the household-year cycle: caregiving + transmission only.
+  // Case preparation, autonomous/family treatment decisions, and charge
+  // settlement (prepareCases/applyAutonomousDecisions/settleTreatmentCharges)
+  // now run earlier in the annual pipeline -- before the household's own
+  // NPC medical progression and before HouseholdSystem.tick()'s finance pass
+  // -- so treatment charges land in the same year they were incurred and a
+  // condition treated this year doesn't also take a full year of untreated
+  // burden in that same year. This phase deliberately runs after BOTH the
+  // household's NPC medical progression and the player's own annual medical
+  // tick, so transmission risk reflects everyone's post-progression state.
+  // See NpcSystem.applyHouseholdHealthTick for the production call site.
+  function tickHouseholdCaregivingAndTransmission(world,household,context){
     const state=ensure(household);
     const opts=context||{};
     const resolvedYear=resolvedYearOf(world,opts);
@@ -395,11 +644,6 @@
     const transmitResult=transmit(world,household,Object.assign({},opts,{year:resolvedYear}));
     const transmissions=transmitResult.transmissions||[];
 
-    // applyCaregiving()/transmit() each call ensure() themselves, which
-    // rebuilds and reassigns household.medical from the current raw state.
-    // Re-fetch the (now current) state object here rather than reusing the
-    // one captured at the top of this function, or these final writes would
-    // land on a stale object no longer referenced by household.medical.
     const finalState=ensure(household);
     finalState.annual.transmissions=transmissions.length;
     finalState.annual.newConditions=transmissions.length;
@@ -416,6 +660,25 @@
     finalState.lastTickYear=resolvedYear;
     finalState.annual.year=resolvedYear;
     return {applied:true,reason:'applied',year:resolvedYear,caregiving:careResult,transmissions};
+  }
+
+  // Convenience wrapper running every phase (prepare -> resolve treatment ->
+  // settle charges -> caregiving -> transmission) in the correct relative
+  // order within a single call. Production code (ui.js's advanceYear via
+  // NpcSystem) calls the phases separately so household treatment can be
+  // interleaved with NPC and player medical progression and with
+  // HouseholdSystem's finance settlement; this wrapper is for callers (tests,
+  // diagnostics) that don't need that interleaving and just want one
+  // household-year of health processing applied at once.
+  function tickHousehold(world,household,context){
+    const opts=context||{};
+    const resolvedYear=resolvedYearOf(world,opts);
+    prepareNewCases(world,household,Object.assign({},opts,{year:resolvedYear}));
+    applyAutonomousDecisions(world,household,resolvedYear,opts);
+    const chargeResult=settleTreatmentCharges(world,household,Object.assign({},opts,{year:resolvedYear}));
+    const lateResult=tickHouseholdCaregivingAndTransmission(world,household,opts);
+    if(!lateResult.applied)return lateResult;
+    return Object.assign({},lateResult,{charges:chargeResult});
   }
 
   // Read-only view of household.medical, used by summary()/checkInvariants() so
@@ -512,6 +775,10 @@
     prepareCases,
     pendingCases,
     resolveDecision,
+    autonomousDecisionFor,
+    applyAutonomousDecisions,
+    settleTreatmentCharges,
+    tickHouseholdCaregivingAndTransmission,
     tickHousehold,
     transmit,
     applyCaregiving,
