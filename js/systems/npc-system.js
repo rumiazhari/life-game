@@ -672,6 +672,39 @@
     });
   }
 
+  // Runs household transmission + caregiving (slice 4B-3) once per household
+  // per year, after every living NPC's own annual medical progression has
+  // already run above in this same tick(). This is the minimal non-UI
+  // integration point available: ui.js's advanceYear() calls NpcSystem.tick
+  // with deferHousehold:true and only calls HouseholdSystem.tick (finance)
+  // itself afterward, so household medical logic is invoked here instead of
+  // being deferred, since there is no later non-UI call site that would run
+  // it after the subject's own annual medical tick (which happens later in
+  // ui.js's advanceYear via runPersonalYearTick). See the phase 4B-3 report
+  // for the ordering trade-off this implies for the subject specifically.
+  function applyHouseholdHealthTick(world,year,subject,lineage,notices,medicalNoticeKeys){
+    if(!root.HouseholdHealthSystem||!root.HouseholdSystem||typeof root.HouseholdSystem.all!=='function')return;
+    root.HouseholdSystem.all(world).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(household=>{
+      const result=root.HouseholdHealthSystem.tickHousehold(world,household,{year,subject,lineage,subjectCareHours:0});
+      if(!result||!result.applied)return;
+      (result.transmissions||[]).forEach(entry=>{
+        const parties=[entry.sourceId,entry.targetId].filter((id,index,arr)=>arr.indexOf(id)===index);
+        parties.forEach(id=>{
+          if(subject&&subject.npcId&&id===subject.npcId)return;
+          const npc=world.npcs&&world.npcs[id];
+          if(!npc||npc.alive===false)return;
+          if(!isRelevantToSubject(world,npc,subject,lineage))return;
+          const key=npc.id+'|'+entry.instanceId+'|medical_transmission|'+year;
+          if(medicalNoticeKeys.has(key))return;
+          medicalNoticeKeys.add(key);
+          const text='Illness spread within '+fullName(npc)+'’s household.';
+          notices.push({type:'medical_transmission',npcId:npc.id,name:fullName(npc),conditionInstanceId:entry.instanceId,text});
+          historyPush(npc,{year,type:'medical_transmission',summary:text});
+        });
+      });
+    });
+  }
+
   function tick(world,context){
     const ctx=context||{}, subject=ctx.subject||null, lineage=ctx.lineage||null, year=Number(ctx.year)||Number(world.year)||0;
     migrate(world,subject,lineage);
@@ -714,6 +747,7 @@
       if(!medicalDied&&rng.chance(mortalityProbability(npc,age,runtime))) markDeath(world,npc,year,age<1?'infant illness':healthPressure(runtime)>.55?'illness during a healthcare crisis':'natural causes',notices);
     });
     autonomousFamilyTransitions(world,year,notices);
+    applyHouseholdHealthTick(world,year,subject,lineage,notices,medicalNoticeKeys);
     if(root.HouseholdSystem&&!ctx.deferHousehold){
       root.HouseholdSystem.tick(world,{year,subject,lineage}).forEach(notice=>notices.push(notice));
     }
@@ -845,6 +879,11 @@
     if(subject&&subject.npcId&&!npcs[subject.npcId]) violations.push('subject NPC id must exist in registry');
     if(subject&&npcs[subject.npcId]&&Number(world.year)!==Number(subject.dob)+Number(subject.age)) violations.push('subject age must match world year');
     if(root.HouseholdSystem) violations.push(...root.HouseholdSystem.checkInvariants(world,subject));
+    if(root.HouseholdHealthSystem&&world&&world.households){
+      Object.keys(world.households).forEach(id=>{
+        root.HouseholdHealthSystem.checkInvariants(world.households[id]).forEach(v=>violations.push('household '+id+' medical: '+v));
+      });
+    }
     if(lineage&&Array.isArray(lineage.members)) lineage.members.forEach(member=>{if(member.npcId&&!npcs[member.npcId]) violations.push('legacy kin '+member.mid+' references missing NPC '+member.npcId);});
     return violations;
   }
