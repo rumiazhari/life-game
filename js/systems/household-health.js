@@ -170,7 +170,13 @@
     const state=ensure(household), year=resolvedYearOf(world,ctx), members=livingHouseholdMembers(world,household,ctx);
     if(state.lastPreparedYear===year) return state.cases;
     const newCases=[];
+    const subjectId=ctx.subject&&ctx.subject.npcId!=null?String(ctx.subject.npcId):null;
     members.forEach(member=>{
+      // The subject's own condition is deliberately excluded here -- it's
+      // already handled by the player's personal medical system (js/medical.js
+      // / the MEDICAL REVIEW sheet), and creating a household case for it too
+      // would let the same condition receive double treatment.
+      if(subjectId&&member.id===subjectId)return;
       root.MedicalSystem.activeConditions(member.person).forEach(condition=>{
         if(!condition.known||condition.resolved)return;
         const existing=state.cases.find(c=>c.npcId===member.id&&c.conditionInstanceId===condition.instanceId&&!c.resolved);
@@ -192,6 +198,31 @@
     });
     state.lastPreparedYear=year;
     return newCases;
+  }
+
+  // Closes any household case whose underlying situation is no longer valid:
+  // the referenced condition instance has resolved or vanished, the patient
+  // died, or the patient no longer lives in this household. Closed cases keep
+  // their history (status:'closed', resolved:true) but disappear from
+  // getActiveDecisions()/pendingCases() (only 'pending'/'active'/'diagnosed'
+  // count as active there) and are exempt from checkInvariants()'s
+  // conditionInstanceId requirement (see checkInvariants below). Naturally
+  // idempotent: an already-closed/resolved case is skipped, so calling this
+  // more than once per year (or once per phase-split call site) is harmless.
+  function reconcileCases(world,household,context){
+    const state=ensure(household);
+    const ctx=context||{};
+    const memberIds=Array.isArray(household.memberIds)?household.memberIds.map(String):[];
+    let closed=0;
+    state.cases.forEach(caseRecord=>{
+      if(caseRecord.resolved||caseRecord.status==='closed')return;
+      const person=resolvePerson(world,ctx,caseRecord.npcId);
+      if(!person){caseRecord.status='closed';caseRecord.resolved=true;closed+=1;return;}
+      if(!memberIds.includes(String(caseRecord.npcId))){caseRecord.status='closed';caseRecord.resolved=true;closed+=1;return;}
+      const condition=root.MedicalSystem.conditionByRef(person,caseRecord.conditionInstanceId);
+      if(!condition){caseRecord.status='closed';caseRecord.resolved=true;closed+=1;}
+    });
+    return {closed};
   }
 
   function getActiveDecisions(state,year){
@@ -560,9 +591,15 @@
     const requiredRaw=patients.reduce((sum,patient)=>sum+patient.need,0);
     const required=Math.min(CARE_HOURS_CAP,requiredRaw);
 
+    const patientIds=new Set(patients.map(patient=>patient.id));
     let automatic=0;
     members.forEach(member=>{
       if(subjectId&&member.id===subjectId)return;
+      // A member who is themselves a patient (any care need > 0, not just
+      // severity>=4) cannot also count as one of the household's automatic
+      // healthy caregivers -- otherwise a mildly-ill child/elder would be
+      // treated as caring for themselves.
+      if(patientIds.has(member.id))return;
       const age=root.MedicalSystem.ageOf(member.person,world);
       if(age<18)return;
       const severelyIll=root.MedicalSystem.activeConditions(member.person).some(condition=>condition.severity>=4);
@@ -613,13 +650,23 @@
   }
 
   // Moves every charge behind a 'treated' case from pendingCharges into
-  // settledChargeKeys and totals annual.treatmentCosts, so that whatever
-  // calls HouseholdSystem.tick() next (the household's finance settlement)
-  // sees this year's charges rather than last year's. Naturally idempotent:
-  // a charge already in settledChargeKeys is skipped, so calling this more
-  // than once in a year (or once per phase-split call site) is harmless.
+  // settledChargeKeys and adds their total into annual.treatmentCosts, so
+  // that whatever calls HouseholdSystem.tick() next (the household's finance
+  // settlement) sees this year's charges rather than last year's. Naturally
+  // idempotent: a charge already in settledChargeKeys is skipped, and
+  // annual.treatmentCosts is accumulated (not overwritten) so a repeated
+  // same-year call -- from another phase-split call site, or simply called
+  // twice -- adds zero newly-settled charges the second time rather than
+  // resetting the year's total back to zero. annual.year gates the actual
+  // year boundary: a call for a new year zeroes the running total first
+  // (it belongs to last year's household-health tick, already read by that
+  // year's HouseholdSystem.tick), then accumulates only this year's charges.
   function settleTreatmentCharges(world,household,context){
     const state=ensure(household), year=resolvedYearOf(world,context);
+    if(state.annual.year!==year){
+      state.annual.treatmentCosts=0;
+      state.annual.year=year;
+    }
     let totalTreatmentCosts=0;
     state.cases.forEach(caseRecord=>{
       if(caseRecord.status==='treated'&&caseRecord.chargeKey){
@@ -632,8 +679,8 @@
         }
       }
     });
-    state.annual.treatmentCosts=totalTreatmentCosts;
-    return {treatmentCosts:totalTreatmentCosts};
+    state.annual.treatmentCosts=nonNegNumber(state.annual.treatmentCosts,0)+totalTreatmentCosts;
+    return {treatmentCosts:state.annual.treatmentCosts};
   }
 
   // Late phase of the household-year cycle: caregiving + transmission only.
@@ -687,6 +734,7 @@
   function tickHousehold(world,household,context){
     const opts=context||{};
     const resolvedYear=resolvedYearOf(world,opts);
+    reconcileCases(world,household,Object.assign({},opts,{year:resolvedYear}));
     prepareNewCases(world,household,Object.assign({},opts,{year:resolvedYear}));
     applyAutonomousDecisions(world,household,resolvedYear,opts);
     const chargeResult=settleTreatmentCharges(world,household,Object.assign({},opts,{year:resolvedYear}));
@@ -787,6 +835,7 @@
     ensure,
     migrate,
     prepareCases,
+    reconcileCases,
     pendingCases,
     treatmentOptionsFor,
     resolveDecision,

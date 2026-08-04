@@ -2326,10 +2326,19 @@ function advanceYear(suppressBurst,quiet){
   // resolve here too -- still before NpcSystem.tick below -- so a member the
   // player chose to fund this year is already 'treated' for that same
   // member's own annual progression/mortality roll a few lines down.
+  let __subjectHomeCareHours=0;
   if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.resolveQueuedFamilyDecisions==='function'&&S.__familyMedicalQueue){
     const queue=Object.values(S.__familyMedicalQueue);
     if(queue.length){
-      NpcSystem.resolveQueuedFamilyDecisions(World,World.year,S,Lineage,queue);
+      const results=NpcSystem.resolveQueuedFamilyDecisions(World,World.year,S,Lineage,queue);
+      const homeCareCount=Array.isArray(results)?results.filter(r=>r&&r.applied&&r.reason==='home-care').length:0;
+      // The subject's own caregiving contribution is capped both at 3 hours
+      // and at whatever's left of this year's planning-hour budget after the
+      // player's own queued activities -- home care given to family isn't
+      // free time, it comes out of the same annual hours.
+      const usedPlanHours=S.queue.reduce((a,q)=>a+(PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0)),0);
+      const remainingPlanHours=Math.max(0,planHours()-usedPlanHours);
+      __subjectHomeCareHours=Math.max(0,Math.min(3,homeCareCount,remainingPlanHours));
       S.__familyMedicalQueue={};
     }
   }
@@ -2364,7 +2373,7 @@ function advanceYear(suppressBurst,quiet){
   // so transmission risk reflects everyone's post-progression state.
   if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.applyHouseholdHealthTick==='function'){
     const householdHealthNotices=[];
-    NpcSystem.applyHouseholdHealthTick(World,World.year,S,Lineage,householdHealthNotices,new Set());
+    NpcSystem.applyHouseholdHealthTick(World,World.year,S,Lineage,householdHealthNotices,new Set(),__subjectHomeCareHours);
     householdHealthNotices.slice(0,4).forEach(notice=>{
       logEv('CONNECTED LIFE. '+NpcSystem.noticeText(World,notice),{},'milestone','HOUSEHOLD FILE · YEAR '+S.age);
     });

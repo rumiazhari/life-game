@@ -715,11 +715,29 @@
   // a non-event). Pending-before/after case-status comparison is used
   // rather than applyAutonomousDecisions()'s own return value so this stays
   // independent of that function's result shape.
+  // Natural (non-player) diagnosis pass: gives every living non-subject NPC a
+  // chance to have an already-symptomatic-but-unknown condition surface as
+  // diagnosed, using MedicalSystem.naturalDiagnosis (isolated deterministic
+  // RNG, incrementActionCounter:false -- see medical-system.js). Runs once per
+  // NPC per year, before any household's cases are prepared below, so a
+  // condition newly diagnosed this way is already 'known' in time for
+  // prepareCases to create a case for it this same year.
+  function applyNaturalDiagnosis(world,year){
+    if(!root.MedicalSystem||typeof root.MedicalSystem.naturalDiagnosis!=='function')return;
+    Object.values(world.npcs).filter(npc=>npc&&npc.alive&&!npc.isSubject).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(npc=>{
+      const runtime=settlementState(world,npc);
+      const ctx=medicalContextFor(world,npc,runtime,year);
+      root.MedicalSystem.naturalDiagnosis(world,npc,ctx);
+    });
+  }
+
   function prepareAndResolveHouseholdCases(world,year,subject,lineage){
     if(!root.HouseholdHealthSystem||!root.HouseholdSystem||typeof root.HouseholdSystem.all!=='function')return;
     migrate(world,subject,lineage);
+    applyNaturalDiagnosis(world,year);
     const notices=[], seenKeys=new Set();
     root.HouseholdSystem.all(world).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(household=>{
+      root.HouseholdHealthSystem.reconcileCases(world,household,{year,subject,lineage});
       const newCases=root.HouseholdHealthSystem.prepareCases(world,household,{year,subject,lineage});
       newCases.forEach(caseRecord=>{
         emitHouseholdCaseNotice(world,subject,lineage,year,notices,seenKeys,caseRecord,'medical_diagnosis',
@@ -809,10 +827,11 @@
   // it after the subject's own annual medical tick (which happens later in
   // ui.js's advanceYear via runPersonalYearTick). See the phase 4B-3 report
   // for the ordering trade-off this implies for the subject specifically.
-  function applyHouseholdHealthTick(world,year,subject,lineage,notices,medicalNoticeKeys){
+  function applyHouseholdHealthTick(world,year,subject,lineage,notices,medicalNoticeKeys,subjectCareHours){
     if(!root.HouseholdHealthSystem||!root.HouseholdSystem||typeof root.HouseholdSystem.all!=='function')return;
+    const hours=Math.max(0,Math.min(3,Number(subjectCareHours)||0));
     root.HouseholdSystem.all(world).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(household=>{
-      const result=root.HouseholdHealthSystem.tickHouseholdCaregivingAndTransmission(world,household,{year,subject,lineage,subjectCareHours:0});
+      const result=root.HouseholdHealthSystem.tickHouseholdCaregivingAndTransmission(world,household,{year,subject,lineage,subjectCareHours:hours});
       if(!result||!result.applied)return;
       (result.transmissions||[]).forEach(entry=>{
         const parties=[entry.sourceId,entry.targetId].filter((id,index,arr)=>arr.indexOf(id)===index);

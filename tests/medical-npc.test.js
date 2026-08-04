@@ -323,3 +323,88 @@ test('NpcSystem.checkInvariants surfaces a MedicalSystem violation with the NPC 
   `);
   assert.equal(result.prefixed,true);
 });
+
+// --- Natural NPC diagnosis (phase 4B-4 review fix) --------------------------
+
+test('MedicalSystem.naturalDiagnosis never invents a condition when no symptomatic condition exists',()=>{
+  const context=newContext('natural-diagnosis-noop');
+  const result=run(context,`
+    const npc=(World.npcs[S.mother.npcId]&&World.npcs[S.mother.npcId].alive!==false)?World.npcs[S.mother.npcId]:Object.values(World.npcs).find(n=>!n.isSubject&&n.alive!==false);
+    const before=JSON.stringify(MedicalSystem.activeConditions(npc));
+    const ctx=MedicalSystem.contextFor(World,npc,{year:World.year});
+    const outcome=MedicalSystem.naturalDiagnosis(World,npc,ctx);
+    const after=JSON.stringify(MedicalSystem.activeConditions(npc));
+    return JSON.stringify({reason:outcome.reason,condition:outcome.condition,unchanged:before===after});
+  `);
+  assert.equal(result.reason,'no-eligible-condition');
+  assert.equal(result.condition,null);
+  assert.equal(result.unchanged,true);
+});
+
+test('MedicalSystem.naturalDiagnosis uses an isolated deterministic RNG and does not increment actionCounter',()=>{
+  const context=newContext('natural-diagnosis-isolation');
+  const result=run(context,`
+    const npc=(World.npcs[S.mother.npcId]&&World.npcs[S.mother.npcId].alive!==false)?World.npcs[S.mother.npcId]:Object.values(World.npcs).find(n=>!n.isSubject&&n.alive!==false);
+    MedicalSystem.addCondition(npc,'infection',3,{world:World,year:World.year,state:'symptomatic'});
+    const before=MedicalSystem.ensureMedicalState(npc,{world:World,year:World.year}).actionCounter;
+    const expectedNpcStream=NpcSystem.stream(World,World.year,npc.id,'annual').next();
+    Random.setSeed('natural-guard');
+    const guardFirst=Random.next();
+    MedicalSystem.naturalDiagnosis(World,npc,MedicalSystem.contextFor(World,npc,{year:World.year}));
+    const guardAfter=Random.next();
+    Random.setSeed('natural-guard'); Random.next();
+    const guardExpected=Random.next();
+    const after=MedicalSystem.ensureMedicalState(npc,{world:World,year:World.year}).actionCounter;
+    const afterNpcStream=NpcSystem.stream(World,World.year,npc.id,'annual').next();
+    return JSON.stringify({before,after,same:before===after,streamSame:expectedNpcStream===afterNpcStream,guardMatches:guardAfter===guardExpected});
+  `);
+  assert.equal(result.same,true);
+  assert.equal(result.streamSame,true);
+  assert.equal(result.guardMatches,true);
+});
+
+test('MedicalSystem.naturalDiagnosis is idempotent for the same person/year',()=>{
+  const context=newContext('natural-diagnosis-idempotent');
+  const result=run(context,`
+    const npc=(World.npcs[S.mother.npcId]&&World.npcs[S.mother.npcId].alive!==false)?World.npcs[S.mother.npcId]:Object.values(World.npcs).find(n=>!n.isSubject&&n.alive!==false);
+    MedicalSystem.addCondition(npc,'infection',5,{world:World,year:World.year,state:'symptomatic'});
+    const ctx=MedicalSystem.contextFor(World,npc,{year:World.year});
+    const first=MedicalSystem.naturalDiagnosis(World,npc,ctx);
+    const after=JSON.stringify(MedicalSystem.activeConditions(npc));
+    const second=MedicalSystem.naturalDiagnosis(World,npc,ctx);
+    const afterSecond=JSON.stringify(MedicalSystem.activeConditions(npc));
+    return JSON.stringify({secondReason:second.reason,unchanged:after===afterSecond});
+  `);
+  assert.equal(result.secondReason,'already-applied');
+  assert.equal(result.unchanged,true);
+});
+
+test('multi-year integration: a naturally generated NPC illness becomes diagnosed, creates a household case, and receives treatment',()=>{
+  const context=newContext('natural-diagnosis-full-integration');
+  const result=run(context,`
+    const household=HouseholdSystem.create(World,{settlementId:World.activeSettlementId,memberIds:[],dependentIds:[]});
+    const npc=NpcSystem.upsert(World,{id:'npc:natural-patient',firstName:'Nat',lastName:'Ural',sex:'M',birthYear:World.year-30,alive:true,locationId:World.activeSettlementId,roleTags:['relative'],source:'test',health:{general:60,conditions:[]}});
+    HouseholdSystem.addMember(World,household.id,npc.id,false);
+    household.finances.savings=100000;
+    let becameSymptomaticYear=null,diagnosedYear=null,caseCreatedYear=null,treatedYear=null;
+    for(let i=0;i<300&&!treatedYear;i++){
+      World.year++;
+      NpcSystem.tick(World,{year:World.year});
+      if(!World.npcs[npc.id].alive) break;
+      const conditions=MedicalSystem.activeConditions(npc);
+      if(!becameSymptomaticYear&&conditions.some(c=>c.state==='symptomatic'&&!c.known)) becameSymptomaticYear=World.year;
+      if(!diagnosedYear&&conditions.some(c=>c.known)) diagnosedYear=World.year;
+      const state=HouseholdHealthSystem.ensure(household);
+      if(!caseCreatedYear&&state.cases.length) caseCreatedYear=World.year;
+      if(!treatedYear&&state.cases.some(c=>c.status==='treated'||c.status==='home-care')) treatedYear=World.year;
+    }
+    return JSON.stringify({becameSymptomaticYear,diagnosedYear,caseCreatedYear,treatedYear});
+  `);
+  assert.ok(result.becameSymptomaticYear,'NPC should naturally develop a symptomatic condition');
+  assert.ok(result.diagnosedYear,'condition should become diagnosed via the natural-diagnosis pass');
+  assert.ok(result.caseCreatedYear,'a household case should be created once the condition is known');
+  assert.ok(result.treatedYear,'the case should eventually receive treatment (funded care or home care)');
+  assert.ok(result.diagnosedYear>=result.becameSymptomaticYear);
+  assert.ok(result.caseCreatedYear>=result.diagnosedYear);
+  assert.ok(result.treatedYear>=result.caseCreatedYear);
+});

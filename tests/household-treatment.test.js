@@ -685,3 +685,248 @@ test('annual ordering: a household transmission proposed during the deferred win
   assert.equal(result.transmittedDuringDeferredNpcTick,false,'deferHousehold:true must not apply transmission by itself');
   assert.equal(result.transmittedAfterHouseholdCall,true,'transmission should eventually apply once household health is explicitly ticked');
 });
+
+// --- Household case lifecycle reconciliation (phase 4B-4 review fix #2) ----
+
+test('reconcileCases closes a case whose condition has resolved',()=>{
+  const context=newContext('reconcile-resolved');
+  const result=run(context,`
+    ${setupNpcHousehold}
+    MedicalSystem.addCondition(npc,'injury',1,{world:World,year:World.year,known:true,state:'diagnosed'});
+    HouseholdHealthSystem.prepareCases(World,household,{year:World.year});
+    const condition=MedicalSystem.activeConditions(npc)[0];
+    condition.state='resolved';condition.resolved=true;
+    HouseholdHealthSystem.reconcileCases(World,household,{year:World.year});
+    const s=HouseholdHealthSystem.ensure(household);
+    return JSON.stringify({status:s.cases[0].status,resolved:s.cases[0].resolved,pending:HouseholdHealthSystem.pendingCases(World,household,{year:World.year}).length});
+  `);
+  assert.equal(result.status,'closed');
+  assert.equal(result.resolved,true);
+  assert.equal(result.pending,0);
+});
+
+test('reconcileCases closes a case when the patient died',()=>{
+  const context=newContext('reconcile-death');
+  const result=run(context,`
+    ${setupNpcHousehold}
+    MedicalSystem.addCondition(npc,'injury',3,{world:World,year:World.year,known:true,state:'diagnosed'});
+    HouseholdHealthSystem.prepareCases(World,household,{year:World.year});
+    npc.alive=false;
+    HouseholdHealthSystem.reconcileCases(World,household,{year:World.year});
+    const s=HouseholdHealthSystem.ensure(household);
+    return JSON.stringify({status:s.cases[0].status,resolved:s.cases[0].resolved});
+  `);
+  assert.equal(result.status,'closed');
+  assert.equal(result.resolved,true);
+});
+
+test('reconcileCases closes a case when the patient leaves the household (no longer a member)',()=>{
+  const context=newContext('reconcile-left');
+  const result=run(context,`
+    ${setupNpcHousehold}
+    MedicalSystem.addCondition(npc,'injury',3,{world:World,year:World.year,known:true,state:'diagnosed'});
+    HouseholdHealthSystem.prepareCases(World,household,{year:World.year});
+    HouseholdSystem.removeMember(World,household.id,npc.id);
+    HouseholdHealthSystem.reconcileCases(World,household,{year:World.year});
+    const s=HouseholdHealthSystem.ensure(household);
+    return JSON.stringify({status:s.cases[0].status,resolved:s.cases[0].resolved});
+  `);
+  assert.equal(result.status,'closed');
+  assert.equal(result.resolved,true);
+});
+
+test('reconcileCases leaves a genuinely still-active case alone',()=>{
+  const context=newContext('reconcile-active');
+  const result=run(context,`
+    ${setupNpcHousehold}
+    MedicalSystem.addCondition(npc,'injury',3,{world:World,year:World.year,known:true,state:'diagnosed'});
+    HouseholdHealthSystem.prepareCases(World,household,{year:World.year});
+    HouseholdHealthSystem.reconcileCases(World,household,{year:World.year});
+    const s=HouseholdHealthSystem.ensure(household);
+    return JSON.stringify({status:s.cases[0].status,resolved:s.cases[0].resolved});
+  `);
+  assert.equal(result.status,'pending');
+  assert.equal(result.resolved,false);
+});
+
+test('reconcileCases is idempotent and closed cases disappear from pendingCases()/history is preserved',()=>{
+  const context=newContext('reconcile-idempotent');
+  const result=run(context,`
+    ${setupNpcHousehold}
+    MedicalSystem.addCondition(npc,'injury',1,{world:World,year:World.year,known:true,state:'diagnosed'});
+    HouseholdHealthSystem.prepareCases(World,household,{year:World.year});
+    const caseId=HouseholdHealthSystem.ensure(household).cases[0].caseId;
+    const condition=MedicalSystem.activeConditions(npc)[0];
+    condition.state='resolved';condition.resolved=true;
+    HouseholdHealthSystem.reconcileCases(World,household,{year:World.year});
+    const once=JSON.stringify(HouseholdHealthSystem.ensure(household).cases);
+    HouseholdHealthSystem.reconcileCases(World,household,{year:World.year});
+    const twice=JSON.stringify(HouseholdHealthSystem.ensure(household).cases);
+    const violations=HouseholdHealthSystem.checkInvariants(household);
+    return JSON.stringify({idempotent:once===twice,caseStillPresent:HouseholdHealthSystem.ensure(household).cases.some(c=>c.caseId===caseId),violations});
+  `);
+  assert.equal(result.idempotent,true);
+  assert.equal(result.caseStillPresent,true,'closed cases preserve history rather than being deleted');
+  assert.deepEqual(result.violations,[]);
+});
+
+test('NpcSystem.prepareAndResolveHouseholdCases reconciles a departed member before preparing new cases (integration)',()=>{
+  const context=newContext('reconcile-integration');
+  const result=run(context,`
+    const household=HouseholdSystem.findByMember(World,S.npcId);
+    const npc=NpcSystem.upsert(World,{id:'npc:reconcile-integration',firstName:'R',lastName:'Econcile',sex:'M',birthYear:World.year-40,alive:true,locationId:World.activeSettlementId,roleTags:['relative'],source:'test',health:{general:50,conditions:[]}});
+    HouseholdSystem.addMember(World,household.id,npc.id,false);
+    MedicalSystem.addCondition(npc,'injury',3,{world:World,year:World.year,known:true,state:'diagnosed'});
+    World.year++;
+    NpcSystem.prepareAndResolveHouseholdCases(World,World.year,S,Lineage);
+    npc.alive=false;
+    World.year++;
+    NpcSystem.prepareAndResolveHouseholdCases(World,World.year,S,Lineage);
+    const s=HouseholdHealthSystem.ensure(household);
+    return JSON.stringify({status:s.cases[0].status,pendingCount:HouseholdHealthSystem.pendingCases(World,household,{year:World.year,subject:S}).length});
+  `);
+  assert.equal(result.status,'closed');
+  assert.equal(result.pendingCount,0);
+});
+
+// --- Subject's own condition excluded from family-treatment cases (fix #5) -
+
+test('prepareCases does not create a household case for the subject own condition',()=>{
+  const context=newContext('subject-exclusion');
+  const result=run(context,`
+    const household=HouseholdSystem.findByMember(World,S.npcId);
+    MedicalSystem.addCondition(S,'respiratory',3,{world:World,year:World.year,known:true,state:'diagnosed'});
+    HouseholdHealthSystem.prepareCases(World,household,{year:World.year,subject:S});
+    const s=HouseholdHealthSystem.ensure(household);
+    return JSON.stringify({caseCount:s.cases.filter(c=>c.npcId===String(S.npcId)).length});
+  `);
+  assert.equal(result.caseCount,0);
+});
+
+test('prepareCases still creates a case for another household member while excluding the subject',()=>{
+  const context=newContext('subject-exclusion-sibling');
+  const result=run(context,`
+    const household=HouseholdSystem.findByMember(World,S.npcId);
+    const npc=NpcSystem.upsert(World,{id:'npc:subject-exclusion-sibling',firstName:'Sib',lastName:'Ling',sex:'M',birthYear:World.year-20,alive:true,locationId:World.activeSettlementId,roleTags:['relative'],source:'test',health:{general:50,conditions:[]}});
+    HouseholdSystem.addMember(World,household.id,npc.id,false);
+    MedicalSystem.addCondition(S,'respiratory',3,{world:World,year:World.year,known:true,state:'diagnosed'});
+    MedicalSystem.addCondition(npc,'injury',3,{world:World,year:World.year,known:true,state:'diagnosed'});
+    HouseholdHealthSystem.prepareCases(World,household,{year:World.year,subject:S});
+    const s=HouseholdHealthSystem.ensure(household);
+    return JSON.stringify({subjectCases:s.cases.filter(c=>c.npcId===String(S.npcId)).length,otherCases:s.cases.filter(c=>c.npcId===npc.id).length});
+  `);
+  assert.equal(result.subjectCases,0);
+  assert.equal(result.otherCases,1);
+});
+
+// --- settleTreatmentCharges idempotency (phase 4B-4 review fix #4) --------
+
+test('settleTreatmentCharges called twice in the same year preserves annual.treatmentCosts instead of resetting it to zero',()=>{
+  const context=newContext('settle-idempotent-same-year');
+  const result=run(context,`
+    ${setupNpcHousehold}
+    household.finances.savings=100000;
+    MedicalSystem.addCondition(npc,'respiratory',3,{world:World,year:World.year,known:true});
+    HouseholdHealthSystem.prepareCases(World,household,{year:World.year});
+    const s1=HouseholdHealthSystem.ensure(household);
+    HouseholdHealthSystem.resolveDecision(World,household,s1.cases[0].caseId,{decision:'fund-recommended-care'},{year:World.year});
+    const first=HouseholdHealthSystem.settleTreatmentCharges(World,household,{year:World.year});
+    const second=HouseholdHealthSystem.settleTreatmentCharges(World,household,{year:World.year});
+    const s2=HouseholdHealthSystem.ensure(household);
+    return JSON.stringify({firstCosts:first.treatmentCosts,secondCosts:second.treatmentCosts,annualCosts:s2.annual.treatmentCosts,firstPositive:first.treatmentCosts>0});
+  `);
+  assert.equal(result.firstPositive,true);
+  assert.equal(result.secondCosts,result.firstCosts,'a repeated same-year call must preserve annual.treatmentCosts');
+  assert.equal(result.annualCosts,result.firstCosts);
+});
+
+test('settleTreatmentCharges accumulates two separate treated cases settled within the same year',()=>{
+  const context=newContext('settle-accumulate-same-year');
+  const result=run(context,`
+    ${setupNpcHousehold}
+    household.finances.savings=100000;
+    MedicalSystem.addCondition(npc,'respiratory',3,{world:World,year:World.year,known:true});
+    MedicalSystem.addCondition(npc,'strain',3,{world:World,year:World.year,known:true});
+    HouseholdHealthSystem.prepareCases(World,household,{year:World.year});
+    const s1=HouseholdHealthSystem.ensure(household);
+    HouseholdHealthSystem.resolveDecision(World,household,s1.cases[0].caseId,{decision:'fund-recommended-care'},{year:World.year});
+    const afterFirstDecision=HouseholdHealthSystem.settleTreatmentCharges(World,household,{year:World.year});
+    HouseholdHealthSystem.resolveDecision(World,household,s1.cases[1].caseId,{decision:'fund-recommended-care'},{year:World.year});
+    const afterSecondDecision=HouseholdHealthSystem.settleTreatmentCharges(World,household,{year:World.year});
+    return JSON.stringify({firstCosts:afterFirstDecision.treatmentCosts,secondCosts:afterSecondDecision.treatmentCosts,grew:afterSecondDecision.treatmentCosts>afterFirstDecision.treatmentCosts});
+  `);
+  assert.equal(result.grew,true,'settling a second case the same year should add to, not replace, the running total');
+});
+
+test('settleTreatmentCharges resets annual.treatmentCosts on a new year rather than carrying last year total forward',()=>{
+  const context=newContext('settle-year-reset');
+  const result=run(context,`
+    ${setupNpcHousehold}
+    household.finances.savings=100000;
+    MedicalSystem.addCondition(npc,'respiratory',3,{world:World,year:World.year,known:true});
+    HouseholdHealthSystem.prepareCases(World,household,{year:World.year});
+    const s1=HouseholdHealthSystem.ensure(household);
+    HouseholdHealthSystem.resolveDecision(World,household,s1.cases[0].caseId,{decision:'fund-recommended-care'},{year:World.year});
+    const yearOne=HouseholdHealthSystem.settleTreatmentCharges(World,household,{year:World.year});
+    const nextYear=World.year+1;
+    const yearTwo=HouseholdHealthSystem.settleTreatmentCharges(World,household,{year:nextYear});
+    return JSON.stringify({yearOneCosts:yearOne.treatmentCosts,yearTwoCosts:yearTwo.treatmentCosts});
+  `);
+  assert.ok(result.yearOneCosts>0);
+  assert.equal(result.yearTwoCosts,0);
+});
+
+// --- Real home-care hours from queued decisions (phase 4B-4 review fix #3) -
+
+test('applyHouseholdHealthTick feeds an explicit subjectCareHours value into real caregiving hours (not hardcoded 0)',()=>{
+  const context=newContext('subject-care-hours-real');
+  const result=run(context,`
+    const household=HouseholdSystem.findByMember(World,S.npcId);
+    const npc=NpcSystem.upsert(World,{id:'npc:care-hours-patient',firstName:'C',lastName:'Are',sex:'F',birthYear:World.year-8,alive:true,locationId:World.activeSettlementId,roleTags:['relative'],source:'test',health:{general:50,conditions:[]}});
+    HouseholdSystem.addMember(World,household.id,npc.id,false);
+    MedicalSystem.addCondition(npc,'injury',5,{world:World,year:World.year,known:true,state:'diagnosed'});
+    NpcSystem.applyHouseholdHealthTick(World,World.year,S,Lineage,[],new Set(),2);
+    const summary=HouseholdHealthSystem.summary(household);
+    return JSON.stringify({provided:summary.caregivingHoursProvided});
+  `);
+  assert.ok(result.provided>0,'an explicit non-zero subjectCareHours should now feed real caregiving hours');
+});
+
+test('applyHouseholdHealthTick caps subjectCareHours at 3 even if a larger value is supplied',()=>{
+  const context=newContext('subject-care-hours-cap');
+  const result=run(context,`
+    const household=HouseholdSystem.findByMember(World,S.npcId);
+    const npc=NpcSystem.upsert(World,{id:'npc:care-hours-cap',firstName:'C',lastName:'Ap',sex:'F',birthYear:World.year-8,alive:true,locationId:World.activeSettlementId,roleTags:['relative'],source:'test',health:{general:50,conditions:[]}});
+    HouseholdSystem.addMember(World,household.id,npc.id,false);
+    MedicalSystem.addCondition(npc,'chronic',5,{world:World,year:World.year,known:true,state:'chronic'});
+    NpcSystem.applyHouseholdHealthTick(World,World.year,S,Lineage,[],new Set(),99);
+    const summary=HouseholdHealthSystem.summary(household);
+    return JSON.stringify({provided:summary.caregivingHoursProvided});
+  `);
+  assert.ok(result.provided<=3,'subjectCareHours must be capped at 3 regardless of the supplied value');
+});
+
+test('applyCaregiving does not let a patient count as their own automatic healthy caregiver',()=>{
+  const context=newContext('patient-not-own-caregiver');
+  const result=run(context,`
+    const household=HouseholdSystem.create(World,{settlementId:World.activeSettlementId,memberIds:[],dependentIds:[]});
+    const elder=NpcSystem.upsert(World,{id:'npc:elder-patient',firstName:'E',lastName:'Lder',sex:'M',birthYear:World.year-75,alive:true,locationId:World.activeSettlementId,roleTags:['relative'],source:'test',health:{general:50,conditions:[]}});
+    HouseholdSystem.addMember(World,household.id,elder.id,false);
+    MedicalSystem.addCondition(elder,'injury',3,{world:World,year:World.year,known:true,state:'diagnosed'});
+    const result=HouseholdHealthSystem.applyCaregiving(World,household,{year:World.year});
+    return JSON.stringify({required:result.required,provided:result.provided});
+  `);
+  assert.ok(result.required>0);
+  assert.equal(result.provided,0,'a lone elderly patient (severity 3, age>=70) must not count as their own automatic caregiver');
+});
+
+// --- ui.js source-level wiring for subjectCareHours (fix #3) ---------------
+
+test('ui.js derives subjectCareHours from applied home-care decisions and the remaining planning-hour budget, not a hardcoded 0',()=>{
+  const src=fs.readFileSync('js/ui.js','utf8');
+  const fnStart=src.indexOf('function advanceYear(');
+  const fnBody=src.slice(fnStart,src.indexOf('\nfunction advance(',fnStart));
+  assert.ok(/reason===.home-care./.test(fnBody),'advanceYear should count applied home-care decisions from resolveQueuedFamilyDecisions');
+  assert.ok(/planHours\(\)/.test(fnBody),'advanceYear should respect the remaining planning-hour budget for subject caregiving hours');
+  assert.match(fnBody,/NpcSystem\.applyHouseholdHealthTick\(World,World\.year,S,Lineage,householdHealthNotices,new Set\(\),\s*__subjectHomeCareHours\)/);
+});

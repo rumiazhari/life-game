@@ -23,8 +23,23 @@ const scenarios=[
   // bearChild()/livingAtHome=false between postMigrateSetup and the main loop, which can
   // rebuild the subject's household membership; adding the co-resident afterward guarantees
   // it actually shares the household the loop below will observe.
-  {name:'household-transmission',setup:'',preLoopSetup:"const household=HouseholdSystem.findByMember(World,S.npcId); household.housing.rooms=1; household.foodSecurity=0.15; const carrier=NpcSystem.upsert(World,{id:'npc:diag-carrier',firstName:'Cass',lastName:'Carrier',sex:'F',birthYear:World.year-28,alive:true,locationId:World.activeSettlementId,roleTags:['relative'],source:'diagnostic',health:{general:80,conditions:[]}}); HouseholdSystem.addMember(World,household.id,carrier.id,false); MedicalSystem.addCondition(carrier,'respiratory',5,{world:World,year:World.year,known:true,state:'symptomatic'}); NpcSystem.syncLegacy(World,S,Lineage);"},
-  {name:'household-caregiving',setup:'',preLoopSetup:"const household=HouseholdSystem.findByMember(World,S.npcId); const patient=NpcSystem.upsert(World,{id:'npc:diag-patient',firstName:'Pat',lastName:'Patient',sex:'M',birthYear:World.year-40,alive:true,locationId:World.activeSettlementId,roleTags:['relative'],source:'diagnostic',health:{general:60,conditions:[]}}); HouseholdSystem.addMember(World,household.id,patient.id,false); MedicalSystem.addCondition(patient,'injury',5,{world:World,year:World.year,known:true,state:'diagnosed'}); NpcSystem.syncLegacy(World,S,Lineage);"}
+  // A comfortable crowding/food-security margin (extra co-residents, zero
+  // food security) keeps this scenario robust to the phase 4B-4 natural
+  // NPC diagnosis feature: a naturally-diagnosed contagious NPC now correctly
+  // transmits at a reduced multiplier (TRANSMISSION_STATE_MULTIPLIERS.diagnosed
+  // = 0.90 vs .symptomatic = 1.00), which trims risk enough to occasionally
+  // flip a razor-thin-margin scenario's outcome for a given seed; the wider
+  // margin here keeps the eventual-transmission expectation reliable either way.
+  {name:'household-transmission',setup:'',preLoopSetup:"const household=HouseholdSystem.findByMember(World,S.npcId); household.housing.rooms=1; household.foodSecurity=0; const carrier=NpcSystem.upsert(World,{id:'npc:diag-carrier',firstName:'Cass',lastName:'Carrier',sex:'F',birthYear:World.year-28,alive:true,locationId:World.activeSettlementId,roleTags:['relative'],source:'diagnostic',health:{general:80,conditions:[]}}); HouseholdSystem.addMember(World,household.id,carrier.id,false); MedicalSystem.addCondition(carrier,'respiratory',5,{world:World,year:World.year,known:true,state:'symptomatic'}); ['npc:diag-cohabitant-1','npc:diag-cohabitant-2','npc:diag-cohabitant-3'].forEach(id=>{ const cohabitant=NpcSystem.upsert(World,{id,firstName:'Co',lastName:'Habitant',sex:'M',birthYear:World.year-30,alive:true,locationId:World.activeSettlementId,roleTags:['relative'],source:'diagnostic',health:{general:80,conditions:[]}}); HouseholdSystem.addMember(World,household.id,cohabitant.id,false); }); NpcSystem.syncLegacy(World,S,Lineage);"},
+  // An explicit healthy adult co-resident is added alongside the patient so
+  // this scenario tests genuine second-party caregiving. Before the phase
+  // 4B-4 review fix, a lone patient (no other adult present) could count as
+  // their own "automatic healthy caregiver" and this scenario's nonzero
+  // caregivingHoursProvidedTotal was actually coming from that self-care bug
+  // being tripped elsewhere in the simulation, not from real caregiving of
+  // this patient -- adding a dedicated caregiver here makes the assertion
+  // mean what it says.
+  {name:'household-caregiving',setup:'',preLoopSetup:"const household=HouseholdSystem.findByMember(World,S.npcId); const patient=NpcSystem.upsert(World,{id:'npc:diag-patient',firstName:'Pat',lastName:'Patient',sex:'M',birthYear:World.year-40,alive:true,locationId:World.activeSettlementId,roleTags:['relative'],source:'diagnostic',health:{general:60,conditions:[]}}); HouseholdSystem.addMember(World,household.id,patient.id,false); MedicalSystem.addCondition(patient,'injury',5,{world:World,year:World.year,known:true,state:'diagnosed'}); const caregiver=NpcSystem.upsert(World,{id:'npc:diag-caregiver',firstName:'Car',lastName:'Egiver',sex:'F',birthYear:World.year-38,alive:true,locationId:World.activeSettlementId,roleTags:['relative'],source:'diagnostic',health:{general:90,conditions:[]}}); HouseholdSystem.addMember(World,household.id,caregiver.id,false); NpcSystem.syncLegacy(World,S,Lineage);"}
 ];
 
 function runScenario(scenario){
