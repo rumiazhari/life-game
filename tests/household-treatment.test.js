@@ -885,7 +885,17 @@ test('applyHouseholdHealthTick feeds an explicit subjectCareHours value into rea
     const npc=NpcSystem.upsert(World,{id:'npc:care-hours-patient',firstName:'C',lastName:'Are',sex:'F',birthYear:World.year-8,alive:true,locationId:World.activeSettlementId,roleTags:['relative'],source:'test',health:{general:50,conditions:[]}});
     HouseholdSystem.addMember(World,household.id,npc.id,false);
     MedicalSystem.addCondition(npc,'injury',5,{world:World,year:World.year,known:true,state:'diagnosed'});
-    NpcSystem.applyHouseholdHealthTick(World,World.year,S,Lineage,[],new Set(),2);
+    const careHoursByHousehold={};
+    careHoursByHousehold[household.id]=2;
+    NpcSystem.applyHouseholdHealthTick(
+      World,
+      World.year,
+      S,
+      Lineage,
+      [],
+      new Set(),
+      careHoursByHousehold
+    );
     const summary=HouseholdHealthSystem.summary(household);
     return JSON.stringify({provided:summary.caregivingHoursProvided});
   `);
@@ -899,7 +909,17 @@ test('applyHouseholdHealthTick caps subjectCareHours at 3 even if a larger value
     const npc=NpcSystem.upsert(World,{id:'npc:care-hours-cap',firstName:'C',lastName:'Ap',sex:'F',birthYear:World.year-8,alive:true,locationId:World.activeSettlementId,roleTags:['relative'],source:'test',health:{general:50,conditions:[]}});
     HouseholdSystem.addMember(World,household.id,npc.id,false);
     MedicalSystem.addCondition(npc,'chronic',5,{world:World,year:World.year,known:true,state:'chronic'});
-    NpcSystem.applyHouseholdHealthTick(World,World.year,S,Lineage,[],new Set(),99);
+    const careHoursByHousehold={};
+    careHoursByHousehold[household.id]=99;
+    NpcSystem.applyHouseholdHealthTick(
+      World,
+      World.year,
+      S,
+      Lineage,
+      [],
+      new Set(),
+      careHoursByHousehold
+    );
     const summary=HouseholdHealthSystem.summary(household);
     return JSON.stringify({provided:summary.caregivingHoursProvided});
   `);
@@ -928,5 +948,284 @@ test('ui.js derives subjectCareHours from applied home-care decisions and the re
   const fnBody=src.slice(fnStart,src.indexOf('\nfunction advance(',fnStart));
   assert.ok(/reason===.home-care./.test(fnBody),'advanceYear should count applied home-care decisions from resolveQueuedFamilyDecisions');
   assert.ok(/planHours\(\)/.test(fnBody),'advanceYear should respect the remaining planning-hour budget for subject caregiving hours');
-  assert.match(fnBody,/NpcSystem\.applyHouseholdHealthTick\(World,World\.year,S,Lineage,householdHealthNotices,new Set\(\),\s*__subjectHomeCareHours\)/);
+  assert.ok(
+    /result\.householdId/.test(fnBody),
+    'home-care hours must be assigned using each resolved result householdId'
+  );
+  assert.match(
+    fnBody,
+    /NpcSystem\.applyHouseholdHealthTick\(World,World\.year,S,Lineage,householdHealthNotices,new Set\(\),\s*__subjectHomeCareHoursByHousehold\)/
+  );
+});
+
+test('subject caregiving hours are applied to the selected household',()=>{
+  const context=newContext('care-hours-selected-household');
+  const result=run(context,`
+    const selected=HouseholdSystem.create(World,{
+      settlementId:World.activeSettlementId,
+      memberIds:[],
+      dependentIds:[]
+    });
+    const patient=NpcSystem.upsert(World,{
+      id:'npc:selected-care-patient',
+      firstName:'Selected',
+      lastName:'Patient',
+      sex:'F',
+      birthYear:World.year-8,
+      alive:true,
+      locationId:World.activeSettlementId,
+      roleTags:['relative'],
+      source:'test',
+      health:{general:50,conditions:[]}
+    });
+    HouseholdSystem.addMember(World,selected.id,patient.id,true);
+    MedicalSystem.addCondition(patient,'chronic',5,{
+      world:World,
+      year:World.year,
+      known:true,
+      state:'chronic'
+    });
+
+    const careHours={};
+    careHours[selected.id]=2;
+
+    NpcSystem.applyHouseholdHealthTick(
+      World,
+      World.year,
+      S,
+      Lineage,
+      [],
+      new Set(),
+      careHours
+    );
+
+    return JSON.stringify({
+      provided:HouseholdHealthSystem.summary(selected).caregivingHoursProvided
+    });
+  `);
+
+  assert.equal(result.provided,2);
+});
+
+test('subject caregiving hours are not applied to an unrelated household',()=>{
+  const context=newContext('care-hours-household-isolation');
+  const result=run(context,`
+    function makePatient(household,id){
+      const patient=NpcSystem.upsert(World,{
+        id,
+        firstName:id,
+        lastName:'Patient',
+        sex:'F',
+        birthYear:World.year-8,
+        alive:true,
+        locationId:World.activeSettlementId,
+        roleTags:['relative'],
+        source:'test',
+        health:{general:50,conditions:[]}
+      });
+      HouseholdSystem.addMember(World,household.id,patient.id,true);
+      MedicalSystem.addCondition(patient,'chronic',5,{
+        world:World,
+        year:World.year,
+        known:true,
+        state:'chronic'
+      });
+    }
+
+    const selected=HouseholdSystem.create(World,{
+      settlementId:World.activeSettlementId,
+      memberIds:[],
+      dependentIds:[]
+    });
+    const unrelated=HouseholdSystem.create(World,{
+      settlementId:World.activeSettlementId,
+      memberIds:[],
+      dependentIds:[]
+    });
+
+    makePatient(selected,'npc:selected-isolation');
+    makePatient(unrelated,'npc:unrelated-isolation');
+
+    const careHours={};
+    careHours[selected.id]=1;
+
+    NpcSystem.applyHouseholdHealthTick(
+      World,
+      World.year,
+      S,
+      Lineage,
+      [],
+      new Set(),
+      careHours
+    );
+
+    return JSON.stringify({
+      selectedProvided:HouseholdHealthSystem.summary(selected).caregivingHoursProvided,
+      unrelatedProvided:HouseholdHealthSystem.summary(unrelated).caregivingHoursProvided
+    });
+  `);
+
+  assert.equal(result.selectedProvided,1);
+  assert.equal(result.unrelatedProvided,0);
+});
+
+test('total subject caregiving hours across all households never exceeds three',()=>{
+  const context=newContext('care-hours-global-cap');
+  const result=run(context,`
+    function makeHousehold(id){
+      const household=HouseholdSystem.create(World,{
+        settlementId:World.activeSettlementId,
+        memberIds:[],
+        dependentIds:[]
+      });
+      const patient=NpcSystem.upsert(World,{
+        id,
+        firstName:id,
+        lastName:'Patient',
+        sex:'F',
+        birthYear:World.year-8,
+        alive:true,
+        locationId:World.activeSettlementId,
+        roleTags:['relative'],
+        source:'test',
+        health:{general:50,conditions:[]}
+      });
+      HouseholdSystem.addMember(World,household.id,patient.id,true);
+      MedicalSystem.addCondition(patient,'chronic',5,{
+        world:World,
+        year:World.year,
+        known:true,
+        state:'chronic'
+      });
+      return household;
+    }
+
+    const first=makeHousehold('npc:global-cap-first');
+    const second=makeHousehold('npc:global-cap-second');
+
+    const careHours={};
+    careHours[first.id]=3;
+    careHours[second.id]=3;
+
+    NpcSystem.applyHouseholdHealthTick(
+      World,
+      World.year,
+      S,
+      Lineage,
+      [],
+      new Set(),
+      careHours
+    );
+
+    const firstProvided=
+      HouseholdHealthSystem.summary(first).caregivingHoursProvided;
+    const secondProvided=
+      HouseholdHealthSystem.summary(second).caregivingHoursProvided;
+
+    return JSON.stringify({
+      firstProvided,
+      secondProvided,
+      total:firstProvided+secondProvided
+    });
+  `);
+
+  assert.equal(result.total,3);
+});
+
+test('household churn assigns subject caregiving hours to the newly resolved household',()=>{
+  const context=newContext('care-hours-household-churn');
+  const result=run(context,`
+    const oldHousehold=HouseholdSystem.create(World,{
+      settlementId:World.activeSettlementId,
+      memberIds:[],
+      dependentIds:[]
+    });
+
+    const patient=NpcSystem.upsert(World,{
+      id:'npc:care-churn-patient',
+      firstName:'Care',
+      lastName:'Churn',
+      sex:'F',
+      birthYear:World.year-40,
+      alive:true,
+      locationId:World.activeSettlementId,
+      roleTags:['relative'],
+      source:'test',
+      health:{general:50,conditions:[]}
+    });
+
+    HouseholdSystem.addMember(World,oldHousehold.id,patient.id,false);
+    MedicalSystem.addCondition(patient,'injury',5,{
+      world:World,
+      year:World.year,
+      known:true,
+      state:'diagnosed'
+    });
+
+    HouseholdHealthSystem.prepareCases(
+      World,
+      oldHousehold,
+      {year:World.year,subject:S}
+    );
+
+    const oldState=HouseholdHealthSystem.ensure(oldHousehold);
+    const caseRecord=oldState.cases.find(
+      item=>item.npcId===patient.id
+    );
+
+    const queuedDecision={
+      npcId:caseRecord.npcId,
+      conditionInstanceId:caseRecord.conditionInstanceId,
+      decision:'home-care',
+      treatmentId:'rest'
+    };
+
+    const newHousehold=HouseholdSystem.create(World,{
+      settlementId:World.activeSettlementId,
+      memberIds:[],
+      dependentIds:[]
+    });
+
+    HouseholdSystem.addMember(World,newHousehold.id,patient.id,false);
+    newHousehold.medical=oldHousehold.medical;
+    oldHousehold.medical=undefined;
+
+    const results=NpcSystem.resolveQueuedFamilyDecisions(
+      World,
+      World.year,
+      S,
+      Lineage,
+      [queuedDecision]
+    );
+
+    const careHours={};
+    results
+      .filter(result=>result&&result.applied&&result.reason==='home-care')
+      .forEach(result=>{
+        careHours[result.householdId]=(careHours[result.householdId]||0)+1;
+      });
+
+    NpcSystem.applyHouseholdHealthTick(
+      World,
+      World.year,
+      S,
+      Lineage,
+      [],
+      new Set(),
+      careHours
+    );
+
+    return JSON.stringify({
+      resolvedHouseholdId:results[0]&&results[0].householdId,
+      newHouseholdId:newHousehold.id,
+      newProvided:
+        HouseholdHealthSystem.summary(newHousehold).caregivingHoursProvided,
+      oldProvided:
+        HouseholdHealthSystem.summary(oldHousehold).caregivingHoursProvided
+    });
+  `);
+
+  assert.equal(result.resolvedHouseholdId,result.newHouseholdId);
+  assert.equal(result.newProvided,1);
+  assert.equal(result.oldProvided,0);
 });

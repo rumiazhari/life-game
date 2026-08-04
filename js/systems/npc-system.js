@@ -827,28 +827,74 @@
   // it after the subject's own annual medical tick (which happens later in
   // ui.js's advanceYear via runPersonalYearTick). See the phase 4B-3 report
   // for the ordering trade-off this implies for the subject specifically.
-  function applyHouseholdHealthTick(world,year,subject,lineage,notices,medicalNoticeKeys,subjectCareHours){
+  function applyHouseholdHealthTick(world,year,subject,lineage,notices,medicalNoticeKeys,subjectCareHoursByHousehold){
     if(!root.HouseholdHealthSystem||!root.HouseholdSystem||typeof root.HouseholdSystem.all!=='function')return;
-    const hours=Math.max(0,Math.min(3,Number(subjectCareHours)||0));
-    root.HouseholdSystem.all(world).sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(household=>{
-      const result=root.HouseholdHealthSystem.tickHouseholdCaregivingAndTransmission(world,household,{year,subject,lineage,subjectCareHours:hours});
-      if(!result||!result.applied)return;
-      (result.transmissions||[]).forEach(entry=>{
-        const parties=[entry.sourceId,entry.targetId].filter((id,index,arr)=>arr.indexOf(id)===index);
-        parties.forEach(id=>{
-          if(subject&&subject.npcId&&id===subject.npcId)return;
-          const npc=world.npcs&&world.npcs[id];
-          if(!npc||npc.alive===false)return;
-          if(!isRelevantToSubject(world,npc,subject,lineage))return;
-          const key=npc.id+'|'+entry.instanceId+'|medical_transmission|'+year;
-          if(medicalNoticeKeys.has(key))return;
-          medicalNoticeKeys.add(key);
-          const text='Illness spread within '+fullName(npc)+'’s household.';
-          notices.push({type:'medical_transmission',npcId:npc.id,name:fullName(npc),conditionInstanceId:entry.instanceId,text});
-          historyPush(npc,{year,type:'medical_transmission',summary:text});
+
+    const requestedByHousehold=
+      subjectCareHoursByHousehold&&typeof subjectCareHoursByHousehold==='object'
+        ?subjectCareHoursByHousehold
+        :{};
+
+    let remainingSubjectCareHours=3;
+
+    root.HouseholdSystem.all(world)
+      .sort((a,b)=>String(a.id).localeCompare(String(b.id)))
+      .forEach(household=>{
+        const requestedHours=Math.max(
+          0,
+          Math.min(3,Number(requestedByHousehold[household.id])||0)
+        );
+        const householdSubjectCareHours=Math.min(
+          requestedHours,
+          remainingSubjectCareHours
+        );
+        remainingSubjectCareHours-=householdSubjectCareHours;
+
+        const result=root.HouseholdHealthSystem.tickHouseholdCaregivingAndTransmission(
+          world,
+          household,
+          {
+            year,
+            subject,
+            lineage,
+            subjectCareHours:householdSubjectCareHours
+          }
+        );
+
+        if(!result||!result.applied)return;
+
+        (result.transmissions||[]).forEach(entry=>{
+          const parties=[entry.sourceId,entry.targetId]
+            .filter((id,index,array)=>array.indexOf(id)===index);
+
+          parties.forEach(id=>{
+            if(subject&&subject.npcId&&id===subject.npcId)return;
+
+            const npc=world.npcs&&world.npcs[id];
+            if(!npc||npc.alive===false)return;
+            if(!isRelevantToSubject(world,npc,subject,lineage))return;
+
+            const key=npc.id+'|'+entry.instanceId+'|medical_transmission|'+year;
+            if(medicalNoticeKeys.has(key))return;
+
+            medicalNoticeKeys.add(key);
+
+            const text='Illness spread within '+fullName(npc)+'’s household.';
+            notices.push({
+              type:'medical_transmission',
+              npcId:npc.id,
+              name:fullName(npc),
+              conditionInstanceId:entry.instanceId,
+              text
+            });
+            historyPush(npc,{
+              year,
+              type:'medical_transmission',
+              summary:text
+            });
+          });
         });
       });
-    });
   }
 
   function tick(world,context){
