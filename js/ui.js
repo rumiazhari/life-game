@@ -2394,6 +2394,11 @@ function advanceYear(suppressBurst,quiet){
   runReverseAffairs();
   tickSkills();
   checkCareerProgress();
+  if(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof EmploymentSystem.reconcilePlayer==='function'){
+    EmploymentSystem.reconcilePlayer(World,S);
+    if(typeof EmploymentSystem.reconcileNpcs==='function') EmploymentSystem.reconcileNpcs(World);
+    if(typeof EmploymentSystem.syncAllBusinessEmployees==='function') EmploymentSystem.syncAllBusinessEmployees(World);
+  }
   guardianTeachTick();
   guardianAmbientTick();
   guardianIncidentTick();
