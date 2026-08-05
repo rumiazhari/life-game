@@ -402,6 +402,140 @@ test('checkInvariants detects non-finite/malformed businessCounter',()=>{
   assert.ok(issues.some(msg=>/businessCounter/i.test(msg)));
 });
 
+test('ensure resets a numeric-string businessCounter to 0',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){ World.businessCounter='7'; BusinessSystem.ensure(World); return World.businessCounter; })()`);
+  assert.equal(result,0);
+});
+
+test('ensure resets a fractional businessCounter to 0',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){ World.businessCounter=7.5; BusinessSystem.ensure(World); return World.businessCounter; })()`);
+  assert.equal(result,0);
+});
+
+test('ensure resets a null businessCounter to 0',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){ World.businessCounter=null; BusinessSystem.ensure(World); return World.businessCounter; })()`);
+  assert.equal(result,0);
+});
+
+test('ensure resets a negative businessCounter to 0',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){ World.businessCounter=-1; BusinessSystem.ensure(World); return World.businessCounter; })()`);
+  assert.equal(result,0);
+});
+
+test('ensure preserves a valid non-negative integer businessCounter',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){ World.businessCounter=42; BusinessSystem.ensure(World); return World.businessCounter; })()`);
+  assert.equal(result,42);
+});
+
+test('migration allocates valid IDs when the original counter is a numeric string',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['business:00001']={id:'business:00001',name:'Broken Counter Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businesses['not-a-valid-id']={id:'not-a-valid-id',name:'Odd Shop',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businessCounter='7';
+    BusinessSystem.migrate(World,[]);
+    const ids=Object.keys(World.businesses);
+    const allValid=ids.every(id=>/^business:\\d{5,}$/.test(id));
+    return JSON.stringify({allValid,counterValid:typeof World.businessCounter==='number'&&Number.isInteger(World.businessCounter)&&World.businessCounter>=0});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.allValid);
+  assert.ok(parsed.counterValid);
+});
+
+test('migration allocates valid IDs when the original counter is a fraction',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['not-a-valid-id']={id:'not-a-valid-id',name:'Odd Shop',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businessCounter=3.7;
+    BusinessSystem.migrate(World,[]);
+    const ids=Object.keys(World.businesses);
+    const allValid=ids.every(id=>/^business:\\d{5,}$/.test(id));
+    return JSON.stringify({allValid,counterValid:typeof World.businessCounter==='number'&&Number.isInteger(World.businessCounter)&&World.businessCounter>=0});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.allValid);
+  assert.ok(parsed.counterValid);
+});
+
+test('migration never discards null, string, number, boolean, and array legacy business entries',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['legacy-null']=null;
+    World.businesses['legacy-string']='Grandpa\\'s Bakery';
+    World.businesses['legacy-number']=42;
+    World.businesses['legacy-bool']=true;
+    World.businesses['legacy-array']=['a','b'];
+    const beforeCount=Object.keys(World.businesses).length;
+    BusinessSystem.migrate(World,[]);
+    const afterCount=Object.keys(World.businesses).length;
+    const names=Object.values(World.businesses).map(b=>b.name).sort();
+    return JSON.stringify({beforeCount,afterCount,names});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.beforeCount,5);
+  assert.equal(parsed.afterCount,5);
+  assert.ok(parsed.names.includes("Grandpa's Bakery"));
+});
+
+test('migration preserves record count with empty settlementDefinitions and produces valid unique repaired records',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['legacy-null']=null;
+    World.businesses['legacy-string']='Old Name Co';
+    World.businesses['legacy-number']=7;
+    World.businesses['legacy-bool']=false;
+    World.businesses['legacy-array']=[1,2,3];
+    const beforeCount=Object.keys(World.businesses).length;
+    BusinessSystem.migrate(World,[]);
+    const afterCount=Object.keys(World.businesses).length;
+    const keys=Object.keys(World.businesses);
+    const keyIdAgree=keys.every(key=>World.businesses[key].id===key);
+    const uniqueIds=new Set(keys).size===keys.length;
+    const allValidIds=keys.every(key=>/^business:\\d{5,}$/.test(key));
+    const invariants=BusinessSystem.checkInvariants(World);
+    return JSON.stringify({beforeCount,afterCount,keyIdAgree,uniqueIds,allValidIds,invariants});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.beforeCount,5);
+  assert.equal(parsed.afterCount,5);
+  assert.ok(parsed.keyIdAgree);
+  assert.ok(parsed.uniqueIds);
+  assert.ok(parsed.allValidIds);
+  assert.deepEqual(parsed.invariants,[]);
+});
+
+test('migration of legacy non-object entries is byte-for-byte idempotent',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['legacy-null']=null;
+    World.businesses['legacy-string']='Repeatable Co';
+    World.businesses['legacy-number']=99;
+    World.businesses['legacy-bool']=true;
+    World.businesses['legacy-array']=['x'];
+    BusinessSystem.migrate(World,[]);
+    const first=JSON.stringify(World.businesses);
+    const firstCounter=World.businessCounter;
+    BusinessSystem.migrate(World,[]);
+    BusinessSystem.migrate(World,[]);
+    const second=JSON.stringify(World.businesses);
+    return JSON.stringify({equal:first===second,counterEqual:firstCounter===World.businessCounter});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.equal);
+  assert.ok(parsed.counterEqual);
+});
+
 test('checkInvariants rejects null, empty-string, and numeric-string finance values',()=>{
   const context=freshWorld();
   const result=expose(context,`(function(){

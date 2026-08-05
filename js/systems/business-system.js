@@ -40,6 +40,10 @@
 
   const finite=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
 
+  function isValidCounter(value){
+    return typeof value==='number'&&Number.isFinite(value)&&Number.isInteger(value)&&value>=0;
+  }
+
   function populationOf(settlement){
     const text=String(settlement&&settlement.population||'0').replace(/[^0-9]/g,'');
     return Math.max(0,Number(text)||0);
@@ -143,7 +147,7 @@
   function ensure(world){
     if(!world||typeof world!=='object') throw new Error('BusinessSystem.ensure requires a world object');
     if(!world.businesses||typeof world.businesses!=='object'||Array.isArray(world.businesses)) world.businesses={};
-    if(!Number.isFinite(Number(world.businessCounter))||Number(world.businessCounter)<0) world.businessCounter=0;
+    if(!isValidCounter(world.businessCounter)) world.businessCounter=0;
     world.businessSchemaVersion=SCHEMA_VERSION;
     return world;
   }
@@ -161,7 +165,7 @@
       demandGroup:SECTOR_DEMAND_GROUPS[sector],
       kind,
       status,
-      foundedYear:Number.isFinite(Number(record&&record.foundedYear))?Number(record.foundedYear):null,
+      foundedYear:(record&&record.foundedYear)!=null&&Number.isFinite(Number(record.foundedYear))?Number(record.foundedYear):null,
       ownerNpcId:(record&&record.ownerNpcId)!=null?record.ownerNpcId:null,
       employeeIds:uniqueStringArray(record&&record.employeeIds),
       vacancies:uniqueVacancies(record&&record.vacancies),
@@ -283,30 +287,31 @@
 
   function migrate(world,settlementDefinitions){
     ensure(world);
-    const highest=highestBusinessIdNumber(world);
-    if(!Number.isFinite(Number(world.businessCounter))||Number(world.businessCounter)<highest) world.businessCounter=highest;
 
     const rawKeys=Object.keys(world.businesses).sort();
     const normalized={};
     const usedIds=new Set();
+
+    function allocateId(){
+      let candidate;
+      do{
+        world.businessCounter+=1;
+        candidate='business:'+String(world.businessCounter).padStart(5,'0');
+      } while(usedIds.has(candidate));
+      return candidate;
+    }
+
     rawKeys.forEach(key=>{
-      const record=world.businesses[key];
-      if(!record||typeof record!=='object') return;
+      const raw=world.businesses[key];
+      const record=(raw&&typeof raw==='object'&&!Array.isArray(raw))?raw:Object.assign({settlementId:'unassigned'},typeof raw==='string'&&raw?{name:raw}:{});
       const recordId=record.id;
-      let finalId=null;
+      let finalId;
       if(isValidBusinessId(recordId)&&!usedIds.has(recordId)){
         finalId=recordId;
       } else if(isValidBusinessId(key)&&!usedIds.has(key)){
         finalId=key;
       } else {
-        let counter=world.businessCounter;
-        let candidate;
-        do{
-          counter+=1;
-          candidate='business:'+String(counter).padStart(5,'0');
-        } while(usedIds.has(candidate));
-        world.businessCounter=counter;
-        finalId=candidate;
+        finalId=allocateId();
       }
       usedIds.add(finalId);
       normalized[finalId]=normalizeRecord(finalId,record,record.settlementId);
@@ -314,6 +319,9 @@
     world.businesses=normalized;
     const defs=Array.isArray(settlementDefinitions)?settlementDefinitions:[];
     seedWorld(world,defs);
+
+    const highest=highestBusinessIdNumber(world);
+    if(world.businessCounter<highest) world.businessCounter=highest;
     world.businessSchemaVersion=SCHEMA_VERSION;
     return world;
   }
