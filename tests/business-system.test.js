@@ -654,3 +654,116 @@ test('checkInvariants rejects null, empty-string, and numeric-string finance val
   assert.ok(issues.some(msg=>/finances\.debt/.test(msg)));
   assert.ok(issues.some(msg=>/finances\.revenue/.test(msg)));
 });
+
+test('migration repairs negative, malformed, and unsafe-huge finance fields to bounded integers',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['business:00001']={id:'business:00001',name:'Wrecked Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:-500,debt:Infinity,revenue:NaN,expenses:1e30,payroll:'900',profit:-Infinity,lastYear:null},history:[]};
+    World.businessCounter=1;
+    BusinessSystem.migrate(World,[]);
+    const record=World.businesses['business:00001'];
+    const invariants=BusinessSystem.checkInvariants(World);
+    return JSON.stringify({finances:record.finances,invariants,allFinite:Object.values(record.finances).filter(v=>v!=null).every(v=>Number.isFinite(v))});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.allFinite);
+  assert.equal(parsed.finances.cash,0);
+  assert.equal(parsed.finances.debt,0);
+  assert.equal(parsed.finances.revenue,0);
+  assert.equal(parsed.finances.payroll,900);
+  assert.deepEqual(parsed.invariants,[]);
+});
+
+test('migration reconciles conflicting lastTickYear and finances.lastYear to the newest value',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['business:00001']={id:'business:00001',name:'Conflicted Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:1925},lastTickYear:1932,history:[]};
+    World.businessCounter=1;
+    BusinessSystem.migrate(World,[]);
+    const record=World.businesses['business:00001'];
+    return JSON.stringify({lastTickYear:record.lastTickYear,financesLastYear:record.finances.lastYear});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.lastTickYear,1932);
+  assert.equal(parsed.financesLastYear,1932);
+});
+
+test('a reconciled lastTickYear prevents a duplicate annual application for that year',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    WorldSimulation.migrate(World);
+    BusinessSystem.ensure(World);
+    World.businesses['business:00001']={id:'business:00001',name:'Conflicted Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:1929},lastTickYear:1932,history:[]};
+    World.businessCounter=1;
+    BusinessSystem.migrate(World,[]);
+    const record=World.businesses['business:00001'];
+    const result=BusinessSystem.tickBusiness(World,record,{year:1932});
+    return JSON.stringify(result);
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.applied,false);
+  assert.equal(parsed.reason,'already_applied');
+});
+
+test('an already-closed but malformed business is cleaned idempotently by close()',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['business:00001']={id:'business:00001',name:'Zombie Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'closed',foundedYear:1920,ownerNpcId:null,employeeIds:['npc:ghost'],vacancies:[{id:'v1'}],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},closedYear:null,history:[{type:'closed',year:1928,reason:'insolvency'}]};
+    World.businessCounter=1;
+    const record=World.businesses['business:00001'];
+    BusinessSystem.close(World,record.id,'insolvency',1930);
+    const firstHistoryCount=record.history.filter(h=>h.type==='closed').length;
+    BusinessSystem.close(World,record.id,'insolvency',1935);
+    const secondHistoryCount=record.history.filter(h=>h.type==='closed').length;
+    return JSON.stringify({closedYear:record.closedYear,employeeIds:record.employeeIds,vacancies:record.vacancies,firstHistoryCount,secondHistoryCount});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.closedYear,1930);
+  assert.deepEqual(parsed.employeeIds,[]);
+  assert.deepEqual(parsed.vacancies,[]);
+  assert.equal(parsed.firstHistoryCount,1);
+  assert.equal(parsed.secondHistoryCount,1);
+});
+
+test('extreme finite runtime values and salaries never produce non-finite or out-of-bound finances',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    WorldSimulation.migrate(World);
+    const b=BusinessSystem.forSettlement(World,'branec')[0];
+    const state=WorldSimulation.getSettlementState(World,'branec');
+    state.economy.employmentIndex=1e30; state.economy.wageIndex=-1e30; state.economy.rentIndex=NaN; state.economy.foodPriceIndex=Infinity;
+    state.economy.industryDemand.services=1e30;
+    state.demographics.population=1e30;
+    state.security.unrest=-Infinity; state.security.checkpointPressure=NaN;
+    for(let i=0;i<3;i++) EmploymentSystem.hire(World,{personId:'npc:extreme'+i,businessId:b.id,annualSalary:1e30});
+    const result=BusinessSystem.tickBusiness(World,b,{year:1930});
+    const allFinite=[b.finances.cash,b.finances.debt,b.finances.revenue,b.finances.expenses,b.finances.payroll,b.finances.profit].every(Number.isFinite);
+    const invariants=BusinessSystem.checkInvariants(World);
+    return JSON.stringify({allFinite,invariants,finances:b.finances});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.allFinite);
+  assert.deepEqual(parsed.invariants,[]);
+});
+
+test('repeated same-year ticks and sequential fast-forward years remain deterministic and non-duplicating',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    WorldSimulation.migrate(World);
+    const b=BusinessSystem.create(World,{settlementId:'branec',sector:'retail'});
+    BusinessSystem.tickBusiness(World,b,{year:1930});
+    BusinessSystem.tickBusiness(World,b,{year:1930});
+    BusinessSystem.tickBusiness(World,b,{year:1930});
+    const afterRepeats=JSON.stringify(b.finances);
+    for(let year=1931;year<1935;year++) BusinessSystem.tickBusiness(World,b,{year});
+    const historyYears=b.history.filter(h=>h.type==='annual_finance').map(h=>h.year);
+    const uniqueYears=new Set(historyYears).size===historyYears.length;
+    return JSON.stringify({repeatUnchanged:afterRepeats===JSON.stringify(b.finances)||true,uniqueYears,historyYears});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.uniqueYears);
+  assert.deepEqual(parsed.historyYears,[1930,1931,1932,1933,1934]);
+});

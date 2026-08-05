@@ -64,6 +64,15 @@
     professional:0.32
   };
 
+  const MAX_MONEY=1000000000;
+  const MIN_YEAR=-5000;
+  const MAX_YEAR=5000;
+  const MAX_STRUGGLING_YEARS=1000;
+  const MAX_POPULATION=50000000;
+  const MAX_EMPLOYEES=100000;
+  const INDEX_MIN=typeof root!=='undefined'&&root.SettlementEconomy&&Number.isFinite(root.SettlementEconomy.MIN_INDEX)?root.SettlementEconomy.MIN_INDEX:0.65;
+  const INDEX_MAX=typeof root!=='undefined'&&root.SettlementEconomy&&Number.isFinite(root.SettlementEconomy.MAX_INDEX)?root.SettlementEconomy.MAX_INDEX:1.55;
+
   const finite=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 
@@ -71,13 +80,25 @@
     return typeof value==='number'&&Number.isFinite(value)&&Number.isInteger(value)&&value>=0;
   }
 
-  function nonNegInt(value,fallback){
+  function nonNegInt(value,fallback,max){
     if(value==null||!Number.isFinite(Number(value))) return fallback;
     const n=Math.round(Number(value));
-    return n>=0?n:fallback;
+    if(n<0) return fallback;
+    return max!=null?Math.min(max,n):n;
   }
   function finiteIntOrNull(value){
-    return value!=null&&Number.isFinite(Number(value))?Math.round(Number(value)):null;
+    if(value==null||!Number.isFinite(Number(value))) return null;
+    return Math.max(MIN_YEAR,Math.min(MAX_YEAR,Math.round(Number(value))));
+  }
+  function boundedMoney(value,fallback){
+    const n=Number(value);
+    if(!Number.isFinite(n)||n<0) return fallback;
+    return Math.min(MAX_MONEY,Math.round(n));
+  }
+  function boundedSignedMoney(value,fallback){
+    const n=Number(value);
+    if(!Number.isFinite(n)) return fallback;
+    return Math.max(-MAX_MONEY,Math.min(MAX_MONEY,Math.round(n)));
   }
 
   function populationOf(settlement){
@@ -109,13 +130,13 @@
     const defaults=emptyFinances();
     const finances=source&&typeof source==='object'?source:{};
     return {
-      cash:finite(finances.cash,defaults.cash),
-      debt:finite(finances.debt,defaults.debt),
-      revenue:finite(finances.revenue,defaults.revenue),
-      expenses:finite(finances.expenses,defaults.expenses),
-      payroll:finite(finances.payroll,defaults.payroll),
-      profit:finite(finances.profit,defaults.profit),
-      lastYear:finances.lastYear!=null&&Number.isFinite(Number(finances.lastYear))?Number(finances.lastYear):null
+      cash:boundedMoney(finances.cash,defaults.cash),
+      debt:boundedMoney(finances.debt,defaults.debt),
+      revenue:boundedMoney(finances.revenue,defaults.revenue),
+      expenses:boundedMoney(finances.expenses,defaults.expenses),
+      payroll:boundedMoney(finances.payroll,defaults.payroll),
+      profit:boundedSignedMoney(finances.profit,defaults.profit),
+      lastYear:finiteIntOrNull(finances.lastYear)
     };
   }
 
@@ -194,7 +215,16 @@
     const status=STATUSES.includes(record&&record.status)?record.status:'active';
     const history=Array.isArray(record&&record.history)?record.history.slice(-HISTORY_LIMIT):[];
     let closedYear=finiteIntOrNull(record&&record.closedYear);
-    if(status==='closed'){ if(closedYear==null) closedYear=finiteIntOrNull(year); } else closedYear=null;
+    if(status==='closed'){ if(closedYear==null) closedYear=finiteIntOrNull(year)!=null?finiteIntOrNull(year):0; } else closedYear=null;
+    const finances=normalizeFinances(record&&record.finances);
+    let lastTickYear=finiteIntOrNull(record&&record.lastTickYear);
+    if(lastTickYear!=null||finances.lastYear!=null){
+      const authoritative=Math.max(lastTickYear==null?-Infinity:lastTickYear,finances.lastYear==null?-Infinity:finances.lastYear);
+      lastTickYear=authoritative;
+      finances.lastYear=authoritative;
+    }
+    const employeeIds=status==='closed'?[]:uniqueStringArray(record&&record.employeeIds);
+    const vacancies=status==='closed'?[]:uniqueVacancies(record&&record.vacancies);
     return {
       id,
       name:typeof (record&&record.name)==='string'&&record.name?record.name:id,
@@ -205,11 +235,11 @@
       status,
       foundedYear:(record&&record.foundedYear)!=null&&Number.isFinite(Number(record.foundedYear))?Number(record.foundedYear):null,
       ownerNpcId:(record&&record.ownerNpcId)!=null?record.ownerNpcId:null,
-      employeeIds:uniqueStringArray(record&&record.employeeIds),
-      vacancies:uniqueVacancies(record&&record.vacancies),
-      finances:normalizeFinances(record&&record.finances),
-      lastTickYear:finiteIntOrNull(record&&record.lastTickYear),
-      strugglingYears:nonNegInt(record&&record.strugglingYears,0),
+      employeeIds,
+      vacancies,
+      finances,
+      lastTickYear,
+      strugglingYears:nonNegInt(record&&record.strugglingYears,0,MAX_STRUGGLING_YEARS),
       closedYear,
       history
     };
@@ -223,6 +253,8 @@
     const sector=spec.sector;
     if(!SECTOR_SET.has(sector)) throw new Error('BusinessSystem.create requires a supported sector, got: '+sector);
     const id=nextBusinessId(world);
+    const status=STATUSES.includes(spec.status)?spec.status:'active';
+    const closed=status==='closed';
     const record={
       id,
       name:typeof spec.name==='string'&&spec.name?spec.name:id,
@@ -230,15 +262,15 @@
       sector,
       demandGroup:SECTOR_DEMAND_GROUPS[sector],
       kind:KINDS.includes(spec.kind)?spec.kind:defaultKindForSector(sector),
-      status:STATUSES.includes(spec.status)?spec.status:'active',
+      status,
       foundedYear:Number.isFinite(Number(spec.foundedYear))?Number(spec.foundedYear):finite(world.year,null),
       ownerNpcId:spec.ownerNpcId!=null?spec.ownerNpcId:null,
-      employeeIds:uniqueStringArray(spec.employeeIds),
-      vacancies:uniqueVacancies(spec.vacancies).map(v=>v&&typeof v==='object'?Object.assign({},v):v),
+      employeeIds:closed?[]:uniqueStringArray(spec.employeeIds),
+      vacancies:closed?[]:uniqueVacancies(spec.vacancies).map(v=>v&&typeof v==='object'?Object.assign({},v):v),
       finances:normalizeFinances(spec.finances),
       lastTickYear:finiteIntOrNull(spec.lastTickYear),
-      strugglingYears:nonNegInt(spec.strugglingYears,0),
-      closedYear:STATUSES.includes(spec.status)&&spec.status==='closed'?finiteIntOrNull(spec.closedYear!=null?spec.closedYear:world.year):null,
+      strugglingYears:nonNegInt(spec.strugglingYears,0,MAX_STRUGGLING_YEARS),
+      closedYear:closed?(finiteIntOrNull(spec.closedYear!=null?spec.closedYear:world.year)!=null?finiteIntOrNull(spec.closedYear!=null?spec.closedYear:world.year):0):null,
       history:Array.isArray(spec.history)?spec.history.slice(-HISTORY_LIMIT).map(h=>h&&typeof h==='object'?Object.assign({},h):h):[]
     };
     world.businesses[id]=record;
@@ -400,18 +432,20 @@
     const economy=runtime&&runtime.economy||{};
     const security=runtime&&runtime.security||{};
     const demographics=runtime&&runtime.demographics||{};
-    const employmentIndex=finite(economy.employmentIndex,0.5);
-    const wageIndex=finite(economy.wageIndex,1);
-    const rentIndex=finite(economy.rentIndex,1);
-    const foodPriceIndex=finite(economy.foodPriceIndex,1);
-    const sectorDemand=economy.industryDemand&&economy.industryDemand[business.demandGroup]!=null?finite(economy.industryDemand[business.demandGroup],0.5):0.5;
-    const population=finite(demographics.population,0);
-    const unrest=finite(security.unrest,0);
-    const checkpointPressure=finite(security.checkpointPressure,0);
-    const publicHealthPressure=runtime&&root.PublicHealth&&typeof root.PublicHealth.pressure==='function'?finite(root.PublicHealth.pressure(runtime),0):0;
+    const employmentIndex=clamp(finite(economy.employmentIndex,0.5),0,1);
+    const wageIndex=clamp(finite(economy.wageIndex,1),INDEX_MIN,INDEX_MAX);
+    const rentIndex=clamp(finite(economy.rentIndex,1),INDEX_MIN,INDEX_MAX);
+    const foodPriceIndex=clamp(finite(economy.foodPriceIndex,1),INDEX_MIN,INDEX_MAX);
+    const sectorDemandRaw=economy.industryDemand&&economy.industryDemand[business.demandGroup];
+    const sectorDemand=clamp(finite(sectorDemandRaw,0.5),0,1);
+    const population=Math.max(0,Math.min(MAX_POPULATION,finite(demographics.population,0)));
+    const unrest=clamp(finite(security.unrest,0),0,1);
+    const checkpointPressure=clamp(finite(security.checkpointPressure,0),0,1);
+    const publicHealthPressureRaw=runtime&&root.PublicHealth&&typeof root.PublicHealth.pressure==='function'?root.PublicHealth.pressure(runtime):0;
+    const publicHealthPressure=clamp(finite(publicHealthPressureRaw,0),0,1);
     const activeContracts=root.EmploymentSystem&&typeof root.EmploymentSystem.activeForBusiness==='function'?root.EmploymentSystem.activeForBusiness(world,business.id):[];
-    const activeEmployees=activeContracts.length;
-    const annualPayroll=activeContracts.reduce((sum,c)=>sum+finite(c.annualSalary,0),0);
+    const activeEmployees=Math.max(0,Math.min(MAX_EMPLOYEES,activeContracts.length));
+    const annualPayroll=boundedMoney(activeContracts.reduce((sum,c)=>sum+Math.max(0,finite(c.annualSalary,0)),0),0);
     return {
       year:Math.round(finite(world.year,0)),
       employmentIndex,wageIndex,rentIndex,foodPriceIndex,sectorDemand,population,unrest,checkpointPressure,publicHealthPressure,
@@ -432,15 +466,16 @@
     const stabilityFactor=1-inputs.unrest*0.30-inputs.checkpointPressure*0.12;
     const healthFactor=1-inputs.publicHealthPressure*0.18;
     const grossRevenue=sectorBase*inputs.businessScale*demandFactor*employmentFactor*Math.max(0.35,stabilityFactor)*Math.max(0.55,healthFactor)*variation;
-    const revenue=Math.max(0,Math.round(grossRevenue));
-    const payroll=Math.round(inputs.annualPayroll);
+    const revenue=boundedMoney(Number.isFinite(grossRevenue)?grossRevenue:0,0);
+    const payroll=boundedMoney(inputs.annualPayroll,0);
     const ratio=SECTOR_OPERATING_RATIO[business.sector]||SECTOR_OPERATING_RATIO.professional;
     const fixedCost=900*inputs.businessScale*inputs.rentIndex;
     const variableCost=revenue*ratio*(0.80+inputs.foodPriceIndex*0.20);
-    const expenses=Math.max(0,Math.round(fixedCost+variableCost));
-    const profit=revenue-expenses-payroll;
-    const startingCash=Math.max(0,finite(business.finances.cash,0));
-    const startingDebt=Math.max(0,finite(business.finances.debt,0));
+    const expensesRaw=fixedCost+variableCost;
+    const expenses=boundedMoney(Number.isFinite(expensesRaw)?expensesRaw:0,0);
+    const profit=boundedSignedMoney(revenue-expenses-payroll,0);
+    const startingCash=boundedMoney(business.finances&&business.finances.cash,0);
+    const startingDebt=boundedMoney(business.finances&&business.finances.debt,0);
     let cash=startingCash, debt=startingDebt;
     if(profit>=0){
       cash+=profit;
@@ -452,24 +487,28 @@
       cash-=fromCash;
       debt+=(loss-fromCash);
     }
-    cash=Math.max(0,Math.round(cash));
-    debt=Math.max(0,Math.round(debt));
-    return {year,revenue,expenses,payroll,profit:Math.round(profit),cash,debt,variation,inputs};
+    cash=boundedMoney(cash,0);
+    debt=boundedMoney(debt,0);
+    return {year,revenue,expenses,payroll,profit,cash,debt,variation,inputs};
   }
 
   function close(world,businessId,reason,year){
     ensure(world);
     const business=get(world,businessId);
     if(!business) return null;
-    if(business.status==='closed') return business;
-    const closeYear=Number.isFinite(Number(year))?Math.round(Number(year)):Math.round(finite(world.year,business.closedYear||0));
+    const requestedYear=finiteIntOrNull(year);
     business.status='closed';
-    business.closedYear=closeYear;
-    business.history=business.history.slice(-HISTORY_LIMIT+1);
-    business.history.push({type:'closed',year:closeYear,reason:reason||'insolvency'});
+    if(business.closedYear==null){
+      business.closedYear=requestedYear!=null?requestedYear:Math.round(finite(world.year,0));
+    }
+    const hasClosureEntry=Array.isArray(business.history)&&business.history.some(entry=>entry&&entry.type==='closed');
+    if(!hasClosureEntry){
+      business.history=(Array.isArray(business.history)?business.history:[]).slice(-HISTORY_LIMIT+1);
+      business.history.push({type:'closed',year:business.closedYear,reason:reason||'insolvency'});
+    }
     if(root.EmploymentSystem&&typeof root.EmploymentSystem.activeForBusiness==='function'){
       root.EmploymentSystem.activeForBusiness(world,businessId).forEach(contract=>{
-        root.EmploymentSystem.end(world,contract.id,'terminated','business_closed',closeYear);
+        root.EmploymentSystem.end(world,contract.id,'terminated','business_closed',business.closedYear);
       });
     }
     business.employeeIds=[];
@@ -593,14 +632,14 @@
       if(!Array.isArray(business.vacancies)) issues.push('business '+key+' vacancies must be an array');
       if(!business.finances||typeof business.finances!=='object') issues.push('business '+key+' missing finances');
       else {
-        ['cash','debt','revenue','expenses','payroll','profit'].forEach(field=>{
+        ['cash','debt','revenue','expenses','payroll'].forEach(field=>{
           const value=business.finances[field];
-          if(typeof value!=='number'||!Number.isFinite(value)) issues.push('business '+key+' has non-finite finances.'+field);
+          if(typeof value!=='number'||!Number.isFinite(value)||!Number.isInteger(value)||value<0||value>MAX_MONEY) issues.push('business '+key+' has an invalid or out-of-bound finances.'+field);
         });
+        const profit=business.finances.profit;
+        if(typeof profit!=='number'||!Number.isFinite(profit)||!Number.isInteger(profit)||profit<-MAX_MONEY||profit>MAX_MONEY) issues.push('business '+key+' has an invalid or out-of-bound finances.profit');
         const lastYear=business.finances.lastYear;
-        if(lastYear!=null&&(typeof lastYear!=='number'||!Number.isFinite(lastYear))) issues.push('business '+key+' has invalid finances.lastYear');
-        if(typeof business.finances.cash==='number'&&business.finances.cash<0) issues.push('business '+key+' has negative finances.cash');
-        if(typeof business.finances.debt==='number'&&business.finances.debt<0) issues.push('business '+key+' has negative finances.debt');
+        if(lastYear!=null&&(typeof lastYear!=='number'||!Number.isFinite(lastYear)||!Number.isInteger(lastYear))) issues.push('business '+key+' has invalid finances.lastYear');
         if(business.lastTickYear!=null&&lastYear!=null&&business.lastTickYear!==lastYear) issues.push('business '+key+' lastTickYear does not match finances.lastYear');
       }
       if(!Array.isArray(business.history)) issues.push('business '+key+' history must be an array');
@@ -611,6 +650,7 @@
       if(business.status==='closed'){
         if(business.closedYear==null) issues.push('business '+key+' is closed but missing closedYear');
         if(Array.isArray(business.employeeIds)&&business.employeeIds.length>0) issues.push('business '+key+' is closed but still has employeeIds');
+        if(Array.isArray(business.vacancies)&&business.vacancies.length>0) issues.push('business '+key+' is closed but still has vacancies');
         if(root.EmploymentSystem&&typeof root.EmploymentSystem.activeForBusiness==='function'&&root.EmploymentSystem.activeForBusiness(world,business.id).length>0){
           issues.push('business '+key+' is closed but has active employment contracts');
         }

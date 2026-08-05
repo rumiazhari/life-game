@@ -9,6 +9,10 @@
   const END_STATUSES=new Set(['terminated','resigned','retired']);
   const OCCUPATION_TYPES=['career','job','generic'];
 
+  const MAX_SALARY=5000000;
+  const MIN_YEAR=-5000;
+  const MAX_YEAR=5000;
+
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
   const finite=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
   const clampUnit=(value,fallback)=>Number.isFinite(Number(value))?clamp(Number(value),0,1):fallback;
@@ -25,6 +29,16 @@
     const n=Number(value);
     return Number.isFinite(n)&&n>=0?n:fallback;
   };
+  const boundedSalary=(value,fallback)=>{
+    const n=Number(value);
+    if(!Number.isFinite(n)||n<0) return fallback;
+    return Math.min(MAX_SALARY,Math.round(n));
+  };
+  const boundedYear=(value,fallback)=>{
+    if(value==null||!Number.isFinite(Number(value))) return fallback;
+    return Math.max(MIN_YEAR,Math.min(MAX_YEAR,Math.round(Number(value))));
+  };
+  const boundedYearOrNull=value=>value==null?null:boundedYear(value,null);
   const isValidCounter=value=>typeof value==='number'&&Number.isFinite(value)&&Number.isInteger(value)&&value>=0;
   const cloneEntry=entry=>entry&&typeof entry==='object'&&!Array.isArray(entry)?Object.assign({},entry):entry;
   const trimHistory=history=>Array.isArray(history)?history.slice(-HISTORY_LIMIT).map(cloneEntry):[];
@@ -83,10 +97,11 @@
     const occupationType=OCCUPATION_TYPES.includes(spec.occupationType)?spec.occupationType:'generic';
     const careerStage=(spec.careerStage!=null&&Number.isFinite(Number(spec.careerStage))&&Number(spec.careerStage)>=0)?Math.round(Number(spec.careerStage)):null;
     const jobTier=clampInt(spec.jobTier,0,5,1);
-    const annualSalary=nonNegNumber(spec.annualSalary,0);
-    const hiredYear=Number.isFinite(Number(spec.hiredYear))?Math.round(Number(spec.hiredYear)):Math.round(finite(world.year,0));
+    const annualSalary=boundedSalary(spec.annualSalary,0);
+    const currentYear=Math.round(finite(world.year,0));
+    const hiredYear=boundedYear(spec.hiredYear,currentYear);
     const status=CONTRACT_STATUSES.includes(spec.status)?spec.status:'active';
-    const endedYear=spec.endedYear!=null&&Number.isFinite(Number(spec.endedYear))?Math.round(Number(spec.endedYear)):null;
+    const endedYear=ACTIVE_STATUSES.has(status)?null:(boundedYearOrNull(spec.endedYear)!=null?boundedYearOrNull(spec.endedYear):boundedYear(currentYear,hiredYear));
     return {
       id,
       personId,
@@ -100,13 +115,13 @@
       jobTier,
       annualSalary,
       hiredYear,
-      endedYear:ACTIVE_STATUSES.has(status)?null:endedYear,
+      endedYear,
       status,
       terminationReason:ACTIVE_STATUSES.has(status)?null:(spec.terminationReason!=null?String(spec.terminationReason):null),
       performance:clampUnit(spec.performance,0.5),
       satisfaction:clampUnit(spec.satisfaction,0.5),
-      lastPaidYear:spec.lastPaidYear!=null&&Number.isFinite(Number(spec.lastPaidYear))?Math.round(Number(spec.lastPaidYear)):null,
-      annualPaid:nonNegNumber(spec.annualPaid,0),
+      lastPaidYear:boundedYearOrNull(spec.lastPaidYear),
+      annualPaid:boundedSalary(spec.annualPaid,0),
       history:trimHistory(spec.history)
     };
   }
@@ -123,9 +138,18 @@
       const salary=Number(spec.annualSalary);
       if(!Number.isFinite(salary)||salary<0) throw new Error('EmploymentSystem.create requires a finite non-negative annualSalary');
     }
+    const personId=String(spec.personId);
+    const status=CONTRACT_STATUSES.includes(spec.status)?spec.status:'active';
+    if(ACTIVE_STATUSES.has(status)&&activeForPerson(world,personId).length>0){
+      throw new Error('EmploymentSystem.create: person already has an active or on_leave contract');
+    }
     const id=nextContractId(world);
     const record=buildRecord(id,spec,business,world);
     world.employmentContracts[id]=record;
+    if(ACTIVE_STATUSES.has(record.status)){
+      if(!Array.isArray(business.employeeIds)) business.employeeIds=[];
+      if(!business.employeeIds.includes(record.personId)) business.employeeIds.push(record.personId);
+    }
     return record;
   }
 
@@ -153,15 +177,7 @@
   function hire(world,spec){
     ensure(world);
     spec=spec||{};
-    if(spec.personId!=null&&activeForPerson(world,String(spec.personId)).length>0){
-      throw new Error('EmploymentSystem.hire: person already has an active or on_leave contract');
-    }
-    const contract=create(world,spec);
-    const business=getBusiness(world,contract.businessId);
-    if(business){
-      if(!Array.isArray(business.employeeIds)) business.employeeIds=[];
-      if(!business.employeeIds.includes(contract.personId)) business.employeeIds.push(contract.personId);
-    }
+    const contract=create(world,Object.assign({},spec,{status:'active'}));
     contract.history.push(cloneEntry({type:'hired',year:contract.hiredYear,businessId:contract.businessId,annualSalary:contract.annualSalary,occupationName:contract.occupationName}));
     contract.history=trimHistory(contract.history);
     return contract;
@@ -291,10 +307,10 @@
       const occupationType=OCCUPATION_TYPES.includes(source.occupationType)?source.occupationType:'generic';
       const careerStage=(source.careerStage!=null&&Number.isFinite(Number(source.careerStage))&&Number(source.careerStage)>=0)?Math.round(Number(source.careerStage)):null;
       const jobTier=clampInt(source.jobTier,0,5,1);
-      const annualSalary=nonNegNumber(source.annualSalary,0);
-      const hiredYear=Number.isFinite(Number(source.hiredYear))?Math.round(Number(source.hiredYear)):year;
+      const annualSalary=boundedSalary(source.annualSalary,0);
+      const hiredYear=boundedYear(source.hiredYear,year);
       let status=CONTRACT_STATUSES.includes(source.status)?source.status:'active';
-      let endedYear=source.endedYear!=null&&Number.isFinite(Number(source.endedYear))?Math.round(Number(source.endedYear)):null;
+      let endedYear=boundedYearOrNull(source.endedYear);
       let terminationReason=source.terminationReason!=null?String(source.terminationReason):null;
       if(ACTIVE_STATUSES.has(status)){ endedYear=null; terminationReason=null; }
       else if(endedYear==null){ endedYear=year; }
@@ -316,8 +332,8 @@
         terminationReason,
         performance:clampUnit(source.performance,0.5),
         satisfaction:clampUnit(source.satisfaction,0.5),
-        lastPaidYear:source.lastPaidYear!=null&&Number.isFinite(Number(source.lastPaidYear))?Math.round(Number(source.lastPaidYear)):null,
-        annualPaid:nonNegNumber(source.annualPaid,0),
+        lastPaidYear:boundedYearOrNull(source.lastPaidYear),
+        annualPaid:boundedSalary(source.annualPaid,0),
         history:trimHistory(source.history)
       };
     });
@@ -387,18 +403,20 @@
       if(!OCCUPATION_TYPES.includes(c.occupationType)) issues.push('employment contract '+key+' has invalid occupationType: '+c.occupationType);
       if(c.careerStage!=null&&(typeof c.careerStage!=='number'||!Number.isInteger(c.careerStage)||c.careerStage<0)) issues.push('employment contract '+key+' has invalid careerStage');
       if(typeof c.jobTier!=='number'||!Number.isInteger(c.jobTier)||c.jobTier<0||c.jobTier>5) issues.push('employment contract '+key+' has invalid jobTier');
-      if(typeof c.annualSalary!=='number'||!Number.isFinite(c.annualSalary)||c.annualSalary<0) issues.push('employment contract '+key+' has invalid annualSalary');
+      if(typeof c.annualSalary!=='number'||!Number.isFinite(c.annualSalary)||c.annualSalary<0||c.annualSalary>MAX_SALARY) issues.push('employment contract '+key+' has invalid or out-of-bound annualSalary');
       if(typeof c.hiredYear!=='number'||!Number.isFinite(c.hiredYear)||!Number.isInteger(c.hiredYear)) issues.push('employment contract '+key+' has invalid hiredYear');
       if(c.endedYear!=null&&(typeof c.endedYear!=='number'||!Number.isFinite(c.endedYear)||!Number.isInteger(c.endedYear))) issues.push('employment contract '+key+' has invalid endedYear');
+      if(c.endedYear!=null&&typeof c.hiredYear==='number'&&c.endedYear<c.hiredYear) issues.push('employment contract '+key+' has endedYear before hiredYear');
       if(!CONTRACT_STATUSES.includes(c.status)) issues.push('employment contract '+key+' has invalid status: '+c.status);
       else {
         if(END_STATUSES.has(c.status)&&c.endedYear==null) issues.push('employment contract '+key+' is ended but missing endedYear');
         if(ACTIVE_STATUSES.has(c.status)&&c.endedYear!=null) issues.push('employment contract '+key+' is active but has an endedYear');
+        if(ACTIVE_STATUSES.has(c.status)&&business&&business.status==='closed') issues.push('employment contract '+key+' is active at a closed business');
       }
       if(typeof c.performance!=='number'||!Number.isFinite(c.performance)||c.performance<0||c.performance>1) issues.push('employment contract '+key+' has invalid performance');
       if(typeof c.satisfaction!=='number'||!Number.isFinite(c.satisfaction)||c.satisfaction<0||c.satisfaction>1) issues.push('employment contract '+key+' has invalid satisfaction');
-      if(typeof c.annualPaid!=='number'||!Number.isFinite(c.annualPaid)||c.annualPaid<0) issues.push('employment contract '+key+' has invalid annualPaid');
-      if(c.lastPaidYear!=null&&(typeof c.lastPaidYear!=='number'||!Number.isFinite(c.lastPaidYear))) issues.push('employment contract '+key+' has invalid lastPaidYear');
+      if(typeof c.annualPaid!=='number'||!Number.isFinite(c.annualPaid)||c.annualPaid<0||c.annualPaid>MAX_SALARY) issues.push('employment contract '+key+' has invalid or out-of-bound annualPaid');
+      if(c.lastPaidYear!=null&&(typeof c.lastPaidYear!=='number'||!Number.isFinite(c.lastPaidYear)||!Number.isInteger(c.lastPaidYear))) issues.push('employment contract '+key+' has invalid lastPaidYear');
       if(!Array.isArray(c.history)) issues.push('employment contract '+key+' history must be an array');
       else if(c.history.length>HISTORY_LIMIT) issues.push('employment contract '+key+' history exceeds limit of '+HISTORY_LIMIT);
       if(ACTIVE_STATUSES.has(c.status)){
@@ -488,26 +506,45 @@
     return root.BusinessSystem.create(world,{settlementId,sector:'professional',name});
   }
 
+  function occupationIdsMatch(a,b){
+    const an=a==null?null:String(a);
+    const bn=b==null?null:String(b);
+    return an===bn;
+  }
+
+  function isContractCompatible(world,existing,descriptor,sectors){
+    if(existing.settlementId!==descriptor.settlementId) return false;
+    if(existing.occupationType!==descriptor.occupationType) return false;
+    if(!occupationIdsMatch(existing.occupationId,descriptor.occupationId)) return false;
+    const business=getBusiness(world,existing.businessId);
+    if(!business||business.status==='closed') return false;
+    if(!sectors.includes(business.sector)) return false;
+    return true;
+  }
+
   function reconcilePerson(world,descriptor,options){
     ensure(world);
     const opts=options||{};
     const personId=String(descriptor.personId);
     const year=Number.isFinite(Number(descriptor.year))?Math.round(Number(descriptor.year)):Math.round(finite(world.year,0));
-    const existing=activeForPerson(world,personId)[0]||null;
+    let existing=activeForPerson(world,personId)[0]||null;
     if(!descriptor.employed){
       if(existing) endInternal(world,existing,'resigned',opts.unemployedReason||'legacy_unemployed',year);
       return existing?get(world,existing.id):null;
     }
-    if(existing){
-      existing.occupationType=OCCUPATION_TYPES.includes(descriptor.occupationType)?descriptor.occupationType:existing.occupationType;
-      existing.occupationId=descriptor.occupationId!=null?String(descriptor.occupationId):existing.occupationId;
-      existing.occupationName=descriptor.occupationName||existing.occupationName;
-      existing.careerStage=(descriptor.careerStage!=null&&Number.isFinite(Number(descriptor.careerStage))&&Number(descriptor.careerStage)>=0)?Math.round(Number(descriptor.careerStage)):null;
-      existing.jobTier=clampInt(descriptor.jobTier,0,5,existing.jobTier);
-      existing.annualSalary=nonNegNumber(descriptor.annualSalary,existing.annualSalary);
-      return existing;
-    }
     const sectors=Array.isArray(descriptor.sectors)&&descriptor.sectors.length?descriptor.sectors:['professional'];
+    if(existing){
+      if(isContractCompatible(world,existing,descriptor,sectors)){
+        existing.occupationName=descriptor.occupationName||existing.occupationName;
+        existing.careerStage=(descriptor.careerStage!=null&&Number.isFinite(Number(descriptor.careerStage))&&Number(descriptor.careerStage)>=0)?Math.round(Number(descriptor.careerStage)):null;
+        existing.jobTier=clampInt(descriptor.jobTier,0,5,existing.jobTier);
+        existing.annualSalary=boundedSalary(descriptor.annualSalary,existing.annualSalary);
+        return existing;
+      }
+      const reason=existing.settlementId!==descriptor.settlementId?'worker_relocated':'employment_changed';
+      endInternal(world,existing,'terminated',reason,year);
+      existing=null;
+    }
     const business=chooseEmployer(world,personId,descriptor.settlementId,descriptor.occupationType,descriptor.occupationId,sectors);
     if(!business) return null;
     return hire(world,{
