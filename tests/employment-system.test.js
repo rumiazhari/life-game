@@ -797,3 +797,115 @@ test('checkInvariants stays clean after repairing manually-injected huge-salary 
   })()`);
   assert.deepEqual(JSON.parse(result),[]);
 });
+
+test('at capacity with 11 closed and 1 open incompatible business, the stable open fallback is used without creating a 13th business',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    const settlementId='branec';
+    const businesses=BusinessSystem.forSettlement(World,settlementId).slice().sort((a,b)=>a.id.localeCompare(b.id));
+    const initialCount=businesses.length;
+    const remainOpen=businesses.find(b=>b.sector!=='healthcare');
+    businesses.forEach(b=>{ if(b.id!==remainOpen.id) BusinessSystem.close(World,b.id,'insolvency',1930); });
+    World.npcs=World.npcs||{};
+    World.npcs['npc:doc']={id:'npc:doc',isSubject:false,alive:true,birthYear:World.year-30,locationId:settlementId,employment:{status:'employed',sector:'hospital',income:900}};
+    EmploymentSystem.reconcileNpcs(World);
+    const first=EmploymentSystem.activeForPerson(World,'npc:doc')[0];
+    const totalAfterFirst=BusinessSystem.forSettlement(World,settlementId).length;
+    EmploymentSystem.reconcileNpcs(World);
+    const second=EmploymentSystem.activeForPerson(World,'npc:doc')[0];
+    const totalAfterSecond=BusinessSystem.forSettlement(World,settlementId).length;
+    return JSON.stringify({
+      initialCount,
+      totalAfterFirst,totalAfterSecond,
+      assignedBusinessId:first.businessId,
+      remainOpenId:remainOpen.id,
+      sameContract:first.id===second.id,
+      businessInvariants:BusinessSystem.checkInvariants(World),
+      employmentInvariants:EmploymentSystem.checkInvariants(World)
+    });
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.initialCount,12);
+  assert.equal(parsed.totalAfterFirst,12);
+  assert.equal(parsed.totalAfterSecond,12);
+  assert.equal(parsed.assignedBusinessId,parsed.remainOpenId);
+  assert.ok(parsed.sameContract);
+  assert.deepEqual(parsed.businessInvariants,[]);
+  assert.deepEqual(parsed.employmentInvariants,[]);
+});
+
+test('at capacity with all 12 businesses closed, no employer is assigned and no 13th business is created',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    const settlementId='branec';
+    const businesses=BusinessSystem.forSettlement(World,settlementId);
+    const initialCount=businesses.length;
+    businesses.forEach(b=>BusinessSystem.close(World,b.id,'insolvency',1930));
+    World.npcs=World.npcs||{};
+    World.npcs['npc:doc']={id:'npc:doc',isSubject:false,alive:true,birthYear:World.year-30,locationId:settlementId,employment:{status:'employed',sector:'hospital',income:900}};
+    EmploymentSystem.reconcileNpcs(World);
+    const totalAfter=BusinessSystem.forSettlement(World,settlementId).length;
+    return JSON.stringify({
+      initialCount,totalAfter,
+      activeCount:EmploymentSystem.activeForPerson(World,'npc:doc').length,
+      businessInvariants:BusinessSystem.checkInvariants(World),
+      employmentInvariants:EmploymentSystem.checkInvariants(World)
+    });
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.initialCount,12);
+  assert.equal(parsed.totalAfter,12);
+  assert.equal(parsed.activeCount,0);
+  assert.deepEqual(parsed.businessInvariants,[]);
+  assert.deepEqual(parsed.employmentInvariants,[]);
+});
+
+test('with 11 total businesses (including closed) and capacity remaining, exactly one compatible fallback is created and the total becomes 12',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    const settlementId='oberhain';
+    let businesses=BusinessSystem.forSettlement(World,settlementId);
+    let filler=0;
+    while(businesses.length<11){
+      BusinessSystem.create(World,{settlementId,sector:'retail',name:'Filler Co '+(filler++)});
+      businesses=BusinessSystem.forSettlement(World,settlementId);
+    }
+    const sorted=businesses.slice().sort((a,b)=>a.id.localeCompare(b.id));
+    for(let i=0;i<4;i++) BusinessSystem.close(World,sorted[i].id,'insolvency',1930);
+    const initialCount=BusinessSystem.forSettlement(World,settlementId).length;
+    World.npcs=World.npcs||{};
+    World.npcs['npc:doc']={id:'npc:doc',isSubject:false,alive:true,birthYear:World.year-30,locationId:settlementId,employment:{status:'employed',sector:'hospital',income:900}};
+    EmploymentSystem.reconcileNpcs(World);
+    const totalAfterFirst=BusinessSystem.forSettlement(World,settlementId).length;
+    EmploymentSystem.reconcileNpcs(World);
+    const totalAfterSecond=BusinessSystem.forSettlement(World,settlementId).length;
+    return JSON.stringify({initialCount,totalAfterFirst,totalAfterSecond});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.initialCount,11);
+  assert.equal(parsed.totalAfterFirst,12);
+  assert.equal(parsed.totalAfterSecond,12);
+});
+
+test('compatibility evaluation on an already-assigned fallback does not change World.businesses or businessCounter',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    const settlementId='branec';
+    const businesses=BusinessSystem.forSettlement(World,settlementId).slice().sort((a,b)=>a.id.localeCompare(b.id));
+    const remainOpen=businesses.find(b=>b.sector!=='healthcare');
+    businesses.forEach(b=>{ if(b.id!==remainOpen.id) BusinessSystem.close(World,b.id,'insolvency',1930); });
+    World.npcs=World.npcs||{};
+    World.npcs['npc:doc']={id:'npc:doc',isSubject:false,alive:true,birthYear:World.year-30,locationId:settlementId,employment:{status:'employed',sector:'hospital',income:900}};
+    EmploymentSystem.reconcileNpcs(World);
+    const beforeBusinesses=JSON.stringify(World.businesses);
+    const beforeCounter=World.businessCounter;
+    EmploymentSystem.reconcileNpcs(World);
+    EmploymentSystem.reconcileNpcs(World);
+    const afterBusinesses=JSON.stringify(World.businesses);
+    const afterCounter=World.businessCounter;
+    return JSON.stringify({businessesUnchanged:beforeBusinesses===afterBusinesses,counterUnchanged:beforeCounter===afterCounter});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.businessesUnchanged);
+  assert.ok(parsed.counterUnchanged);
+});

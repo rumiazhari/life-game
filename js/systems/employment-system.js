@@ -512,25 +512,49 @@
     professional:'Employment Bureau'
   };
 
-  function chooseEmployer(world,personId,settlementId,occupationType,occupationId,sectors){
+  function settlementBusinessInventory(world,settlementId){
+    const all=root.BusinessSystem?root.BusinessSystem.forSettlement(world,settlementId):[];
+    const open=all.filter(b=>b.status!=='closed');
+    return {all,open};
+  }
+
+  function maxBusinessesPerSettlement(){
+    return Number.isFinite(root.BusinessSystem&&root.BusinessSystem.MAX_BUSINESSES_PER_SETTLEMENT)?root.BusinessSystem.MAX_BUSINESSES_PER_SETTLEMENT:12;
+  }
+
+  function fallbackBusinessName(settlementId,primarySector){
+    return settlementNameOf(settlementId)+' '+(SECTOR_FALLBACK_LABEL[primarySector]||'Employment Bureau');
+  }
+
+  // Pure lookup: never creates a business. Used both by employer selection and
+  // by compatibility checks, so evaluating compatibility can never have the
+  // side effect of creating a fallback business.
+  function resolveExistingEmployer(world,personId,settlementId,occupationType,occupationId,sectors){
     if(!root.BusinessSystem) return null;
-    const inSettlement=root.BusinessSystem.forSettlement(world,settlementId).filter(b=>b.status!=='closed');
-    const compatible=inSettlement.filter(b=>sectors.includes(b.sector)).sort((a,b)=>a.id.localeCompare(b.id));
-    if(compatible.length){
+    const {all,open}=settlementBusinessInventory(world,settlementId);
+    const compatibleOpen=open.filter(b=>sectors.includes(b.sector)).sort((a,b)=>a.id.localeCompare(b.id));
+    if(compatibleOpen.length){
       const key=[world.seed,personId,occupationType,occupationId||''].join('|');
-      const idx=deterministicIndex(key,compatible.length);
-      return compatible[idx];
+      const idx=deterministicIndex(key,compatibleOpen.length);
+      return compatibleOpen[idx];
+    }
+    if(all.length>=maxBusinessesPerSettlement()){
+      const stableSorted=open.slice().sort((a,b)=>a.id.localeCompare(b.id));
+      return stableSorted.length?stableSorted[0]:null;
     }
     const primarySector=sectors[0];
-    const fallbackName=settlementNameOf(settlementId)+' '+(SECTOR_FALLBACK_LABEL[primarySector]||'Employment Bureau');
-    const existingFallback=inSettlement.find(b=>b.name===fallbackName&&b.sector===primarySector);
-    if(existingFallback) return existingFallback;
-    const maxPerSettlement=Number.isFinite(root.BusinessSystem.MAX_BUSINESSES_PER_SETTLEMENT)?root.BusinessSystem.MAX_BUSINESSES_PER_SETTLEMENT:12;
-    if(inSettlement.length<maxPerSettlement){
-      return root.BusinessSystem.create(world,{settlementId,sector:primarySector,name:fallbackName});
-    }
-    const stableSorted=inSettlement.slice().sort((a,b)=>a.id.localeCompare(b.id));
-    return stableSorted.length?stableSorted[0]:null;
+    const fallbackName=fallbackBusinessName(settlementId,primarySector);
+    return open.find(b=>b.name===fallbackName&&b.sector===primarySector)||null;
+  }
+
+  function chooseEmployer(world,personId,settlementId,occupationType,occupationId,sectors){
+    if(!root.BusinessSystem) return null;
+    const existing=resolveExistingEmployer(world,personId,settlementId,occupationType,occupationId,sectors);
+    if(existing) return existing;
+    const {all}=settlementBusinessInventory(world,settlementId);
+    if(all.length>=maxBusinessesPerSettlement()) return null;
+    const primarySector=sectors[0];
+    return root.BusinessSystem.create(world,{settlementId,sector:primarySector,name:fallbackBusinessName(settlementId,primarySector)});
   }
 
   function occupationIdsMatch(a,b){
@@ -546,7 +570,7 @@
     const business=getBusiness(world,existing.businessId);
     if(!business||business.status==='closed') return false;
     if(sectors.includes(business.sector)) return true;
-    const candidate=chooseEmployer(world,String(descriptor.personId),descriptor.settlementId,descriptor.occupationType,descriptor.occupationId,sectors);
+    const candidate=resolveExistingEmployer(world,String(descriptor.personId),descriptor.settlementId,descriptor.occupationType,descriptor.occupationId,sectors);
     return !!candidate&&candidate.id===business.id;
   }
 
