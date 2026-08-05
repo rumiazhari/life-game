@@ -1,13 +1,14 @@
 'use strict';
 
 (function(root){
-  const SCHEMA_VERSION=1;
+  const SCHEMA_VERSION=2;
   const HISTORY_LIMIT=64;
   const CONTRACT_STATUSES=['active','on_leave','terminated','resigned','retired'];
   const WORKER_TYPES=['player','npc'];
   const ACTIVE_STATUSES=new Set(['active','on_leave']);
   const END_STATUSES=new Set(['terminated','resigned','retired']);
   const OCCUPATION_TYPES=['career','job','generic'];
+  const CONTRACT_ORIGINS=['legacy','vacancy'];
 
   const MAX_SALARY=5000000;
   const MAX_PAYROLL=1000000000;
@@ -129,7 +130,12 @@
       satisfaction:clampUnit(spec.satisfaction,0.5),
       lastPaidYear:boundedYearOrNull(spec.lastPaidYear),
       annualPaid:boundedSalary(spec.annualPaid,0),
-      history:trimHistory(spec.history)
+      history:trimHistory(spec.history),
+      origin:CONTRACT_ORIGINS.includes(spec.origin)?spec.origin:'legacy',
+      stageStartedYear:Math.max(boundedYear(spec.stageStartedYear,hiredYear),hiredYear),
+      lastReviewYear:boundedYearOrNull(spec.lastReviewYear),
+      lastLifecycleYear:boundedYearOrNull(spec.lastLifecycleYear),
+      lastPromotionAttemptYear:boundedYearOrNull(spec.lastPromotionAttemptYear)
     };
   }
 
@@ -207,11 +213,14 @@
     return contract;
   }
 
-  function end(world,contractId,status,reason,year){
+  function end(world,contractId,status,reason,year,options){
     ensure(world);
     const contract=world.employmentContracts[contractId];
     if(!contract) throw new Error('EmploymentSystem.end requires an existing contractId, got: '+contractId);
-    return endInternal(world,contract,status,reason,year);
+    const wasActive=ACTIVE_STATUSES.has(contract.status);
+    const result=endInternal(world,contract,status,reason,year);
+    if(wasActive) syncPersonLegacy(world,contract.personId,options);
+    return result;
   }
 
   function syncBusinessEmployees(world,businessId){
@@ -344,7 +353,12 @@
         satisfaction:clampUnit(source.satisfaction,0.5),
         lastPaidYear:boundedYearOrNull(source.lastPaidYear),
         annualPaid:boundedSalary(source.annualPaid,0),
-        history:trimHistory(source.history)
+        history:trimHistory(source.history),
+        origin:CONTRACT_ORIGINS.includes(source.origin)?source.origin:'legacy',
+        stageStartedYear:Math.max(boundedYear(source.stageStartedYear,hiredYear),hiredYear),
+        lastReviewYear:boundedYearOrNull(source.lastReviewYear),
+        lastLifecycleYear:boundedYearOrNull(source.lastLifecycleYear),
+        lastPromotionAttemptYear:boundedYearOrNull(source.lastPromotionAttemptYear)
       };
     });
     world.employmentContracts=normalized;
@@ -429,6 +443,13 @@
       if(c.lastPaidYear!=null&&(typeof c.lastPaidYear!=='number'||!Number.isFinite(c.lastPaidYear)||!Number.isInteger(c.lastPaidYear)||c.lastPaidYear<MIN_YEAR||c.lastPaidYear>MAX_YEAR)) issues.push('employment contract '+key+' has invalid or out-of-bound lastPaidYear');
       if(!Array.isArray(c.history)) issues.push('employment contract '+key+' history must be an array');
       else if(c.history.length>HISTORY_LIMIT) issues.push('employment contract '+key+' history exceeds limit of '+HISTORY_LIMIT);
+      if(!CONTRACT_ORIGINS.includes(c.origin)) issues.push('employment contract '+key+' has invalid origin: '+c.origin);
+      if(typeof c.stageStartedYear!=='number'||!Number.isFinite(c.stageStartedYear)||!Number.isInteger(c.stageStartedYear)||c.stageStartedYear<MIN_YEAR||c.stageStartedYear>MAX_YEAR) issues.push('employment contract '+key+' has invalid or out-of-bound stageStartedYear');
+      else if(typeof c.hiredYear==='number'&&c.stageStartedYear<c.hiredYear) issues.push('employment contract '+key+' has stageStartedYear before hiredYear');
+      ['lastReviewYear','lastLifecycleYear','lastPromotionAttemptYear'].forEach(field=>{
+        const v=c[field];
+        if(v!=null&&(typeof v!=='number'||!Number.isFinite(v)||!Number.isInteger(v)||v<MIN_YEAR||v>MAX_YEAR)) issues.push('employment contract '+key+' has invalid or out-of-bound '+field);
+      });
       if(ACTIVE_STATUSES.has(c.status)){
         (activeByPerson[c.personId]=activeByPerson[c.personId]||[]).push(c.id);
         if(business){ (businessEmployeeExpectation[business.id]=businessEmployeeExpectation[business.id]||new Set()).add(c.personId); }
@@ -587,10 +608,15 @@
     const sectors=Array.isArray(descriptor.sectors)&&descriptor.sectors.length?descriptor.sectors:['professional'];
     if(existing){
       if(isContractCompatible(world,existing,descriptor,sectors)){
-        existing.occupationName=descriptor.occupationName||existing.occupationName;
-        existing.careerStage=(descriptor.careerStage!=null&&Number.isFinite(Number(descriptor.careerStage))&&Number(descriptor.careerStage)>=0)?Math.round(Number(descriptor.careerStage)):null;
-        existing.jobTier=clampInt(descriptor.jobTier,0,5,existing.jobTier);
-        existing.annualSalary=boundedSalary(descriptor.annualSalary,existing.annualSalary);
+        // A vacancy-origin contract is authoritative: legacy S/npc.employment
+        // fields lag behind it (they were just synced FROM it), so they must
+        // never be used to overwrite its salary, name, or stage.
+        if(existing.origin!=='vacancy'){
+          existing.occupationName=descriptor.occupationName||existing.occupationName;
+          existing.careerStage=(descriptor.careerStage!=null&&Number.isFinite(Number(descriptor.careerStage))&&Number(descriptor.careerStage)>=0)?Math.round(Number(descriptor.careerStage)):null;
+          existing.jobTier=clampInt(descriptor.jobTier,0,5,existing.jobTier);
+          existing.annualSalary=boundedSalary(descriptor.annualSalary,existing.annualSalary);
+        }
         return existing;
       }
       const reason=existing.settlementId!==descriptor.settlementId?'worker_relocated':'employment_changed';
@@ -687,6 +713,282 @@
     return results;
   }
 
+  /* ---- legacy synchronization (outward, contract -> S/npc) ---- */
+
+  function syncPlayerLegacy(world,subject){
+    if(!subject) return;
+    const contract=activeForPerson(world,'subject')[0]||null;
+    if(contract){
+      subject.employmentContractId=contract.id;
+      subject.jobTier=contract.jobTier;
+      subject.jobName=contract.occupationName;
+      subject.career=contract.occupationType==='career'?contract.occupationId:null;
+      subject.careerYears=Math.max(0,boundedYear(world.year,0)-contract.stageStartedYear);
+    } else {
+      subject.employmentContractId=null;
+    }
+  }
+
+  function syncTerminatedPlayerLegacy(world,subject){
+    if(!subject) return;
+    subject.employmentContractId=null;
+    subject.jobTier=0;
+    subject.career=null;
+    subject.careerYears=0;
+    subject.jobName='Unemployed';
+  }
+
+  function syncRetiredPlayerLegacy(world,subject){
+    if(!subject) return;
+    subject.employmentContractId=null;
+    subject.jobTier=0;
+    subject.career=null;
+    subject.careerYears=0;
+    subject.jobName='Pensioner (retired)';
+  }
+
+  function syncNpcLegacy(world,npcId){
+    if(!world.npcs||typeof world.npcs!=='object') return;
+    const npc=world.npcs[npcId];
+    if(!npc) return;
+    if(!npc.employment||typeof npc.employment!=='object') npc.employment={};
+    const contract=activeForPerson(world,npcId)[0]||null;
+    const year=boundedYear(world.year,0);
+    if(contract){
+      const business=getBusiness(world,contract.businessId);
+      npc.employment.status='employed';
+      npc.employment.sector=business?business.sector:npc.employment.sector;
+      npc.employment.careerId=contract.occupationType==='career'?contract.occupationId:null;
+      npc.employment.income=contract.annualSalary;
+      npc.employment.lastChangeYear=year;
+    } else {
+      npc.employment.status=npc.employment.status==='retired'?'retired':'unemployed';
+      npc.employment.income=0;
+      npc.employment.lastChangeYear=year;
+    }
+  }
+
+  function syncPersonLegacy(world,personId,options){
+    const opts=options||{};
+    if(personId==='subject'){
+      const subject=opts.subject||(typeof S!=='undefined'?S:null);
+      if(!subject) return;
+      if(opts.terminal==='retired') syncRetiredPlayerLegacy(world,subject);
+      else if(opts.terminal) syncTerminatedPlayerLegacy(world,subject);
+      else syncPlayerLegacy(world,subject);
+    } else {
+      if(opts.terminal==='retired'){
+        if(world.npcs&&world.npcs[personId]){
+          const npc=world.npcs[personId];
+          if(!npc.employment||typeof npc.employment!=='object') npc.employment={};
+          npc.employment.status='retired';
+          npc.employment.income=0;
+          npc.employment.lastChangeYear=boundedYear(world.year,0);
+          return;
+        }
+      }
+      syncNpcLegacy(world,personId);
+    }
+  }
+
+  /* ---- vacancy-backed hiring and career lifecycle ---- */
+
+  function acceptVacancy(world,vacancy,personId,options){
+    ensure(world);
+    const opts=options||{};
+    const year=boundedYear(opts.year,boundedYear(world.year,0));
+    if(!vacancy||vacancy.status!=='open') return {accepted:false,reason:'vacancy_not_open'};
+    const business=getBusiness(world,vacancy.businessId);
+    if(!business||business.status==='closed') return {accepted:false,reason:'business_unavailable'};
+    personId=String(personId);
+
+    if(vacancy.occupationType==='career'&&vacancy.careerStage!=null){
+      const existing=activeForPerson(world,personId)[0]||null;
+      if(existing&&existing.businessId===vacancy.businessId&&existing.occupationType==='career'
+        &&occupationIdsMatch(existing.occupationId,vacancy.occupationId)
+        &&existing.careerStage===vacancy.careerStage-1){
+        const promoted=promote(world,existing.id,vacancy.id,year,opts);
+        return promoted;
+      }
+    }
+
+    const previousContract=activeForPerson(world,personId)[0]||null;
+    if(previousContract) endInternal(world,previousContract,'resigned','accepted_new_position',year);
+
+    const contract=create(world,{
+      personId,
+      businessId:business.id,
+      occupationType:vacancy.occupationType,
+      occupationId:vacancy.occupationId,
+      occupationName:vacancy.occupationName,
+      careerStage:vacancy.careerStage,
+      jobTier:vacancy.jobTier,
+      annualSalary:vacancy.annualSalary,
+      hiredYear:year,
+      stageStartedYear:year,
+      origin:'vacancy',
+      status:'active'
+    });
+    contract.history.push(cloneEntry({type:'hired',year,businessId:contract.businessId,annualSalary:contract.annualSalary,occupationName:contract.occupationName}));
+    contract.history=trimHistory(contract.history);
+    syncPersonLegacy(world,personId,opts);
+    syncBusinessEmployees(world,business.id);
+    if(previousContract&&previousContract.businessId!==business.id) syncBusinessEmployees(world,previousContract.businessId);
+    return {accepted:true,contract,previousContract,reason:null};
+  }
+
+  function promote(world,contractId,vacancyId,year,options){
+    ensure(world);
+    const opts=options||{};
+    const contract=get(world,contractId);
+    if(!contract||!ACTIVE_STATUSES.has(contract.status)) return {accepted:false,reason:'no_active_contract'};
+    const vacancy=root.VacancySystem&&typeof root.VacancySystem.get==='function'?root.VacancySystem.get(world,vacancyId):null;
+    if(!vacancy||vacancy.status!=='open') return {accepted:false,reason:'no_opening'};
+    if(vacancy.businessId!==contract.businessId) return {accepted:false,reason:'different_business'};
+    if(vacancy.occupationType!=='career'||contract.occupationType!=='career') return {accepted:false,reason:'not_career'};
+    if(!occupationIdsMatch(vacancy.occupationId,contract.occupationId)) return {accepted:false,reason:'different_career'};
+    const y=boundedYear(year,boundedYear(world.year,0));
+    const fromOccupationName=contract.occupationName, fromSalary=contract.annualSalary;
+    contract.occupationName=vacancy.occupationName;
+    contract.careerStage=vacancy.careerStage;
+    contract.jobTier=vacancy.jobTier;
+    contract.annualSalary=vacancy.annualSalary;
+    contract.stageStartedYear=y;
+    contract.lastPromotionAttemptYear=y;
+    contract.history.push(cloneEntry({type:'promoted',year:y,vacancyId,fromOccupationName,toOccupationName:contract.occupationName,fromSalary,toSalary:contract.annualSalary}));
+    contract.history=trimHistory(contract.history);
+    syncPersonLegacy(world,contract.personId,opts);
+    return {accepted:true,contract,previousContract:null,reason:null};
+  }
+
+  function adjustSalary(world,contractId,salary,reason,year){
+    ensure(world);
+    const contract=get(world,contractId);
+    if(!contract||!ACTIVE_STATUSES.has(contract.status)) return contract;
+    const newSalary=boundedSalary(salary,contract.annualSalary);
+    if(newSalary===contract.annualSalary) return contract;
+    const y=boundedYear(year,boundedYear(world.year,0));
+    const previousSalary=contract.annualSalary;
+    contract.annualSalary=newSalary;
+    contract.history.push(cloneEntry({type:'salary_adjusted',year:y,previousSalary,annualSalary:newSalary,reason:reason||null}));
+    contract.history=trimHistory(contract.history);
+    if(contract.personId==='subject') { /* player cash payment happens only in runEconomy */ }
+    else syncNpcLegacy(world,contract.personId);
+    return contract;
+  }
+
+  function dismiss(world,contractId,reason,year,options){
+    return end(world,contractId,'terminated',reason||'dismissed',year,options);
+  }
+  function resign(world,contractId,reason,year,options){
+    return end(world,contractId,'resigned',reason||'voluntary_resignation',year,options);
+  }
+  function retire(world,contractId,year,options){
+    const opts=Object.assign({},options,{terminal:'retired'});
+    return end(world,contractId,'retired','retirement',year,opts);
+  }
+
+  function requestPromotion(world,contractId,options){
+    ensure(world);
+    const opts=options||{};
+    const year=boundedYear(opts.year,boundedYear(world.year,0));
+    const contract=get(world,contractId);
+    if(!contract||!ACTIVE_STATUSES.has(contract.status)) return {accepted:false,reason:'no_active_contract'};
+    if(contract.occupationType!=='career') return {accepted:false,reason:'not_career'};
+    if(contract.jobTier>=5) return {accepted:false,reason:'top_stage'};
+    contract.lastPromotionAttemptYear=year;
+    if(!root.VacancySystem) return {accepted:false,reason:'no_opening'};
+    const candidates=root.VacancySystem.openVacancies(world,{businessId:contract.businessId}).filter(v=>
+      v.occupationType==='career'&&occupationIdsMatch(v.occupationId,contract.occupationId)&&v.careerStage===(contract.careerStage||0)+1
+    ).sort((a,b)=>(a.openedYear-b.openedYear)||a.id.localeCompare(b.id));
+    if(!candidates.length) return {accepted:false,reason:'no_opening'};
+    const vacancy=candidates[0];
+    if(typeof root.VacancySystem.submitApplication!=='function') return {accepted:false,reason:'no_opening'};
+    const application=root.VacancySystem.submitApplication(world,vacancy.id,contract.personId,{subject:opts.subject,kind:'promotion',year});
+    if(!application.applied&&application.application&&application.application.status==='rejected'){
+      return {accepted:false,reason:'not_qualified'};
+    }
+    const resolved=root.VacancySystem.resolveVacancy(world,vacancy.id,{year,subject:opts.subject});
+    if(resolved&&resolved.filledByPersonId===contract.personId) return {accepted:true,reason:'accepted',contract:get(world,contractId)};
+    return {accepted:false,reason:'rejected'};
+  }
+
+  function considerAutomaticPromotion(world,subject,options){
+    ensure(world);
+    const opts=options||{};
+    const year=boundedYear(opts.year,boundedYear(world.year,0));
+    const contract=activeForPerson(world,'subject')[0]||null;
+    if(!contract||contract.occupationType!=='career') return {accepted:false,reason:'no_active_contract'};
+    if(contract.performance<0.72) return {accepted:false,reason:'performance_too_low'};
+    if(contract.lastPromotionAttemptYear===year) return {accepted:false,reason:'already_attempted'};
+    return requestPromotion(world,contract.id,{year,subject});
+  }
+
+  function reviewContract(world,contract,year){
+    if(contract.lastReviewYear===year) return null;
+    if(contract.lastReviewYear!=null&&year<contract.lastReviewYear) return null;
+    const stream=root.WorldSimulation.streamFor(world,year,contract.id,'employment-review');
+    const performanceNoise=(stream.next()-0.5)*0.08;
+    const satisfactionNoise=(stream.next()-0.5)*0.06;
+    const business=getBusiness(world,contract.businessId);
+    const profitSignal=!business?0:(business.finances.profit>0?0.02:(business.finances.profit<0?-0.03:0));
+    const statusSignal=!business?0:(business.status==='active'?0.02:(business.status==='struggling'?-0.05:-0.10));
+    contract.performance=Math.round(clamp(contract.performance+performanceNoise+profitSignal,0,1)*10000)/10000;
+    contract.satisfaction=Math.round(clamp(contract.satisfaction+satisfactionNoise+statusSignal,0,1)*10000)/10000;
+    contract.lastReviewYear=year;
+    contract.lastLifecycleYear=year;
+    contract.history.push(cloneEntry({type:'annual_review',year,performance:contract.performance,satisfaction:contract.satisfaction}));
+    contract.history=trimHistory(contract.history);
+    return contract;
+  }
+
+  function tickWorld(world,options){
+    ensure(world);
+    const opts=options||{};
+    const year=boundedYear(opts.year,boundedYear(world.year,0));
+    let reviews=0, layoffs=0, retirements=0;
+
+    all(world).filter(c=>ACTIVE_STATUSES.has(c.status)).sort((a,b)=>a.id.localeCompare(b.id)).forEach(contract=>{
+      if(contract.personId==='subject'){
+        const subject=opts.subject;
+        const age=subject?Number(subject.age):null;
+        if(age!=null&&age>=65){ retire(world,contract.id,year,{subject}); retirements++; return; }
+      } else if(world.npcs&&world.npcs[contract.personId]){
+        const npc=world.npcs[contract.personId];
+        const age=Number.isFinite(Number(npc.birthYear))?year-Number(npc.birthYear):null;
+        if(age!=null&&age>=65){ retire(world,contract.id,year); retirements++; return; }
+      }
+      if(reviewContract(world,contract,year)) reviews++;
+    });
+
+    if(root.BusinessSystem&&typeof root.BusinessSystem.all==='function'){
+      root.BusinessSystem.all(world).slice().sort((a,b)=>a.id.localeCompare(b.id)).forEach(business=>{
+        if(business.status!=='struggling') return;
+        const activeContracts=activeForBusiness(world,business.id);
+        if(activeContracts.length<=1) return;
+        const payrollRatio=business.finances.payroll/Math.max(1,business.finances.revenue);
+        let requested=0;
+        if(payrollRatio>0.75) requested=Math.ceil((payrollRatio-0.65)*activeContracts.length);
+        else if((business.strugglingYears||0)>=2&&business.finances.profit<0) requested=1;
+        const layoffCount=clamp(requested,0,activeContracts.length-1);
+        if(layoffCount<=0) return;
+        const maxSalary=Math.max(1,...activeContracts.map(c=>c.annualSalary));
+        const ranked=activeContracts.map(contract=>{
+          const salaryShare=contract.annualSalary/maxSalary;
+          const noise=(root.Random.hashSeed([world.seed,year,business.id,contract.id,'layoff'].join('|'))%10000)/9999;
+          const risk=(1-contract.performance)*0.60+salaryShare*0.25+(1-contract.satisfaction)*0.10+noise*0.05;
+          return {contract,risk};
+        }).sort((a,b)=>(b.risk-a.risk)||a.contract.id.localeCompare(b.contract.id));
+        ranked.slice(0,layoffCount).forEach(({contract})=>{
+          dismiss(world,contract.id,'layoff_financial',year,{subject:opts.subject});
+          layoffs++;
+        });
+      });
+    }
+
+    return {year,applied:true,skipped:0,reviews,layoffs,retirements};
+  }
+
   root.EmploymentSystem={
     SCHEMA_VERSION,
     CONTRACT_STATUSES,
@@ -712,6 +1014,19 @@
     checkInvariants,
     sectorsForCareer,
     sectorForJobName,
-    normalizedJobSlug
+    normalizedJobSlug,
+    CONTRACT_ORIGINS,
+    syncPersonLegacy,
+    syncPlayerLegacy,
+    syncNpcLegacy,
+    acceptVacancy,
+    promote,
+    adjustSalary,
+    dismiss,
+    resign,
+    retire,
+    requestPromotion,
+    considerAutomaticPromotion,
+    tickWorld
   };
 })(typeof globalThis!=='undefined'?globalThis:this);

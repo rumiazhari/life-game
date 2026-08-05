@@ -289,11 +289,18 @@ function readyForPromotion(track){ if(S.jobTier<1||S.jobTier>=5) return false;
   const educationFast=typeof careerYearsRequired==='function'?careerYearsRequired(track,S.jobTier):CAREER_EXP[S.jobTier-1];
   return careerStageQualifies(track,S.jobTier) && S.careerYears>=Math.max(1,educationFast-fast); }
 function rollJobVacancies(){
+  if(typeof VacancySystem==='object'&&VacancySystem&&typeof VacancySystem.playerPortalVacancies==='function'&&typeof World!=='undefined'&&World){
+    S.vacancies=VacancySystem.playerPortalVacancies(World,S);
+    return S.vacancies;
+  }
+  // Legacy fallback: only reached when VacancySystem/World are unavailable
+  // (isolated legacy execution). The normal runtime never uses this path.
   S.vacancies=CAREERS.map(track=>{
     const advantage=typeof educationCareerAdvantage==='function'?educationCareerAdvantage(track):{hiringBonus:0};
     const openingChance=clamp(0.6+(advantage.hiringBonus||0),0.1,0.95);
     return {track:track.id, stage:(chance(openingChance)&&careerStageQualifies(track,0))?0:-1};
   });
+  return S.vacancies;
 }
 const STATKEYS={health:'HEALTH',happiness:'HAPPINESS',smarts:'SMARTS',looks:'LOOKS',relations:'RELATIONS'};
 function lastAncestor(){ return (typeof Lineage!=='undefined'&&Lineage&&Lineage.pastSubjects&&Lineage.pastSubjects.length)?Lineage.pastSubjects[Lineage.pastSubjects.length-1]:null; }
@@ -746,7 +753,29 @@ const PURSUITS=[
      return{fx:SKILL_PRACTICE_FX[id]||{happiness:1},text:'Subject spent the year deliberately building a skill: '+SKILLS[id].name.toLowerCase()+'.'};}},
  {id:'lookwork',cat:'work',icon:'🚪',cost:1,avail:s=>!s.eduStage&&s.age>=16&&s.age<65&&s.jailUntil<=s.age&&!s.jobName.startsWith('Pensioner'),
    note:s=>s.jobTier>0?'browse other careers · switching costs the year’s momentum':'browse this year’s openings · the portal',
-   apply:(S2,item)=>{ const track=item&&CAREERS.find(c=>c.id===item.track); const stageIdx=item?item.stage:-1;
+   apply:(S2,item)=>{
+     if(typeof VacancySystem==='object'&&VacancySystem&&typeof VacancySystem.applyAndResolve==='function'&&typeof World!=='undefined'&&World&&item&&item.vacancyId){
+       const vacancy=VacancySystem.get(World,item.vacancyId);
+       if(!vacancy||vacancy.status!=='open') return{fx:{happiness:-2},text:'Subject went back to the portal, but that opening had already closed.'};
+       const stageIdx=vacancy.careerStage;
+       const baseBonus=(stageIdx===0&&vacancy.occupationType==='career'&&vacancy.requirements&&vacancy.requirements.educationStage&&eduRank()>=(EDU_RANK[vacancy.requirements.educationStage]||0))
+         ?{lower:100,middle:150,upper:250,university:500}[vacancy.requirements.educationStage]:0;
+       const track=vacancy.occupationType==='career'?CAREERS.find(c=>c.id===vacancy.occupationId):null;
+       const advantage=(stageIdx===0&&track&&typeof educationCareerAdvantage==='function')?educationCareerAdvantage(track):{signingBonus:0};
+       const signingBonus=baseBonus+(stageIdx===0?(advantage.signingBonus||0):0);
+       const result=VacancySystem.applyAndResolve(World,item.vacancyId,'subject',{subject:S,year:World.year});
+       const application=result.application;
+       if(application&&application.status==='accepted'){
+         const business=BusinessSystem&&typeof BusinessSystem.get==='function'?BusinessSystem.get(World,vacancy.businessId):null;
+         return{fx:{happiness:4,assets:signingBonus-100},text:'Subject applied through the portal and was taken on as '+vacancy.occupationName+(track?', '+track.name:'')+' at '+(business?business.name:'a new employer')+'. '+money(vacancy.annualSalary)+' a year.'+(signingBonus?' A signing bonus of '+money(signingBonus)+' reflected the subject’s credentials.':'')};
+       }
+       const reason=application?application.reason:'unfilled';
+       if(reason==='better_candidate') return{fx:{happiness:-4},text:'Subject applied through the portal, but the position went to a stronger candidate.'};
+       if(reason==='qualification') return{fx:{happiness:-2},text:'Subject applied through the portal, but did not meet what the position required.'};
+       return{fx:{happiness:-2},text:'Subject applied through the portal. Nothing came of it this year.'};
+     }
+     // Legacy fallback: only reached when VacancySystem/World are unavailable.
+     const track=item&&CAREERS.find(c=>c.id===item.track); const stageIdx=item?item.stage:-1;
      if(!track||stageIdx<0) return{fx:{happiness:-2},text:'Subject visited the job portal and found nothing worth the walk this year.'};
      const st=track.stages[stageIdx];
      S.jobTier=stageIdx+1; S.jobName=st.name; S.career=track.id; S.careerYears=0;
@@ -1006,6 +1035,20 @@ const DECISIONS=[
      return{fx:{happiness:-4},text:'Subject hoped for a child. The year passed without news. The Bureau files the silence gently.'}}},
  {id:'presspromo',cost:1,cat:'work',avail:s=>s.jobTier>=1&&s.jobTier<5,note:()=>`climb the ladder ${P(promoP())}`,
    apply:()=>{
+    if(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof EmploymentSystem.requestPromotion==='function'&&typeof World!=='undefined'&&World){
+      const contract=EmploymentSystem.activeForPerson(World,'subject')[0];
+      if(contract){
+        const result=EmploymentSystem.requestPromotion(World,contract.id,{year:World.year,subject:S});
+        if(result.accepted){
+          const business=BusinessSystem&&typeof BusinessSystem.get==='function'?BusinessSystem.get(World,contract.businessId):null;
+          return{fx:{happiness:5,assets:150},text:'Subject pressed for the promotion — and got it: '+contract.occupationName+' at '+(business?business.name:'the same employer')+'. '+money(contract.annualSalary)+' now, on paper.'};
+        }
+        if(result.reason==='no_opening') return{fx:{happiness:-2},text:'Subject pressed for the promotion. There is no higher opening at this employer right now.'};
+        if(result.reason==='not_qualified'||result.reason==='insufficient_tenure') return{fx:{happiness:-2},text:'Subject pressed for the promotion. Not without more time or qualification, they said.'};
+        if(result.reason==='rejected') return{fx:{happiness:-4},text:'Subject pressed for the promotion. It went to a stronger candidate instead.'};
+        return{fx:{happiness:-2},text:'Subject pressed for the promotion. Nothing came of it this year.'};
+      }
+    }
     if(S.career){ const track=CAREERS.find(c=>c.id===S.career);
       if(!careerStageQualifies(track,S.jobTier)){ const missing=careerMissingRequirements(track,S.jobTier);
          return{fx:{happiness:-2},text:'Subject pressed for the promotion. Not without more '+(missing.length?missing.join(' and '):'time')+', they said.'}; }
@@ -1024,7 +1067,15 @@ const DECISIONS=[
  {id:'nightshift',cost:1,cat:'work',avail:s=>s.jobTier>0&&s.jobName!=='Unemployed',note:()=>`+overtime pay · −HEALTH`,
    apply:()=>({fx:{assets:400,health:-3},text:'Subject took the night shift. The overtime was real. So was the permanent shadow under the eyes.'})},
  {id:'quitjob',cost:0,cat:'work',avail:s=>s.jobTier>0&&s.freedom>=30,note:()=>`walk out · requires freedom 30+`,
-   apply:()=>{S.jobTier=0;S.jobName='Unemployed';S.career=null;return{fx:{happiness:3},text:'Subject quit, on a Tuesday, at noon. The walk home was the best part. The rent, the worst.'}}},
+   apply:()=>{
+    if(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof EmploymentSystem.resign==='function'&&typeof World!=='undefined'&&World){
+      const contract=EmploymentSystem.activeForPerson(World,'subject')[0];
+      if(contract){
+        EmploymentSystem.resign(World,contract.id,'voluntary_resignation',World.year,{subject:S});
+        return{fx:{happiness:3},text:'Subject quit, on a Tuesday, at noon. The walk home was the best part. The rent, the worst.'};
+      }
+    }
+    S.jobTier=0;S.jobName='Unemployed';S.career=null;return{fx:{happiness:3},text:'Subject quit, on a Tuesday, at noon. The walk home was the best part. The rent, the worst.'}}},
  {id:'relocate',cost:2,cat:'personal',avail:s=>s.age>=18&&s.freedom>=40,note:()=>`the coast · freedom 40+ · +HAPPINESS/HEALTH · −$`,
    apply:()=>{S.didCoast=true;return{fx:{assets:-500,happiness:6,health:2},text:'Subject relocated to the coastal district. The sea did not fix everything. It fixed some, which was the deal.'}}},
  {id:'leave',cost:1,cat:'personal',avail:s=>s.age>=20&&s.age<55&&s.freedom>=50,note:()=>`a year to wander · freedom 50+ · +HAPPINESS −$`,

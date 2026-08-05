@@ -62,17 +62,17 @@ test('normal runEconomy year has no other-subject cash flow',()=>{
   assertSettled(result,0);
 });
 
-test('promotion bonus is counted once as other-subject cash flow',()=>{
+test('runEconomy no longer applies a random promotion bonus (moved to EmploymentSystem/checkCareerProgress)',()=>{
   const {context}=uiContext('promotion-household-economy');
   configureAdult(context);
   const result=settle(context,"S.jobTier=1; S.jobName='Clerk'; bestJobForTier=()=>({name:'Forced Promotion'}); Random.chance=()=>true;");
-  assertSettled(result,150);
+  assertSettled(result,0);
 });
 
 test('childbirth cost is counted once as other-subject cash flow',()=>{
   const {context}=uiContext('birth-household-economy');
   configureAdult(context);
-  const result=settle(context,`S.married=true; S.status='Married'; const spouse=makeContact(S.sex==='M'?'F':'M'); spouse.role='spouse'; S.contacts.push(spouse); syncPartnerMirror(); NpcSystem.syncLegacy(World,S,Lineage); let calls=0; Random.chance=()=>++calls===2;`);
+  const result=settle(context,`S.married=true; S.status='Married'; const spouse=makeContact(S.sex==='M'?'F':'M'); spouse.role='spouse'; S.contacts.push(spouse); syncPartnerMirror(); NpcSystem.syncLegacy(World,S,Lineage); let calls=0; Random.chance=()=>++calls===1;`);
   assertSettled(result,-300);
 });
 

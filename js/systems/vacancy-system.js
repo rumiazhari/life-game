@@ -783,6 +783,341 @@
     return issues;
   }
 
+  /* ---- qualification, ranking, applications, resolution (4C-5) ---- */
+
+  const SECTOR_SKILLS={
+    agriculture:['land','social'],
+    manufacturing:['craft','design'],
+    construction:['craft','design'],
+    transport:['craft','social'],
+    retail:['retail','social'],
+    finance:['academics','social'],
+    healthcare:['care','academics'],
+    education:['academics','care'],
+    government:['academics','social'],
+    professional:['social','academics','design','arts']
+  };
+
+  function resolvePersonDescriptor(world,personId,options){
+    const opts=options||{};
+    if(personId==='subject'){
+      const subject=opts.subject||(typeof S!=='undefined'?S:null);
+      if(!subject) return null;
+      return {kind:'player',entity:subject};
+    }
+    if(!world.npcs||!world.npcs[personId]) return null;
+    return {kind:'npc',entity:world.npcs[personId]};
+  }
+
+  function estimateNpcSkill(npc,skillId,vacancy,business){
+    const educationRank=EDUCATION_RANK[(npc.education&&npc.education.level)||'none']||0;
+    const educationComponent=educationRank*1.20;
+    const qualityComponent=clamp(finite(npc.education&&npc.education.quality,0.5),0,1)*1.50;
+    const yearsComponent=Math.min(2,finite(npc.education&&npc.education.years,0)/4);
+    const ambitionComponent=clamp(finite(npc.personality&&npc.personality.ambition,0.5),0,1);
+    const sectorSkillComponent=(SECTOR_SKILLS[business.sector]||[]).includes(skillId)?2:0;
+    const matchingEmploymentComponent=(npc.employment&&npc.employment.status==='employed'&&
+      (npc.employment.sector===business.sector||npc.employment.careerId===vacancy.occupationId))?1.5:0;
+    return clamp(educationComponent+qualityComponent+yearsComponent+ambitionComponent+sectorSkillComponent+matchingEmploymentComponent,0,10);
+  }
+
+  function playerAge(subject){
+    return Number.isFinite(Number(subject.age))?Number(subject.age):null;
+  }
+  function npcAge(world,npc){
+    return Number.isFinite(Number(npc.birthYear))?boundedYear(world.year,0)-Number(npc.birthYear):null;
+  }
+
+  function qualificationDetails(world,personId,vacancy,options){
+    const descriptor=resolvePersonDescriptor(world,personId,options);
+    const reasons=[];
+    if(!descriptor) return {qualifies:false,age:null,ageOk:false,educationRank:0,educationOk:false,majorOk:false,skillResults:{},careerYears:0,careerYearsOk:false,reasons:['not_found']};
+    const business=getBusiness(world,vacancy.businessId);
+    let age=null, alive=true, educationLevel='none', educationMajor=null;
+    if(descriptor.kind==='player'){
+      const subject=descriptor.entity;
+      age=playerAge(subject); alive=subject.alive!==false;
+      educationLevel=(subject.education&&subject.education.completed)||'none';
+      educationMajor=(subject.education&&subject.education.majorId)||null;
+    } else {
+      const npc=descriptor.entity;
+      age=npcAge(world,npc); alive=npc.alive!==false;
+      educationLevel=(npc.education&&npc.education.level)||'none';
+      educationMajor=(npc.education&&npc.education.majorId)||null;
+    }
+    if(!alive) reasons.push('deceased');
+    const ageOk=age!=null&&age>=vacancy.requirements.minAge&&age<65;
+    if(!ageOk) reasons.push('age');
+    const educationRank=EDUCATION_RANK[educationLevel]||0;
+    const requiredRank=vacancy.requirements.educationStage?(EDUCATION_RANK[vacancy.requirements.educationStage]||0):0;
+    const educationOk=educationRank>=requiredRank;
+    if(!educationOk) reasons.push('education');
+    const majorOk=!vacancy.requirements.majorIds.length||(educationMajor!=null&&vacancy.requirements.majorIds.includes(String(educationMajor)));
+    if(!majorOk) reasons.push('major');
+    const skillResults={};
+    let skillsOk=true;
+    Object.keys(vacancy.requirements.skills).forEach(skillId=>{
+      const required=vacancy.requirements.skills[skillId];
+      let have;
+      if(descriptor.kind==='player') have=finite(descriptor.entity.skills&&descriptor.entity.skills[skillId],0);
+      else have=business?estimateNpcSkill(descriptor.entity,skillId,vacancy,business):0;
+      const ok=have>=required;
+      if(!ok) skillsOk=false;
+      skillResults[skillId]={have,required,ok};
+    });
+    if(!skillsOk) reasons.push('skills');
+    let careerYears=0, careerYearsOk=true;
+    if(vacancy.occupationType==='career'&&vacancy.careerStage!=null&&vacancy.careerStage>0){
+      const activeContract=activeForPersonSafe(world,personId);
+      careerYears=activeContract?Math.max(0,boundedYear(world.year,0)-activeContract.stageStartedYear):0;
+      careerYearsOk=careerYears>=vacancy.requirements.minCareerYears;
+      if(!careerYearsOk) reasons.push('career_years');
+    }
+    const qualifies=alive&&ageOk&&educationOk&&majorOk&&skillsOk&&careerYearsOk;
+    return {qualifies,age,ageOk,educationRank,educationOk,majorOk,skillResults,careerYears,careerYearsOk,reasons};
+  }
+
+  function activeForPersonSafe(world,personId){
+    return root.EmploymentSystem&&typeof root.EmploymentSystem.activeForPerson==='function'
+      ?(root.EmploymentSystem.activeForPerson(world,personId)[0]||null):null;
+  }
+
+  function qualifies(world,personId,vacancy,options){
+    return qualificationDetails(world,personId,vacancy,options).qualifies;
+  }
+
+  function rankApplicant(world,personId,vacancy,options){
+    const opts=options||{};
+    const details=qualificationDetails(world,personId,vacancy,options);
+    const components={qualification:0,experience:0,performance:0.5,relationship:0.5,reputation:0.5,noise:0};
+    if(!details.qualifies) return {personId,qualifies:false,score:0,components};
+
+    const skillIds=Object.keys(vacancy.requirements.skills);
+    const skillMatch=skillIds.length
+      ?skillIds.reduce((sum,id)=>sum+clamp(details.skillResults[id].have/Math.max(1,details.skillResults[id].required),0,1),0)/skillIds.length
+      :1;
+    const requiredRank=vacancy.requirements.educationStage?(EDUCATION_RANK[vacancy.requirements.educationStage]||0):0;
+    const educationMatch=clamp(1+(details.educationRank-requiredRank)*0.10,0,1);
+    const majorMatch=vacancy.requirements.majorIds.length?(details.majorOk?1:0):1;
+    components.qualification=clamp(skillMatch*0.65+educationMatch*0.25+majorMatch*0.10,0,1);
+
+    const relevant=(root.EmploymentSystem?root.EmploymentSystem.forPerson(world,personId):[]).filter(c=>
+      c.occupationType===vacancy.occupationType&&c.occupationId===vacancy.occupationId);
+    const relevantYears=relevant.reduce((sum,c)=>sum+Math.max(0,(c.endedYear||boundedYear(world.year,0))-c.hiredYear),0);
+    components.experience=clamp(relevantYears/5,0,1);
+
+    const activeContract=activeForPersonSafe(world,personId);
+    components.performance=activeContract?activeContract.performance:0.5;
+
+    if(personId==='subject'){
+      const subject=opts.subject||(typeof S!=='undefined'?S:null);
+      components.reputation=subject?clamp(finite(subject.relations,50)/100,0,1):0.5;
+    } else if(world.npcs&&world.npcs[personId]){
+      const npc=world.npcs[personId];
+      const loyalty=finite(npc.personality&&npc.personality.loyalty,0.5);
+      const ambition=finite(npc.personality&&npc.personality.ambition,0.5);
+      components.reputation=clamp((loyalty+ambition)/2,0,1);
+    }
+
+    const noiseKey=[world.seed,vacancy.id,personId,'application-rank'].join('|');
+    components.noise=(root.Random.hashSeed(noiseKey)%10000)/9999;
+
+    let raw=components.qualification*0.40+components.experience*0.20+components.performance*0.15+
+      components.relationship*0.10+components.reputation*0.10+components.noise*0.05;
+    if(vacancy.occupationType==='career'&&vacancy.careerStage!=null&&activeContract&&activeContract.businessId===vacancy.businessId) raw+=0.08;
+    const score=Math.round(clamp(raw,0,1)*10000)/100;
+    return {personId,qualifies:true,score,components};
+  }
+
+  function submitApplication(world,vacancyId,personId,options){
+    ensure(world);
+    const opts=options||{};
+    const vacancy=get(world,vacancyId);
+    if(!vacancy||vacancy.status!=='open') return {applied:false,application:null,vacancy,qualification:null};
+    personId=String(personId);
+    const year=boundedYear(opts.year,boundedYear(world.year,0));
+    const existing=vacancy.applications.find(a=>a.personId===personId);
+    if(existing) return {applied:false,application:existing,vacancy,qualification:null};
+    if(vacancy.applications.length>=MAX_APPLICATIONS_PER_VACANCY) return {applied:false,application:null,vacancy,qualification:null};
+
+    const activeContract=activeForPersonSafe(world,personId);
+    let kind=opts.kind;
+    if(!APPLICATION_KINDS.includes(kind)){
+      if(!activeContract) kind='new_hire';
+      else if(activeContract.businessId===vacancy.businessId&&vacancy.careerStage!=null&&activeContract.careerStage===vacancy.careerStage-1) kind='promotion';
+      else kind='switch';
+    }
+
+    const details=qualificationDetails(world,personId,vacancy,opts);
+    const ranked=details.qualifies?rankApplicant(world,personId,vacancy,opts):{score:0};
+    const application={
+      personId,
+      workerType:personId==='subject'?'player':'npc',
+      kind,
+      appliedYear:year,
+      score:details.qualifies?ranked.score:0,
+      status:details.qualifies?'pending':'rejected',
+      resolvedYear:details.qualifies?null:year,
+      reason:details.qualifies?null:'qualification'
+    };
+    vacancy.applications=vacancy.applications.concat([application]).slice(-MAX_APPLICATIONS_PER_VACANCY);
+    vacancy.history=trimHistory(vacancy.history.concat([{type:'application',year,personId,kind,status:application.status,score:application.score}]));
+    return {applied:true,application,vacancy,qualification:details};
+  }
+
+  function seedNpcApplications(world,vacancy,options){
+    ensure(world);
+    const opts=options||{};
+    const year=boundedYear(opts.year,boundedYear(world.year,0));
+    if(!world.npcs) return [];
+    const candidates=Object.keys(world.npcs).sort().filter(id=>{
+      const npc=world.npcs[id];
+      if(!npc||npc.isSubject||npc.alive===false) return false;
+      const age=npcAge(world,npc);
+      if(age==null||age<16||age>64) return false;
+      if(npc.locationId!==vacancy.settlementId) return false;
+      const activeContract=activeForPersonSafe(world,id);
+      if(activeContract&&activeContract.businessId===vacancy.businessId) return false;
+      if(activeContract){
+        const betterTier=vacancy.jobTier>activeContract.jobTier;
+        const betterSalary=vacancy.annualSalary>=activeContract.annualSalary*1.15;
+        if(!betterTier&&!betterSalary) return false;
+      }
+      return true;
+    });
+    const ranked=candidates.map(id=>rankApplicant(world,id,vacancy,opts)).filter(r=>r.qualifies)
+      .sort((a,b)=>(b.score-a.score)||a.personId.localeCompare(b.personId))
+      .slice(0,MAX_NPC_APPLICANTS_PER_VACANCY);
+    const submitted=[];
+    ranked.forEach(candidate=>{
+      const result=submitApplication(world,vacancy.id,candidate.personId,Object.assign({},opts,{year}));
+      if(result.applied) submitted.push(result.application);
+    });
+    return submitted;
+  }
+
+  function resolveVacancy(world,vacancyId,options){
+    ensure(world);
+    const opts=options||{};
+    const vacancy=get(world,vacancyId);
+    if(!vacancy||vacancy.status!=='open') return vacancy;
+    const year=boundedYear(opts.year,boundedYear(world.year,0));
+    const pending=vacancy.applications.filter(a=>a.status==='pending')
+      .slice().sort((a,b)=>(b.score-a.score)||(a.appliedYear-b.appliedYear)||a.personId.localeCompare(b.personId));
+
+    let winner=null, winnerResult=null;
+    for(const candidate of pending){
+      const recheck=qualificationDetails(world,candidate.personId,vacancy,opts);
+      if(!recheck.qualifies) continue;
+      const result=root.EmploymentSystem&&typeof root.EmploymentSystem.acceptVacancy==='function'
+        ?root.EmploymentSystem.acceptVacancy(world,vacancy,candidate.personId,opts):{accepted:false};
+      if(result&&result.accepted){ winner=candidate; winnerResult=result; break; }
+    }
+
+    if(winner&&winnerResult){
+      vacancy.status='filled';
+      vacancy.filledByPersonId=winner.personId;
+      vacancy.filledContractId=winnerResult.contract.id;
+      vacancy.filledYear=year;
+      vacancy.closedReason=null;
+      vacancy.applications=vacancy.applications.map(a=>{
+        if(a.personId===winner.personId) return Object.assign({},a,{status:'accepted',resolvedYear:year});
+        if(a.status==='pending') return Object.assign({},a,{status:'rejected',resolvedYear:year,reason:'better_candidate'});
+        return a;
+      });
+      vacancy.history=trimHistory(vacancy.history.concat([{type:'filled',year,personId:winner.personId,contractId:winnerResult.contract.id}]));
+      if(vacancy.businessId) syncBusinessVacancyIds(world,vacancy.businessId);
+    } else {
+      vacancy.applications=vacancy.applications.map(a=>a.status==='pending'?Object.assign({},a,{status:'rejected',resolvedYear:year,reason:'unfilled'}):a);
+    }
+    return vacancy;
+  }
+
+  function resolvePending(world,options){
+    ensure(world);
+    const opts=options||{};
+    const year=boundedYear(opts.year,boundedYear(world.year,0));
+    const resolved=[];
+    Object.keys(world.vacancies).sort().forEach(id=>{
+      const vacancy=world.vacancies[id];
+      if(vacancy.status!=='open') return;
+      if(!(vacancy.openedYear<year)) return;
+      resolveVacancy(world,id,opts);
+      resolved.push(id);
+    });
+    return resolved;
+  }
+
+  function applyAndResolve(world,vacancyId,personId,options){
+    const applied=submitApplication(world,vacancyId,personId,options);
+    if(!applied.applied&&(!applied.application||applied.application.status==='rejected')) return applied;
+    const vacancy=resolveVacancy(world,vacancyId,options);
+    const application=vacancy.applications.find(a=>a.personId===String(personId));
+    return {applied:true,application,vacancy,qualification:applied.qualification};
+  }
+
+  function playerPortalVacancies(world,subject){
+    ensure(world);
+    if(!subject) return [];
+    const settlementId=(subject.location&&subject.location.settlementId)||world.activeSettlementId;
+    const age=playerAge(subject);
+    const open=all(world).filter(v=>v.status==='open'&&v.settlementId===settlementId
+      &&age!=null&&age>=16&&age<65
+      &&getBusiness(world,v.businessId)&&getBusiness(world,v.businessId).status!=='closed');
+
+    const byTrack={};
+    const standalone=[];
+    open.forEach(v=>{
+      if(v.occupationType==='career'){
+        const key=v.occupationId;
+        if(!byTrack[key]) byTrack[key]=[];
+        byTrack[key].push(v);
+      } else {
+        standalone.push(v);
+      }
+    });
+
+    const activeContract=activeForPersonSafe(world,'subject');
+    const projected=[];
+
+    Object.keys(byTrack).sort().forEach(trackId=>{
+      const candidates=byTrack[trackId];
+      candidates.sort((a,b)=>{
+        const aPromo=activeContract&&a.businessId===activeContract.businessId&&a.careerStage===(activeContract.careerStage||0)+1;
+        const bPromo=activeContract&&b.businessId===activeContract.businessId&&b.careerStage===(activeContract.careerStage||0)+1;
+        if(aPromo!==bPromo) return aPromo?-1:1;
+        const aQual=qualifies(world,'subject',a,{subject});
+        const bQual=qualifies(world,'subject',b,{subject});
+        if(aQual!==bQual) return aQual?-1:1;
+        if(b.annualSalary!==a.annualSalary) return b.annualSalary-a.annualSalary;
+        if(a.openedYear!==b.openedYear) return a.openedYear-b.openedYear;
+        return a.id.localeCompare(b.id);
+      });
+      const rep=candidates[0];
+      const business=getBusiness(world,rep.businessId);
+      projected.push({
+        vacancyId:rep.id,businessId:rep.businessId,businessName:business?business.name:rep.businessId,settlementId:rep.settlementId,
+        occupationType:rep.occupationType,occupationId:rep.occupationId,occupationName:rep.occupationName,
+        track:rep.occupationId,stage:rep.careerStage,jobTier:rep.jobTier,annualSalary:rep.annualSalary,
+        qualifies:qualifies(world,'subject',rep,{subject}),
+        applicationStatus:(rep.applications.find(a=>a.personId==='subject')||{}).status||null
+      });
+    });
+
+    standalone.sort((a,b)=>a.id.localeCompare(b.id)).forEach(v=>{
+      const business=getBusiness(world,v.businessId);
+      projected.push({
+        vacancyId:v.id,businessId:v.businessId,businessName:business?business.name:v.businessId,settlementId:v.settlementId,
+        occupationType:v.occupationType,occupationId:v.occupationId,occupationName:v.occupationName,
+        track:null,stage:-1,jobTier:v.jobTier,annualSalary:v.annualSalary,
+        qualifies:qualifies(world,'subject',v,{subject}),
+        applicationStatus:(v.applications.find(a=>a.personId==='subject')||{}).status||null
+      });
+    });
+
+    return projected;
+  }
+
   root.VacancySystem={
     SCHEMA_VERSION,
     VACANCY_STATUSES,
@@ -813,6 +1148,15 @@
     generateForBusiness,
     tickWorld,
     summary,
-    checkInvariants
+    checkInvariants,
+    qualifies,
+    qualificationDetails,
+    rankApplicant,
+    submitApplication,
+    seedNpcApplications,
+    resolveVacancy,
+    resolvePending,
+    applyAndResolve,
+    playerPortalVacancies
   };
 })(typeof globalThis!=='undefined'?globalThis:this);

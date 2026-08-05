@@ -830,6 +830,7 @@ function lifeToggle(items,current,dataAttr,priceFn){
 function labelOf(q){if(q.id==='practice'&&q.skill&&SKILLS[q.skill])return 'Practice: '+SKILLS[q.skill].name;
   if(q.id==='learntrade'&&q.program&&typeof vocationalProgramById==='function'){const program=vocationalProgramById(q.program);if(program)return 'Training: '+program.name;}
   if(q.id==='tendmember'&&q.member){const m=findHoldMember(q.member); if(m) return 'Look after: '+m.first+' '+m.last;}
+  if(q.id==='lookwork'&&q.vacancyId){const v=typeof VacancySystem==='object'&&VacancySystem&&typeof World!=='undefined'&&World?VacancySystem.get(World,q.vacancyId):null; return v?'Apply: '+v.occupationName:'Apply for work';}
   if(q.id==='lookwork'&&q.track){const t=CAREERS.find(c=>c.id===q.track); return t?'Apply: '+t.stages[q.stage].name:'Apply for work';}
   if(q.id==='gig'&&q.gig){const g=GIGS.find(x=>x.id===q.gig); if(g) return 'Off the Books: '+g.name;}
   if(q.cid&&PER_CONTACT_IDS.has(q.id)){const c=S.contacts.find(x=>x.cid===q.cid); if(c) return npcActionLabel({id:q.id,type:PUR_MAP[q.id]?'p':'d'},q.cid);}
@@ -1097,7 +1098,11 @@ function careerEducationRequirementHTML(track,stageIdx){
   else { text='No formal education requirement'; }
   return '<div class="reqrow"><span class="'+(ok?'reqok':'reqno')+'">🎓 '+text+'</span></div>';
 }
+function isPersistentVacancyProjection(){
+  return Array.isArray(S.vacancies)&&S.vacancies.some(v=>v&&v.vacancyId);
+}
 function openJobPortal(){
+  if(isPersistentVacancyProjection()){ openJobPortalPersistent(); return; }
   let rows='';
   CAREERS.forEach(track=>{
     const v=S.vacancies.find(x=>x.track===track.id);
@@ -1131,6 +1136,38 @@ function openJobPortal(){
     if(e.target.id==='jobCancel'){ $('#jobWrap').classList.add('hidden'); return; }
     if(e.target.closest('#openGigs')){ $('#jobWrap').classList.add('hidden'); openGigPicker(); return; }
     const row=e.target.closest('[data-track-row]'); if(row){ openJobDetail(row.dataset.trackRow); }
+  };
+  $('#jobWrap').classList.remove('hidden');
+}
+function openJobPortalPersistent(){
+  const careerEntries=S.vacancies.filter(v=>v&&v.occupationType==='career');
+  const jobEntries=S.vacancies.filter(v=>v&&v.occupationType!=='career');
+  let rows='';
+  careerEntries.forEach(v=>{
+    const track=CAREERS.find(c=>c.id===v.track);
+    const sub=track?track.name+' · '+money(v.annualSalary)+'/yr'+(v.qualifies?'':' · requirements not met yet'):money(v.annualSalary)+'/yr';
+    rows+='<div class="arow clickable" data-track-row="'+(track?track.id:'')+'" data-vacancy-row="'+v.vacancyId+'"><div class="ar-grade">'+(track?track.icon:'💼')+'</div><div style="flex:1"><div class="ar-name">'+v.occupationName+'</div>'+
+      '<div class="ar-meta">'+sub+' · '+v.businessName+'</div></div>'+
+      (v.qualifies?'<button class="btn small" data-apply data-vacancy="'+v.vacancyId+'">Apply ▸</button>':'<div class="ar-chev">VIEW LADDER ›</div>')+'</div>';
+  });
+  let jobRows='';
+  jobEntries.forEach(v=>{
+    jobRows+='<div class="arow'+(v.qualifies?'':' locked')+'"><div class="ar-grade">💼</div><div style="flex:1"><div class="ar-name">'+v.occupationName+'</div>'+
+      '<div class="ar-meta">'+v.businessName+' · tier '+v.jobTier+' · '+money(v.annualSalary)+'/yr'+(v.qualifies?'':' · requirements not met yet')+'</div></div>'+
+      (v.qualifies?'<button class="btn small" data-apply data-vacancy="'+v.vacancyId+'">Apply ▸</button>':'')+'</div>';
+  });
+  $('#jobSheet').innerHTML='<div class="ps-head"><span>THIS YEAR’S OPENINGS</span><span>FORM W-2</span></div>'+
+    '<div class="aempty" style="margin:6px 2px 10px">Real openings at real employers this year. Tap a career row for the full ladder.</div>'+
+    '<div style="margin:10px 2px">'+(rows||'<div class="aempty">No career openings this year.</div>')+'</div>'+
+    (jobEntries.length?'<div class="ps-sub"><span>GENERAL OPENINGS</span></div><div style="margin:10px 2px">'+jobRows+'</div>':'')+
+    '<div class="ps-sub"><span>OR — SKIP THE LADDER ENTIRELY</span></div>'+
+    '<button class="household-tile" id="openGigs"><b>🕶 Off the Books</b><span>Nasty, unlicensed, paid in cash — maybe</span><i>No résumé required. Just nerve.</i></button>'+
+    '<div class="ps-foot"><button class="btn" id="jobCancel">Keep Looking ▸</button></div>';
+  $('#jobSheet').onclick=e=>{
+    const b=e.target.closest('[data-apply]'); if(b){ queueAdd('p','lookwork',{vacancyId:b.dataset.vacancy}); $('#jobWrap').classList.add('hidden'); return; }
+    if(e.target.id==='jobCancel'){ $('#jobWrap').classList.add('hidden'); return; }
+    if(e.target.closest('#openGigs')){ $('#jobWrap').classList.add('hidden'); openGigPicker(); return; }
+    const row=e.target.closest('[data-track-row]'); if(row&&row.dataset.trackRow){ openJobDetail(row.dataset.trackRow); }
   };
   $('#jobWrap').classList.remove('hidden');
 }
@@ -1183,8 +1220,10 @@ function openMeetPicker(){
 function openJobDetail(trackId){
   const track=CAREERS.find(c=>c.id===trackId); if(!track) return;
   const careerAdvantage=typeof educationCareerAdvantage==='function'?educationCareerAdvantage(track):{kind:'none',label:'No degree-specific advantage'};
-  const v=S.vacancies.find(x=>x.track===trackId);
-  const openStage=(v&&v.stage>=0)?v.stage:-1;
+  const persistent=isPersistentVacancyProjection();
+  const v=persistent?S.vacancies.find(x=>x.track===trackId):S.vacancies.find(x=>x.track===trackId);
+  const openStage=persistent?(v?v.stage:-1):((v&&v.stage>=0)?v.stage:-1);
+  const openVacancyId=persistent&&v?v.vacancyId:null;
   let rows='';
   track.stages.forEach((st,idx)=>{
     const minAge=TIER_MINAGE[idx+1], expYears=idx>0?(typeof careerYearsRequired==='function'?careerYearsRequired(track,idx):CAREER_EXP[idx-1]):0;
@@ -1199,11 +1238,14 @@ function openJobDetail(trackId){
     const reqParts=eduRow+Object.keys(st.req).map(k=>{const have=S.skills[k]||0,need=st.req[k],ok=have>=need,pct=Math.min(100,Math.round(have/need*100));
       return '<div class="reqrow"><span class="'+(ok?'reqok':'reqno')+'">'+SKILLS[k].icon+' '+SKILLS[k].name+' '+have+'/'+need+'</span>'+
         '<div class="sbar mini"><div class="sfill" style="width:'+pct+'%;background:'+(ok?'var(--green)':'var(--blue)')+'"></div></div></div>';}).join('');
+    const applyBtn=isOpen?(persistent
+      ?(openVacancyId?'<button class="btn small" data-apply data-vacancy="'+openVacancyId+'">Apply ▸</button>':'')
+      :'<button class="btn small" data-apply data-track="'+trackId+'" data-stage="'+idx+'">Apply ▸</button>'):'';
     rows+='<div class="arow'+(qualifies?'':' locked')+'"><div class="ar-grade">'+(idx+1)+'</div>'+
       '<div style="flex:1"><div class="ar-name">'+st.name+' '+tag+'</div>'+
       '<div class="ar-meta">'+money(st.salary)+'/yr · age '+minAge+'+'+(idx>0?' · '+expYears+'y served in prior stage':'')+'</div>'+
       '<div class="ar-meta">'+reqParts+(S.age<minAge?' · too young yet':'')+'</div></div>'+
-      (isOpen?'<button class="btn small" data-apply data-track="'+trackId+'" data-stage="'+idx+'">Apply ▸</button>':'')+
+      applyBtn+
       '</div>';
   });
   $('#jobDetailSheet').innerHTML='<div class="ps-head"><span>'+track.icon+' '+track.name.toUpperCase()+'</span><span>CAREER LADDER</span></div>'+
@@ -1211,7 +1253,12 @@ function openJobDetail(trackId){
     '<div style="margin:0 2px">'+rows+'</div>'+
     '<div class="ps-foot"><button class="btn" id="jobDetailClose">Close ▸</button></div>';
   $('#jobDetailSheet').onclick=e=>{
-    const b=e.target.closest('[data-apply]'); if(b){ queueAdd('p','lookwork',{track:b.dataset.track,stage:+b.dataset.stage}); $('#jobDetailWrap').classList.add('hidden'); $('#jobWrap').classList.add('hidden'); return; }
+    const b=e.target.closest('[data-apply]');
+    if(b){
+      if(b.dataset.vacancy) queueAdd('p','lookwork',{vacancyId:b.dataset.vacancy});
+      else queueAdd('p','lookwork',{track:b.dataset.track,stage:+b.dataset.stage});
+      $('#jobDetailWrap').classList.add('hidden'); $('#jobWrap').classList.add('hidden'); return;
+    }
     if(e.target.id==='jobDetailClose'){ $('#jobDetailWrap').classList.add('hidden'); }
   };
   $('#jobDetailWrap').classList.remove('hidden');
@@ -1572,22 +1619,30 @@ function stageUnlocks(stageId){
   return jobs.concat(skills);
 }
 function runMilestones(){ const m=S.age;
-  if(m===65&&S.jobTier>0){S.pensionBase=500+S.jobTier*380;S.jobTier=0;S.jobName='Pensioner (retired)';S.career=null; logEv('Subject’s file was transferred to the Pension Office. A small cake was permitted.',{happiness:2},'milestone','MILESTONE · YEAR 65');}
+  if(m===65&&S.jobTier>0){
+    S.pensionBase=500+S.jobTier*380;
+    if(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof EmploymentSystem.retire==='function'&&typeof World!=='undefined'&&World){
+      const contract=EmploymentSystem.activeForPerson(World,'subject')[0];
+      if(contract) EmploymentSystem.retire(World,contract.id,World.year,{subject:S});
+      else{ S.jobTier=0;S.jobName='Pensioner (retired)';S.career=null;S.careerYears=0;S.employmentContractId=null; }
+    } else { S.jobTier=0;S.jobName='Pensioner (retired)';S.career=null; }
+    logEv('Subject’s file was transferred to the Pension Office. A small cake was permitted.',{happiness:2},'milestone','MILESTONE · YEAR 65');
+  }
 }
 function runEconomy(){
   const y=currentYear(), WAR=(y>=1914&&y<=1918)||(y>=1939&&y<=1945), student=!!S.eduStage;
   S.__householdAssetsBeforeEconomy=S.assets; S.__householdSubjectExpensesPaid=0;
   S.__worldWagePaid=0; S.__worldWagePaidYear=y;
-  if(S.age>=16&&S.age<65&&!student&&S.jobName!=='Conscript'&&S.jailUntil<=S.age){
-    if(S.jobTier===0){ const p=(0.04+S.smarts*0.0006)*(WAR?0.6:1);
-      if(chance(p)){const job=bestJobForTier(1); if(job){S.jobTier=1; S.jobName=job.name; logEv('Subject stumbled into work — '+job.name+' — without much looking. Beginner’s luck, filed as such.',{happiness:2});}} }
-    else if(S.career){ S.careerYears++;
-      if(chance(0.03+(S.happiness<30?0.03:0)+(WAR?0.03:0))){ S.jobTier=0;S.jobName='Unemployed';S.career=null; logEv('Subject’s position was eliminated. Subject left with a box of pencils and a firm handshake.',{happiness:-6}); } }
-    else { if(S.jobTier<5&&chance(0.008+S.smarts*0.0003)){const job=bestJobForTier(S.jobTier+1);
-        if(job){S.jobTier++;S.jobName=job.name; logEv('Subject was promoted to '+job.name+', unasked. New office. Same clock.',{happiness:4,assets:150});}}
-      else if(chance(0.03+(S.happiness<30?0.03:0)+(WAR?0.03:0))){S.jobTier=0;S.jobName='Unemployed'; logEv('Subject’s position was eliminated. Subject left with a box of pencils and a firm handshake.',{happiness:-6});} } }
+  const persistentContract=(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof EmploymentSystem.activeForPerson==='function'&&typeof World!=='undefined'&&World)
+    ?EmploymentSystem.activeForPerson(World,'subject')[0]:null;
+  // Random normal-runtime hiring/promotion/elimination is removed: contract
+  // lifecycle (hiring, promotion, dismissal, layoff) is owned entirely by
+  // EmploymentSystem/VacancySystem via the annual pipeline and player pursuits.
+  if(persistentContract) S.careerYears=Math.max(0,y-persistentContract.stageStartedYear);
   if(S.age>=16&&S.jailUntil<=S.age){ let income=0;
-    if(S.jobName==='Conscript')income=400; else if(S.career)income=CAREERS.find(c=>c.id===S.career).stages[S.jobTier-1].salary; else if(S.jobTier>0)income=INC[S.jobTier]; else if(S.jobName.startsWith('Pensioner'))income=S.pensionBase;
+    if(S.jobName==='Conscript')income=400;
+    else if(persistentContract) income=persistentContract.annualSalary;
+    else if(S.career)income=CAREERS.find(c=>c.id===S.career).stages[S.jobTier-1].salary; else if(S.jobTier>0)income=INC[S.jobTier]; else if(S.jobName.startsWith('Pensioner'))income=S.pensionBase;
     if(S.garnishUntil>S.age) income=Math.round(income*0.6);
     if(typeof medicalWorkPenalty==='function'){ const medicalPenalty=medicalWorkPenalty(S); if(medicalPenalty) income=Math.round(income*Math.max(.55,1-medicalPenalty*.14)); }
     if(typeof WorldGameplay==='object'&&WorldGameplay&&typeof WorldGameplay.adjustPaidIncome==='function') income=WorldGameplay.adjustPaidIncome(income,S);
@@ -1638,6 +1693,20 @@ function runEconomy(){
   if(S.vice>0&&S.happiness>60&&chance(.3)) S.vice--;
 }
 function checkCareerProgress(){
+  if(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof EmploymentSystem.considerAutomaticPromotion==='function'&&typeof World!=='undefined'&&World){
+    const contract=EmploymentSystem.activeForPerson(World,'subject')[0];
+    if(!contract||contract.occupationType!=='career') return;
+    if(actionReservedThisYear('presspromo')) return;
+    const result=EmploymentSystem.considerAutomaticPromotion(World,S,{year:World.year,subject:S});
+    if(result&&result.accepted){
+      const track=CAREERS.find(c=>c.id===contract.occupationId);
+      const stageIdx=contract.careerStage;
+      logEv('Subject was promoted to '+contract.occupationName+'.',{happiness:4,assets:150});
+      if(track&&stageIdx!=null) queuePromotionToast(track,track.stages[stageIdx]);
+    }
+    return;
+  }
+  // Legacy fallback: only reached when EmploymentSystem/World are unavailable.
   if(!S.career||S.jobTier<1) return;
   const track=CAREERS.find(c=>c.id===S.career); if(!track) return;
   if(S.jobTier<5 && readyForPromotion(track)){
@@ -2310,6 +2379,34 @@ function runBusinessYearTick(){
   if(typeof BusinessSystem!=='object'||!BusinessSystem||typeof BusinessSystem.tickWorld!=='function') return null;
   return BusinessSystem.tickWorld(World,{year:World.year});
 }
+function runEmploymentReconciliation(){
+  if(typeof EmploymentSystem!=='object'||!EmploymentSystem||typeof EmploymentSystem.reconcilePlayer!=='function') return null;
+  const contract=EmploymentSystem.reconcilePlayer(World,S);
+  if(typeof EmploymentSystem.reconcileNpcs==='function') EmploymentSystem.reconcileNpcs(World);
+  if(typeof EmploymentSystem.syncAllBusinessEmployees==='function') EmploymentSystem.syncAllBusinessEmployees(World);
+  return contract;
+}
+function runEmploymentLifecycleYearTick(){
+  if(typeof EmploymentSystem!=='object'||!EmploymentSystem||typeof EmploymentSystem.tickWorld!=='function') return null;
+  return EmploymentSystem.tickWorld(World,{year:World.year,subject:S});
+}
+function runVacancyYearTick(){
+  if(typeof VacancySystem!=='object'||!VacancySystem||typeof VacancySystem.tickWorld!=='function') return null;
+  const result=VacancySystem.tickWorld(World,{year:World.year});
+  if(result&&result.applied&&typeof VacancySystem.openVacancies==='function'&&typeof VacancySystem.seedNpcApplications==='function'){
+    VacancySystem.openVacancies(World,{}).forEach(vacancy=>{
+      if(vacancy.openedYear===World.year) VacancySystem.seedNpcApplications(World,vacancy,{year:World.year});
+    });
+  }
+  return result;
+}
+function resolvePendingVacancies(){
+  if(typeof VacancySystem!=='object'||!VacancySystem||typeof VacancySystem.resolvePending!=='function') return null;
+  return VacancySystem.resolvePending(World,{year:World.year,subject:S});
+}
+function syncPlayerVacancyPortal(){
+  if(S.age>=16&&S.age<65&&S.jailUntil<=S.age) rollJobVacancies();
+}
 function advanceYear(suppressBurst,quiet){
   if(!S||!S.alive||slipOpen) return;
   if(S.age>0) evaluateYearStreak(quiet);
@@ -2378,10 +2475,31 @@ function advanceYear(suppressBurst,quiet){
     if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.noticeText==='function') logEv('CONNECTED LIFE. '+NpcSystem.noticeText(World,notice),{},'milestone','HOUSEHOLD FILE · YEAR '+S.age);
   });
   runPersonalStandingYearTick();
-  if(S.jobTier===0&&S.age>=16&&S.age<65) rollJobVacancies();
+  // Employment/business/vacancy annual sequence: reconcile legacy state into
+  // contracts, tick business finances exactly once, tick employment lifecycle
+  // (reviews/retirements/layoffs) exactly once, then tick vacancies exactly
+  // once (generation + NPC application seeding, no same-year resolution).
+  runEmploymentReconciliation();
+  runBusinessYearTick();
+  runEmploymentLifecycleYearTick();
+  runVacancyYearTick();
+  checkCareerProgress();
+  syncPlayerVacancyPortal();
   const __newStage=stageForAge(S.age);
   if(__newStage!==S.stage){ S.stage=__newStage; queueChapterCard(__newStage); renderStage(); }
   resolvePlan();
+  // resolvePending only resolves openings from a prior year (openedYear <
+  // World.year) -- an opening generated this year stays visible to the
+  // player until next year. Explicit player applications (via resolvePlan's
+  // lookwork/presspromo) already resolved their own targeted vacancy above.
+  resolvePendingVacancies();
+  if(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof EmploymentSystem.reconcilePlayer==='function'){
+    EmploymentSystem.reconcilePlayer(World,S);
+    if(typeof EmploymentSystem.reconcileNpcs==='function') EmploymentSystem.reconcileNpcs(World);
+    if(typeof EmploymentSystem.syncAllBusinessEmployees==='function') EmploymentSystem.syncAllBusinessEmployees(World);
+  }
+  if(typeof VacancySystem==='object'&&VacancySystem&&typeof VacancySystem.syncAllBusinessVacancyIds==='function') VacancySystem.syncAllBusinessVacancyIds(World);
+  syncPlayerVacancyPortal();
   runPersonalYearTick();
   // Household transmission + caregiving run last, after both the NPC medical
   // progression above and the player's own annual medical tick just above,
@@ -2397,13 +2515,6 @@ function advanceYear(suppressBurst,quiet){
   runAffairs();
   runReverseAffairs();
   tickSkills();
-  checkCareerProgress();
-  if(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof EmploymentSystem.reconcilePlayer==='function'){
-    EmploymentSystem.reconcilePlayer(World,S);
-    if(typeof EmploymentSystem.reconcileNpcs==='function') EmploymentSystem.reconcileNpcs(World);
-    if(typeof EmploymentSystem.syncAllBusinessEmployees==='function') EmploymentSystem.syncAllBusinessEmployees(World);
-  }
-  runBusinessYearTick();
   guardianTeachTick();
   guardianAmbientTick();
   guardianIncidentTick();
