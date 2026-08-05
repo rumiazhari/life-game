@@ -394,16 +394,36 @@ test('tickWorld aggregates totals across all businesses',()=>{
   assert.ok(parsed.revenueMatches);
 });
 
-test('repeated tickWorld calls in the same year leave finances unchanged',()=>{
+test('repeated tickWorld calls in the same year leave finances, history, payment years, and payment amounts unchanged',()=>{
   const context=migratedWorld();
   const result=expose(context,`(function(){
+    const b=BusinessSystem.forSettlement(World,'branec')[0];
+    EmploymentSystem.hire(World,{personId:'npc:steady',businessId:b.id,annualSalary:1000});
     BusinessSystem.tickWorld(World,{year:1930});
-    const first=JSON.stringify(World.businesses);
+    const firstBusinesses=JSON.stringify(World.businesses);
+    const firstContracts=JSON.stringify(World.employmentContracts);
     BusinessSystem.tickWorld(World,{year:1930});
-    const second=JSON.stringify(World.businesses);
-    return JSON.stringify({equal:first===second});
+    const secondBusinesses=JSON.stringify(World.businesses);
+    const secondContracts=JSON.stringify(World.employmentContracts);
+    return JSON.stringify({businessesEqual:firstBusinesses===secondBusinesses,contractsEqual:firstContracts===secondContracts});
   })()`);
-  assert.ok(JSON.parse(result).equal);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.businessesEqual);
+  assert.ok(parsed.contractsEqual);
+});
+
+test('sequential fast-forward years create exactly one annual finance entry per year across a tickWorld sweep',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    const businessId=BusinessSystem.forSettlement(World,'branec')[0].id;
+    for(let year=1930;year<1935;year++) BusinessSystem.tickWorld(World,{year});
+    const b=BusinessSystem.get(World,businessId);
+    const historyYears=b.history.filter(h=>h.type==='annual_finance').map(h=>h.year);
+    return JSON.stringify({historyYears,uniqueCount:new Set(historyYears).size});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.uniqueCount,parsed.historyYears.length);
+  assert.deepEqual(parsed.historyYears,[1930,1931,1932,1933,1934]);
 });
 
 test('the annual flow invokes the business tick exactly once per year via runBusinessYearTick',()=>{

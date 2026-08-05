@@ -451,6 +451,7 @@ test('player relocation transfers the contract to a new settlement and updates b
       oldBusinessEmployees:World.businesses[oldBusinessId].employeeIds,
       newBusinessEmployees:World.businesses[second.businessId].employeeIds,
       subjectContractId:S.employmentContractId,
+      secondId:second.id,
       activeCount:EmploymentSystem.activeForPerson(World,'subject').length
     });
   })()`);
@@ -461,7 +462,7 @@ test('player relocation transfers the contract to a new settlement and updates b
   assert.equal(parsed.oldReason,'worker_relocated');
   assert.ok(!parsed.oldBusinessEmployees.includes('subject'));
   assert.ok(parsed.newBusinessEmployees.includes('subject'));
-  assert.equal(parsed.subjectContractId,parsed.activeCount===1?parsed.subjectContractId:null);
+  assert.equal(parsed.subjectContractId,parsed.secondId);
   assert.equal(parsed.activeCount,1);
 });
 
@@ -477,6 +478,8 @@ test('player career change to a different occupation identity transfers the cont
       newOccupationId:second.occupationId,
       oldStatus:World.employmentContracts[first.id].status,
       oldReason:World.employmentContracts[first.id].terminationReason,
+      subjectContractId:S.employmentContractId,
+      secondId:second.id,
       activeCount:EmploymentSystem.activeForPerson(World,'subject').length
     });
   })()`);
@@ -485,6 +488,30 @@ test('player career change to a different occupation identity transfers the cont
   assert.equal(parsed.newOccupationId,'law');
   assert.equal(parsed.oldStatus,'terminated');
   assert.equal(parsed.oldReason,'employment_changed');
+  assert.equal(parsed.subjectContractId,parsed.secondId);
+  assert.equal(parsed.activeCount,1);
+});
+
+test('a standalone job identity change transfers the contract',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    S={employmentContractId:null}; S.career=null; S.jobTier=1; S.jobName='Farmhand'; S.location={settlementId:'branec'};
+    const first=EmploymentSystem.reconcilePlayer(World,S);
+    S.jobTier=1; S.jobName='Warehouse Hand';
+    const second=EmploymentSystem.reconcilePlayer(World,S);
+    return JSON.stringify({
+      differentContract:first.id!==second.id,
+      firstOccupationId:first.occupationId,
+      secondOccupationId:second.occupationId,
+      subjectContractId:S.employmentContractId,
+      secondId:second.id,
+      activeCount:EmploymentSystem.activeForPerson(World,'subject').length
+    });
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.differentContract);
+  assert.notEqual(parsed.firstOccupationId,parsed.secondOccupationId);
+  assert.equal(parsed.subjectContractId,parsed.secondId);
   assert.equal(parsed.activeCount,1);
 });
 
@@ -531,11 +558,13 @@ test('NPC sector change transfers the contract to a compatible business',()=>{
     World.npcs['npc:switcher'].employment.sector='hospital';
     EmploymentSystem.reconcileNpcs(World);
     const second=EmploymentSystem.activeForPerson(World,'npc:switcher')[0];
-    return JSON.stringify({differentContract:first.id!==second.id,activeCount:EmploymentSystem.activeForPerson(World,'npc:switcher').length});
+    const secondBusiness=BusinessSystem.get(World,second.businessId);
+    return JSON.stringify({differentContract:first.id!==second.id,activeCount:EmploymentSystem.activeForPerson(World,'npc:switcher').length,secondSector:secondBusiness.sector});
   })()`);
   const parsed=JSON.parse(result);
   assert.ok(parsed.differentContract);
   assert.equal(parsed.activeCount,1);
+  assert.equal(parsed.secondSector,'healthcare');
 });
 
 test('public create() rejects a duplicate active/on_leave contract for the same person',()=>{
@@ -610,4 +639,161 @@ test('contract accounting does not directly modify player assets or NPC wealth',
   const parsed=JSON.parse(result);
   assert.equal(parsed.subjectAssets,500);
   assert.equal(parsed.npcCash,250);
+});
+
+test('a healthcare worker in a small settlement without a seeded healthcare business gets a compatible fallback employer',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    World.npcs=World.npcs||{};
+    World.npcs['npc:nurse']={id:'npc:nurse',isSubject:false,alive:true,birthYear:World.year-30,locationId:'oberhain',employment:{status:'employed',sector:'hospital',income:900}};
+    EmploymentSystem.reconcileNpcs(World);
+    const contract=EmploymentSystem.activeForPerson(World,'npc:nurse')[0];
+    const business=BusinessSystem.get(World,contract.businessId);
+    return JSON.stringify({sector:business.sector,seededHealthcareCount:BusinessSystem.forSettlement(World,'oberhain').filter(b=>b.sector==='healthcare').length});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.sector,'healthcare');
+});
+
+test('two consecutive reconciliations into a fallback employer retain the same contract ID',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    World.npcs=World.npcs||{};
+    World.npcs['npc:nurse']={id:'npc:nurse',isSubject:false,alive:true,birthYear:World.year-30,locationId:'oberhain',employment:{status:'employed',sector:'hospital',income:900}};
+    EmploymentSystem.reconcileNpcs(World);
+    const first=EmploymentSystem.activeForPerson(World,'npc:nurse')[0];
+    EmploymentSystem.reconcileNpcs(World);
+    const second=EmploymentSystem.activeForPerson(World,'npc:nurse')[0];
+    return JSON.stringify({sameId:first.id===second.id});
+  })()`);
+  assert.ok(JSON.parse(result).sameId);
+});
+
+test('no duplicate fallback business is created across repeated reconciliations for multiple workers',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    World.npcs=World.npcs||{};
+    World.npcs['npc:nurse-a']={id:'npc:nurse-a',isSubject:false,alive:true,birthYear:World.year-30,locationId:'oberhain',employment:{status:'employed',sector:'hospital',income:900}};
+    World.npcs['npc:nurse-b']={id:'npc:nurse-b',isSubject:false,alive:true,birthYear:World.year-28,locationId:'oberhain',employment:{status:'employed',sector:'medical',income:850}};
+    EmploymentSystem.reconcileNpcs(World);
+    EmploymentSystem.reconcileNpcs(World);
+    EmploymentSystem.reconcileNpcs(World);
+    const healthcareBusinesses=BusinessSystem.forSettlement(World,'oberhain').filter(b=>b.sector==='healthcare');
+    return JSON.stringify({count:healthcareBusinesses.length});
+  })()`);
+  assert.equal(JSON.parse(result).count,1);
+});
+
+test('the fallback-assigned business passes the same compatibility rule used by isContractCompatible',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    World.npcs=World.npcs||{};
+    World.npcs['npc:nurse']={id:'npc:nurse',isSubject:false,alive:true,birthYear:World.year-30,locationId:'oberhain',employment:{status:'employed',sector:'hospital',income:900}};
+    EmploymentSystem.reconcileNpcs(World);
+    const contract=EmploymentSystem.activeForPerson(World,'npc:nurse')[0];
+    const business=BusinessSystem.get(World,contract.businessId);
+    return JSON.stringify({sectorMatchesHealthcareMapping:business.sector==='healthcare'});
+  })()`);
+  assert.ok(JSON.parse(result).sectorMatchesHealthcareMapping);
+});
+
+test('ended contract creation with a future hired year bounds hiredYear and defaults a valid endedYear',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.forSettlement(World,'branec')[0];
+    const contract=EmploymentSystem.create(World,{personId:'npc:future',businessId:b.id,status:'resigned',hiredYear:1e8});
+    return JSON.stringify({hiredYear:contract.hiredYear,endedYear:contract.endedYear,valid:contract.endedYear>=contract.hiredYear});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(Number.isFinite(parsed.hiredYear));
+  assert.ok(parsed.valid);
+});
+
+test('an explicit endedYear earlier than hiredYear is repaired to be no earlier than hiredYear',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.forSettlement(World,'branec')[0];
+    const contract=EmploymentSystem.create(World,{personId:'npc:backwards',businessId:b.id,status:'resigned',hiredYear:1930,endedYear:1900});
+    return JSON.stringify({hiredYear:contract.hiredYear,endedYear:contract.endedYear});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.endedYear>=parsed.hiredYear);
+});
+
+test('end() called with an earlier or extreme year never produces an endedYear before hiredYear',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.forSettlement(World,'branec')[0];
+    const contract=EmploymentSystem.hire(World,{personId:'npc:early-end',businessId:b.id,hiredYear:1930});
+    EmploymentSystem.end(World,contract.id,'resigned','left',1800);
+    const earlyEndedYear=contract.endedYear;
+    const contract2=EmploymentSystem.hire(World,{personId:'npc:extreme-end',businessId:b.id,hiredYear:1930});
+    EmploymentSystem.end(World,contract2.id,'resigned','left',1e20);
+    return JSON.stringify({earlyEndedYear,earlyValid:earlyEndedYear>=1930,extremeEndedYear:contract2.endedYear,extremeFinite:Number.isFinite(contract2.endedYear)});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.earlyValid);
+  assert.ok(parsed.extremeFinite);
+});
+
+test('payBusinessPayroll called with an extreme payment year bounds lastPaidYear',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.forSettlement(World,'branec')[0];
+    const contract=EmploymentSystem.hire(World,{personId:'npc:extreme-pay',businessId:b.id,annualSalary:1000});
+    EmploymentSystem.payBusinessPayroll(World,b.id,1e30);
+    return JSON.stringify({lastPaidYear:contract.lastPaidYear,finite:Number.isFinite(contract.lastPaidYear)});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.finite);
+});
+
+test('malformed/extreme world.year with omitted year fields still bounds hiredYear, endedYear, and lastPaidYear',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    World.year=Infinity;
+    const b=BusinessSystem.forSettlement(World,'branec')[0];
+    const contract=EmploymentSystem.create(World,{personId:'npc:no-year',businessId:b.id,status:'resigned'});
+    World.year=1930;
+    EmploymentSystem.payBusinessPayroll(World,b.id,undefined);
+    return JSON.stringify({hiredYear:contract.hiredYear,endedYear:contract.endedYear,allFinite:[contract.hiredYear,contract.endedYear].every(Number.isFinite)});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.allFinite);
+});
+
+test('malformed manually-injected contracts with huge but finite salaries never overflow payBusinessPayroll',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.forSettlement(World,'branec')[0];
+    World.employmentContracts['employment:00001']={id:'employment:00001',personId:'npc:whale-1',workerType:'npc',businessId:b.id,settlementId:b.settlementId,occupationType:'generic',occupationId:null,occupationName:'Worker',careerStage:null,jobTier:1,annualSalary:1e15,hiredYear:1930,endedYear:null,status:'active',terminationReason:null,performance:0.5,satisfaction:0.5,lastPaidYear:null,annualPaid:0,history:[]};
+    World.employmentContractCounter=1;
+    b.employeeIds=['npc:whale-1'];
+    World.employmentContracts['employment:00002']={id:'employment:00002',personId:'npc:whale-2',workerType:'npc',businessId:b.id,settlementId:b.settlementId,occupationType:'generic',occupationId:null,occupationName:'Worker',careerStage:null,jobTier:1,annualSalary:1e15,hiredYear:1930,endedYear:null,status:'active',terminationReason:null,performance:0.5,satisfaction:0.5,lastPaidYear:null,annualPaid:0,history:[]};
+    World.employmentContractCounter=2;
+    b.employeeIds.push('npc:whale-2');
+    const total=EmploymentSystem.payBusinessPayroll(World,b.id,1930);
+    const c1=World.employmentContracts['employment:00001'];
+    const c2=World.employmentContracts['employment:00002'];
+    return JSON.stringify({total,totalFinite:Number.isFinite(total),c1Salary:c1.annualSalary,c2Salary:c2.annualSalary,c1AnnualPaid:c1.annualPaid,c2AnnualPaid:c2.annualPaid,allFinite:[total,c1.annualSalary,c2.annualSalary,c1.annualPaid,c2.annualPaid].every(Number.isFinite)});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.totalFinite);
+  assert.ok(parsed.allFinite);
+  assert.ok(parsed.total<=1000000000);
+  assert.ok(parsed.c1Salary<=5000000);
+  assert.ok(parsed.c2Salary<=5000000);
+});
+
+test('checkInvariants stays clean after repairing manually-injected huge-salary contracts',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.forSettlement(World,'branec')[0];
+    World.employmentContracts['employment:00001']={id:'employment:00001',personId:'npc:whale',workerType:'npc',businessId:b.id,settlementId:b.settlementId,occupationType:'generic',occupationId:null,occupationName:'Worker',careerStage:null,jobTier:1,annualSalary:1e15,hiredYear:1930,endedYear:null,status:'active',terminationReason:null,performance:0.5,satisfaction:0.5,lastPaidYear:null,annualPaid:0,history:[]};
+    World.employmentContractCounter=1;
+    b.employeeIds=['npc:whale'];
+    EmploymentSystem.payBusinessPayroll(World,b.id,1930);
+    return JSON.stringify(EmploymentSystem.checkInvariants(World));
+  })()`);
+  assert.deepEqual(JSON.parse(result),[]);
 });

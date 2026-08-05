@@ -10,6 +10,7 @@
   const OCCUPATION_TYPES=['career','job','generic'];
 
   const MAX_SALARY=5000000;
+  const MAX_PAYROLL=1000000000;
   const MIN_YEAR=-5000;
   const MAX_YEAR=5000;
 
@@ -35,10 +36,11 @@
     return Math.min(MAX_SALARY,Math.round(n));
   };
   const boundedYear=(value,fallback)=>{
-    if(value==null||!Number.isFinite(Number(value))) return fallback;
+    const safeFallback=fallback!=null&&Number.isFinite(Number(fallback))?Math.max(MIN_YEAR,Math.min(MAX_YEAR,Math.round(Number(fallback)))):0;
+    if(value==null||!Number.isFinite(Number(value))) return safeFallback;
     return Math.max(MIN_YEAR,Math.min(MAX_YEAR,Math.round(Number(value))));
   };
-  const boundedYearOrNull=value=>value==null?null:boundedYear(value,null);
+  const boundedYearOrNull=value=>value==null||!Number.isFinite(Number(value))?null:boundedYear(value,0);
   const isValidCounter=value=>typeof value==='number'&&Number.isFinite(value)&&Number.isInteger(value)&&value>=0;
   const cloneEntry=entry=>entry&&typeof entry==='object'&&!Array.isArray(entry)?Object.assign({},entry):entry;
   const trimHistory=history=>Array.isArray(history)?history.slice(-HISTORY_LIMIT).map(cloneEntry):[];
@@ -98,10 +100,15 @@
     const careerStage=(spec.careerStage!=null&&Number.isFinite(Number(spec.careerStage))&&Number(spec.careerStage)>=0)?Math.round(Number(spec.careerStage)):null;
     const jobTier=clampInt(spec.jobTier,0,5,1);
     const annualSalary=boundedSalary(spec.annualSalary,0);
-    const currentYear=Math.round(finite(world.year,0));
+    const currentYear=boundedYear(world.year,0);
     const hiredYear=boundedYear(spec.hiredYear,currentYear);
     const status=CONTRACT_STATUSES.includes(spec.status)?spec.status:'active';
-    const endedYear=ACTIVE_STATUSES.has(status)?null:(boundedYearOrNull(spec.endedYear)!=null?boundedYearOrNull(spec.endedYear):boundedYear(currentYear,hiredYear));
+    let endedYear=null;
+    if(!ACTIVE_STATUSES.has(status)){
+      const suppliedEndedYear=boundedYearOrNull(spec.endedYear);
+      const candidateEndedYear=suppliedEndedYear!=null?suppliedEndedYear:currentYear;
+      endedYear=Math.max(candidateEndedYear,hiredYear);
+    }
     return {
       id,
       personId,
@@ -187,7 +194,8 @@
     if(!ACTIVE_STATUSES.has(contract.status)) return contract;
     const finalStatus=END_STATUSES.has(status)?status:'terminated';
     contract.status=finalStatus;
-    contract.endedYear=Number.isFinite(Number(year))?Math.round(Number(year)):Math.round(finite(world.year,contract.hiredYear));
+    const fallbackYear=boundedYear(world.year,contract.hiredYear);
+    contract.endedYear=Math.max(boundedYear(year,fallbackYear),contract.hiredYear);
     contract.terminationReason=reason!=null?String(reason):null;
     contract.history.push(cloneEntry({type:finalStatus,year:contract.endedYear,reason:contract.terminationReason}));
     contract.history=trimHistory(contract.history);
@@ -217,12 +225,14 @@
 
   function payBusinessPayroll(world,businessId,year){
     ensure(world);
-    const payYear=Number.isFinite(Number(year))?Math.round(Number(year)):Math.round(finite(world.year,0));
+    const payYear=boundedYear(year,boundedYear(world.year,0));
     const contracts=activeForBusiness(world,businessId);
     let total=0;
     contracts.forEach(contract=>{
-      total+=contract.annualSalary;
-      contract.annualPaid=contract.annualSalary;
+      const salary=boundedSalary(contract.annualSalary,0);
+      contract.annualSalary=salary;
+      total=Math.min(MAX_PAYROLL,total+salary);
+      contract.annualPaid=salary;
       contract.lastPaidYear=payYear;
     });
     return Math.round(total);
@@ -296,7 +306,7 @@
     });
     assignments.sort((a,b)=>a.finalId.localeCompare(b.finalId));
 
-    const year=Math.round(finite(world.year,0));
+    const year=boundedYear(world.year,0);
     const normalized={};
     assignments.forEach(({finalId,source})=>{
       const business=getBusiness(world,source.businessId);
@@ -313,7 +323,7 @@
       let endedYear=boundedYearOrNull(source.endedYear);
       let terminationReason=source.terminationReason!=null?String(source.terminationReason):null;
       if(ACTIVE_STATUSES.has(status)){ endedYear=null; terminationReason=null; }
-      else if(endedYear==null){ endedYear=year; }
+      else { endedYear=Math.max(endedYear!=null?endedYear:year,hiredYear); }
       normalized[finalId]={
         id:finalId,
         personId,
@@ -404,8 +414,8 @@
       if(c.careerStage!=null&&(typeof c.careerStage!=='number'||!Number.isInteger(c.careerStage)||c.careerStage<0)) issues.push('employment contract '+key+' has invalid careerStage');
       if(typeof c.jobTier!=='number'||!Number.isInteger(c.jobTier)||c.jobTier<0||c.jobTier>5) issues.push('employment contract '+key+' has invalid jobTier');
       if(typeof c.annualSalary!=='number'||!Number.isFinite(c.annualSalary)||c.annualSalary<0||c.annualSalary>MAX_SALARY) issues.push('employment contract '+key+' has invalid or out-of-bound annualSalary');
-      if(typeof c.hiredYear!=='number'||!Number.isFinite(c.hiredYear)||!Number.isInteger(c.hiredYear)) issues.push('employment contract '+key+' has invalid hiredYear');
-      if(c.endedYear!=null&&(typeof c.endedYear!=='number'||!Number.isFinite(c.endedYear)||!Number.isInteger(c.endedYear))) issues.push('employment contract '+key+' has invalid endedYear');
+      if(typeof c.hiredYear!=='number'||!Number.isFinite(c.hiredYear)||!Number.isInteger(c.hiredYear)||c.hiredYear<MIN_YEAR||c.hiredYear>MAX_YEAR) issues.push('employment contract '+key+' has invalid or out-of-bound hiredYear');
+      if(c.endedYear!=null&&(typeof c.endedYear!=='number'||!Number.isFinite(c.endedYear)||!Number.isInteger(c.endedYear)||c.endedYear<MIN_YEAR||c.endedYear>MAX_YEAR)) issues.push('employment contract '+key+' has invalid or out-of-bound endedYear');
       if(c.endedYear!=null&&typeof c.hiredYear==='number'&&c.endedYear<c.hiredYear) issues.push('employment contract '+key+' has endedYear before hiredYear');
       if(!CONTRACT_STATUSES.includes(c.status)) issues.push('employment contract '+key+' has invalid status: '+c.status);
       else {
@@ -416,7 +426,7 @@
       if(typeof c.performance!=='number'||!Number.isFinite(c.performance)||c.performance<0||c.performance>1) issues.push('employment contract '+key+' has invalid performance');
       if(typeof c.satisfaction!=='number'||!Number.isFinite(c.satisfaction)||c.satisfaction<0||c.satisfaction>1) issues.push('employment contract '+key+' has invalid satisfaction');
       if(typeof c.annualPaid!=='number'||!Number.isFinite(c.annualPaid)||c.annualPaid<0||c.annualPaid>MAX_SALARY) issues.push('employment contract '+key+' has invalid or out-of-bound annualPaid');
-      if(c.lastPaidYear!=null&&(typeof c.lastPaidYear!=='number'||!Number.isFinite(c.lastPaidYear)||!Number.isInteger(c.lastPaidYear))) issues.push('employment contract '+key+' has invalid lastPaidYear');
+      if(c.lastPaidYear!=null&&(typeof c.lastPaidYear!=='number'||!Number.isFinite(c.lastPaidYear)||!Number.isInteger(c.lastPaidYear)||c.lastPaidYear<MIN_YEAR||c.lastPaidYear>MAX_YEAR)) issues.push('employment contract '+key+' has invalid or out-of-bound lastPaidYear');
       if(!Array.isArray(c.history)) issues.push('employment contract '+key+' history must be an array');
       else if(c.history.length>HISTORY_LIMIT) issues.push('employment contract '+key+' history exceeds limit of '+HISTORY_LIMIT);
       if(ACTIVE_STATUSES.has(c.status)){
@@ -489,6 +499,19 @@
     return settlementId;
   }
 
+  const SECTOR_FALLBACK_LABEL={
+    agriculture:'Agricultural Placement Office',
+    manufacturing:'Industrial Placement Office',
+    construction:'Construction Placement Office',
+    transport:'Transport Placement Office',
+    retail:'Retail Placement Office',
+    finance:'Finance Placement Office',
+    healthcare:'Healthcare Placement Office',
+    education:'Education Placement Office',
+    government:'Civil Placement Office',
+    professional:'Employment Bureau'
+  };
+
   function chooseEmployer(world,personId,settlementId,occupationType,occupationId,sectors){
     if(!root.BusinessSystem) return null;
     const inSettlement=root.BusinessSystem.forSettlement(world,settlementId).filter(b=>b.status!=='closed');
@@ -498,12 +521,16 @@
       const idx=deterministicIndex(key,compatible.length);
       return compatible[idx];
     }
-    const activeSorted=inSettlement.slice().sort((a,b)=>a.id.localeCompare(b.id));
-    if(activeSorted.length) return activeSorted[0];
-    const name=settlementNameOf(settlementId)+' Employment Bureau';
-    const existingBureau=root.BusinessSystem.forSettlement(world,settlementId).find(b=>b.name===name);
-    if(existingBureau) return existingBureau;
-    return root.BusinessSystem.create(world,{settlementId,sector:'professional',name});
+    const primarySector=sectors[0];
+    const fallbackName=settlementNameOf(settlementId)+' '+(SECTOR_FALLBACK_LABEL[primarySector]||'Employment Bureau');
+    const existingFallback=inSettlement.find(b=>b.name===fallbackName&&b.sector===primarySector);
+    if(existingFallback) return existingFallback;
+    const maxPerSettlement=Number.isFinite(root.BusinessSystem.MAX_BUSINESSES_PER_SETTLEMENT)?root.BusinessSystem.MAX_BUSINESSES_PER_SETTLEMENT:12;
+    if(inSettlement.length<maxPerSettlement){
+      return root.BusinessSystem.create(world,{settlementId,sector:primarySector,name:fallbackName});
+    }
+    const stableSorted=inSettlement.slice().sort((a,b)=>a.id.localeCompare(b.id));
+    return stableSorted.length?stableSorted[0]:null;
   }
 
   function occupationIdsMatch(a,b){
@@ -518,15 +545,16 @@
     if(!occupationIdsMatch(existing.occupationId,descriptor.occupationId)) return false;
     const business=getBusiness(world,existing.businessId);
     if(!business||business.status==='closed') return false;
-    if(!sectors.includes(business.sector)) return false;
-    return true;
+    if(sectors.includes(business.sector)) return true;
+    const candidate=chooseEmployer(world,String(descriptor.personId),descriptor.settlementId,descriptor.occupationType,descriptor.occupationId,sectors);
+    return !!candidate&&candidate.id===business.id;
   }
 
   function reconcilePerson(world,descriptor,options){
     ensure(world);
     const opts=options||{};
     const personId=String(descriptor.personId);
-    const year=Number.isFinite(Number(descriptor.year))?Math.round(Number(descriptor.year)):Math.round(finite(world.year,0));
+    const year=boundedYear(descriptor.year,boundedYear(world.year,0));
     let existing=activeForPerson(world,personId)[0]||null;
     if(!descriptor.employed){
       if(existing) endInternal(world,existing,'resigned',opts.unemployedReason||'legacy_unemployed',year);
@@ -602,7 +630,7 @@
     Object.keys(world.npcs).sort().forEach(id=>{
       const npc=world.npcs[id];
       if(!npc||npc.isSubject) return;
-      const year=Math.round(finite(world.year,0));
+      const year=boundedYear(world.year,0);
       if(npc.alive===false){
         const existing=activeForPerson(world,id)[0];
         if(existing) endInternal(world,existing,'terminated','npc_deceased',year);

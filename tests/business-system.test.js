@@ -755,15 +755,119 @@ test('repeated same-year ticks and sequential fast-forward years remain determin
     WorldSimulation.migrate(World);
     const b=BusinessSystem.create(World,{settlementId:'branec',sector:'retail'});
     BusinessSystem.tickBusiness(World,b,{year:1930});
+    const afterFirstTick=JSON.stringify(b.finances);
+    const historyAfterFirstTick=b.history.length;
     BusinessSystem.tickBusiness(World,b,{year:1930});
+    const afterSecondTick=JSON.stringify(b.finances);
+    const historyAfterSecondTick=b.history.length;
     BusinessSystem.tickBusiness(World,b,{year:1930});
-    const afterRepeats=JSON.stringify(b.finances);
+    const afterThirdTick=JSON.stringify(b.finances);
+    const historyAfterThirdTick=b.history.length;
     for(let year=1931;year<1935;year++) BusinessSystem.tickBusiness(World,b,{year});
     const historyYears=b.history.filter(h=>h.type==='annual_finance').map(h=>h.year);
     const uniqueYears=new Set(historyYears).size===historyYears.length;
-    return JSON.stringify({repeatUnchanged:afterRepeats===JSON.stringify(b.finances)||true,uniqueYears,historyYears});
+    return JSON.stringify({
+      repeatsMatch:afterFirstTick===afterSecondTick&&afterSecondTick===afterThirdTick,
+      historyUnchangedByRepeats:historyAfterFirstTick===historyAfterSecondTick&&historyAfterSecondTick===historyAfterThirdTick,
+      uniqueYears,historyYears
+    });
   })()`);
   const parsed=JSON.parse(result);
+  assert.ok(parsed.repeatsMatch);
+  assert.ok(parsed.historyUnchangedByRepeats);
   assert.ok(parsed.uniqueYears);
   assert.deepEqual(parsed.historyYears,[1930,1931,1932,1933,1934]);
+});
+
+test('a fractional or extreme foundedYear is repaired to a bounded integer or null',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['business:00001']={id:'business:00001',name:'Old Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920.7,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businesses['business:00002']={id:'business:00002',name:'Ancient Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1e30,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businessCounter=2;
+    BusinessSystem.migrate(World,[]);
+    const a=World.businesses['business:00001'], b=World.businesses['business:00002'];
+    return JSON.stringify({aFoundedYear:a.foundedYear,bFoundedYear:b.foundedYear,invariants:BusinessSystem.checkInvariants(World)});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.aFoundedYear,1921);
+  assert.ok(Number.isFinite(parsed.bFoundedYear));
+  assert.deepEqual(parsed.invariants,[]);
+});
+
+test('a null lastTickYear with a non-null finances.lastYear is reconciled, not left out of sync',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['business:00001']={id:'business:00001',name:'Half Synced Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:1928},lastTickYear:null,history:[]};
+    World.businessCounter=1;
+    BusinessSystem.migrate(World,[]);
+    const record=World.businesses['business:00001'];
+    return JSON.stringify({lastTickYear:record.lastTickYear,financesLastYear:record.finances.lastYear,invariants:BusinessSystem.checkInvariants(World)});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.lastTickYear,1928);
+  assert.equal(parsed.financesLastYear,1928);
+  assert.deepEqual(parsed.invariants,[]);
+});
+
+test('checkInvariants flags a one-null one-non-null lastTickYear/finances.lastYear pair as out of sync',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['business:00001']={id:'business:00001',name:'Forced Desync Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:1928},lastTickYear:null,history:[]};
+    World.businessCounter=1;
+    return JSON.stringify(BusinessSystem.checkInvariants(World));
+  })()`);
+  const issues=JSON.parse(result);
+  assert.ok(issues.some(msg=>/out of sync/i.test(msg)));
+});
+
+test('close() repairs a non-null malformed closedYear (fractional, infinite, or string)',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    WorldSimulation.migrate(World);
+    const a=BusinessSystem.create(World,{settlementId:'branec',sector:'retail'});
+    a.closedYear='1928.9';
+    BusinessSystem.close(World,a.id,'insolvency',1930);
+    const b=BusinessSystem.create(World,{settlementId:'branec',sector:'retail'});
+    b.closedYear=Infinity;
+    BusinessSystem.close(World,b.id,'insolvency',1930);
+    return JSON.stringify({aClosedYear:a.closedYear,bClosedYear:b.closedYear,aFinite:Number.isFinite(a.closedYear),bFinite:Number.isFinite(b.closedYear)});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.aClosedYear,1929);
+  assert.ok(parsed.bFinite);
+});
+
+test('close() uses bounded normalization when falling back to an extreme world.year',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    WorldSimulation.migrate(World);
+    World.year=1e30;
+    const b=BusinessSystem.create(World,{settlementId:'branec',sector:'retail'});
+    BusinessSystem.close(World,b.id,'insolvency');
+    return JSON.stringify({closedYear:b.closedYear,finite:Number.isFinite(b.closedYear)});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.finite);
+});
+
+test('all closure repair cases remain idempotent on repeated close() calls',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    WorldSimulation.migrate(World);
+    const a=BusinessSystem.create(World,{settlementId:'branec',sector:'retail'});
+    a.closedYear='1928.9';
+    BusinessSystem.close(World,a.id,'insolvency',1930);
+    const first=JSON.stringify(a);
+    BusinessSystem.close(World,a.id,'insolvency',1935);
+    BusinessSystem.close(World,a.id,'insolvency',1940);
+    const second=JSON.stringify(a);
+    return JSON.stringify({equal:first===second,closureEntries:a.history.filter(h=>h.type==='closed').length});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.equal);
+  assert.equal(parsed.closureEntries,1);
 });
