@@ -199,6 +199,19 @@
     return unique;
   }
 
+  function payBusinessPayroll(world,businessId,year){
+    ensure(world);
+    const payYear=Number.isFinite(Number(year))?Math.round(Number(year)):Math.round(finite(world.year,0));
+    const contracts=activeForBusiness(world,businessId);
+    let total=0;
+    contracts.forEach(contract=>{
+      total+=contract.annualSalary;
+      contract.annualPaid=contract.annualSalary;
+      contract.lastPaidYear=payYear;
+    });
+    return Math.round(total);
+  }
+
   function syncAllBusinessEmployees(world){
     ensure(world);
     if(!root.BusinessSystem||typeof root.BusinessSystem.all!=='function') return;
@@ -600,6 +613,7 @@
     activeForBusiness,
     hire,
     end,
+    payBusinessPayroll,
     syncBusinessEmployees,
     syncAllBusinessEmployees,
     reconcilePerson,

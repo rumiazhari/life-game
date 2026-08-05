@@ -38,10 +38,46 @@
 
   const SEED_SECTOR_ORDER=['agriculture','retail','transport','manufacturing','construction','healthcare','education','finance','professional','government'];
 
+  const SECTOR_BASE_REVENUE={
+    agriculture:10500,
+    manufacturing:18000,
+    construction:16500,
+    transport:13000,
+    retail:12500,
+    finance:22000,
+    healthcare:14500,
+    education:12000,
+    government:13500,
+    professional:17500
+  };
+
+  const SECTOR_OPERATING_RATIO={
+    agriculture:0.42,
+    manufacturing:0.50,
+    construction:0.46,
+    transport:0.44,
+    retail:0.38,
+    finance:0.30,
+    healthcare:0.48,
+    education:0.44,
+    government:0.46,
+    professional:0.32
+  };
+
   const finite=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
+  const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 
   function isValidCounter(value){
     return typeof value==='number'&&Number.isFinite(value)&&Number.isInteger(value)&&value>=0;
+  }
+
+  function nonNegInt(value,fallback){
+    if(value==null||!Number.isFinite(Number(value))) return fallback;
+    const n=Math.round(Number(value));
+    return n>=0?n:fallback;
+  }
+  function finiteIntOrNull(value){
+    return value!=null&&Number.isFinite(Number(value))?Math.round(Number(value)):null;
   }
 
   function populationOf(settlement){
@@ -152,11 +188,13 @@
     return world;
   }
 
-  function normalizeRecord(id,record,settlementId){
+  function normalizeRecord(id,record,settlementId,year){
     const sector=SECTOR_SET.has(record&&record.sector)?record.sector:'professional';
     const kind=KINDS.includes(record&&record.kind)?record.kind:defaultKindForSector(sector);
     const status=STATUSES.includes(record&&record.status)?record.status:'active';
     const history=Array.isArray(record&&record.history)?record.history.slice(-HISTORY_LIMIT):[];
+    let closedYear=finiteIntOrNull(record&&record.closedYear);
+    if(status==='closed'){ if(closedYear==null) closedYear=finiteIntOrNull(year); } else closedYear=null;
     return {
       id,
       name:typeof (record&&record.name)==='string'&&record.name?record.name:id,
@@ -170,6 +208,9 @@
       employeeIds:uniqueStringArray(record&&record.employeeIds),
       vacancies:uniqueVacancies(record&&record.vacancies),
       finances:normalizeFinances(record&&record.finances),
+      lastTickYear:finiteIntOrNull(record&&record.lastTickYear),
+      strugglingYears:nonNegInt(record&&record.strugglingYears,0),
+      closedYear,
       history
     };
   }
@@ -195,6 +236,9 @@
       employeeIds:uniqueStringArray(spec.employeeIds),
       vacancies:uniqueVacancies(spec.vacancies).map(v=>v&&typeof v==='object'?Object.assign({},v):v),
       finances:normalizeFinances(spec.finances),
+      lastTickYear:finiteIntOrNull(spec.lastTickYear),
+      strugglingYears:nonNegInt(spec.strugglingYears,0),
+      closedYear:STATUSES.includes(spec.status)&&spec.status==='closed'?finiteIntOrNull(spec.closedYear!=null?spec.closedYear:world.year):null,
       history:Array.isArray(spec.history)?spec.history.slice(-HISTORY_LIMIT).map(h=>h&&typeof h==='object'?Object.assign({},h):h):[]
     };
     world.businesses[id]=record;
@@ -329,9 +373,10 @@
       assignments.push({finalId,record});
     });
     assignments.sort((a,b)=>a.finalId.localeCompare(b.finalId));
+    const migrationYear=Math.round(finite(world.year,0));
     const normalized={};
     assignments.forEach(({finalId,record})=>{
-      normalized[finalId]=normalizeRecord(finalId,record,record.settlementId);
+      normalized[finalId]=normalizeRecord(finalId,record,record.settlementId,migrationYear);
     });
     world.businesses=normalized;
     const defs=Array.isArray(settlementDefinitions)?settlementDefinitions:[];
@@ -341,6 +386,183 @@
     if(world.businessCounter<highest) world.businessCounter=highest;
     world.businessSchemaVersion=SCHEMA_VERSION;
     return world;
+  }
+
+  function businessScaleFor(activeEmployees,population){
+    const employeeScale=Math.min(1,activeEmployees/20);
+    const populationScale=Math.min(1,Math.log10(Math.max(10,population))/6);
+    return clamp(0.20+employeeScale*0.45+populationScale*0.35,0.20,1.00);
+  }
+
+  function financeInputs(world,business){
+    ensure(world);
+    const runtime=root.WorldSimulation&&typeof root.WorldSimulation.getSettlementState==='function'?root.WorldSimulation.getSettlementState(world,business.settlementId):null;
+    const economy=runtime&&runtime.economy||{};
+    const security=runtime&&runtime.security||{};
+    const demographics=runtime&&runtime.demographics||{};
+    const employmentIndex=finite(economy.employmentIndex,0.5);
+    const wageIndex=finite(economy.wageIndex,1);
+    const rentIndex=finite(economy.rentIndex,1);
+    const foodPriceIndex=finite(economy.foodPriceIndex,1);
+    const sectorDemand=economy.industryDemand&&economy.industryDemand[business.demandGroup]!=null?finite(economy.industryDemand[business.demandGroup],0.5):0.5;
+    const population=finite(demographics.population,0);
+    const unrest=finite(security.unrest,0);
+    const checkpointPressure=finite(security.checkpointPressure,0);
+    const publicHealthPressure=runtime&&root.PublicHealth&&typeof root.PublicHealth.pressure==='function'?finite(root.PublicHealth.pressure(runtime),0):0;
+    const activeContracts=root.EmploymentSystem&&typeof root.EmploymentSystem.activeForBusiness==='function'?root.EmploymentSystem.activeForBusiness(world,business.id):[];
+    const activeEmployees=activeContracts.length;
+    const annualPayroll=activeContracts.reduce((sum,c)=>sum+finite(c.annualSalary,0),0);
+    return {
+      year:Math.round(finite(world.year,0)),
+      employmentIndex,wageIndex,rentIndex,foodPriceIndex,sectorDemand,population,unrest,checkpointPressure,publicHealthPressure,
+      activeEmployees,annualPayroll,
+      businessScale:businessScaleFor(activeEmployees,population)
+    };
+  }
+
+  function calculateAnnualResult(world,business,options){
+    const opts=options||{};
+    const year=Number.isFinite(Number(opts.year))?Math.round(Number(opts.year)):Math.round(finite(world.year,0));
+    const inputs=financeInputs(world,business);
+    const stream=root.WorldSimulation.streamFor(world,year,business.id,'business-finance');
+    const variation=0.92+stream.next()*0.16;
+    const sectorBase=SECTOR_BASE_REVENUE[business.sector]||SECTOR_BASE_REVENUE.professional;
+    const demandFactor=0.55+inputs.sectorDemand*0.70;
+    const employmentFactor=0.70+inputs.employmentIndex*0.45;
+    const stabilityFactor=1-inputs.unrest*0.30-inputs.checkpointPressure*0.12;
+    const healthFactor=1-inputs.publicHealthPressure*0.18;
+    const grossRevenue=sectorBase*inputs.businessScale*demandFactor*employmentFactor*Math.max(0.35,stabilityFactor)*Math.max(0.55,healthFactor)*variation;
+    const revenue=Math.max(0,Math.round(grossRevenue));
+    const payroll=Math.round(inputs.annualPayroll);
+    const ratio=SECTOR_OPERATING_RATIO[business.sector]||SECTOR_OPERATING_RATIO.professional;
+    const fixedCost=900*inputs.businessScale*inputs.rentIndex;
+    const variableCost=revenue*ratio*(0.80+inputs.foodPriceIndex*0.20);
+    const expenses=Math.max(0,Math.round(fixedCost+variableCost));
+    const profit=revenue-expenses-payroll;
+    const startingCash=Math.max(0,finite(business.finances.cash,0));
+    const startingDebt=Math.max(0,finite(business.finances.debt,0));
+    let cash=startingCash, debt=startingDebt;
+    if(profit>=0){
+      cash+=profit;
+      const repay=Math.min(debt,Math.floor(profit*0.35));
+      cash-=repay; debt-=repay;
+    } else {
+      const loss=-profit;
+      const fromCash=Math.min(cash,loss);
+      cash-=fromCash;
+      debt+=(loss-fromCash);
+    }
+    cash=Math.max(0,Math.round(cash));
+    debt=Math.max(0,Math.round(debt));
+    return {year,revenue,expenses,payroll,profit:Math.round(profit),cash,debt,variation,inputs};
+  }
+
+  function close(world,businessId,reason,year){
+    ensure(world);
+    const business=get(world,businessId);
+    if(!business) return null;
+    if(business.status==='closed') return business;
+    const closeYear=Number.isFinite(Number(year))?Math.round(Number(year)):Math.round(finite(world.year,business.closedYear||0));
+    business.status='closed';
+    business.closedYear=closeYear;
+    business.history=business.history.slice(-HISTORY_LIMIT+1);
+    business.history.push({type:'closed',year:closeYear,reason:reason||'insolvency'});
+    if(root.EmploymentSystem&&typeof root.EmploymentSystem.activeForBusiness==='function'){
+      root.EmploymentSystem.activeForBusiness(world,businessId).forEach(contract=>{
+        root.EmploymentSystem.end(world,contract.id,'terminated','business_closed',closeYear);
+      });
+    }
+    business.employeeIds=[];
+    business.vacancies=[];
+    return business;
+  }
+
+  function tickBusiness(world,business,options){
+    ensure(world);
+    const opts=options||{};
+    const year=Number.isFinite(Number(opts.year))?Math.round(Number(opts.year)):Math.round(finite(world.year,0));
+    if(business.lastTickYear===year) return {applied:false,reason:'already_applied',businessId:business.id,year};
+    if(business.lastTickYear!=null&&year<business.lastTickYear) return {applied:false,reason:'stale_year',businessId:business.id,year};
+    if(business.status==='closed') return {applied:false,reason:'closed',businessId:business.id,year};
+
+    if(root.EmploymentSystem&&typeof root.EmploymentSystem.payBusinessPayroll==='function'){
+      root.EmploymentSystem.payBusinessPayroll(world,business.id,year);
+    }
+    const result=calculateAnnualResult(world,business,{year});
+    business.finances.revenue=result.revenue;
+    business.finances.expenses=result.expenses;
+    business.finances.payroll=result.payroll;
+    business.finances.profit=result.profit;
+    business.finances.cash=result.cash;
+    business.finances.debt=result.debt;
+    business.finances.lastYear=year;
+    business.lastTickYear=year;
+
+    const debtStruggleThreshold=Math.max(5000,result.revenue*1.5);
+    const strugglingNow=result.profit<0||result.debt>debtStruggleThreshold;
+    if(strugglingNow){
+      business.status='struggling';
+      business.strugglingYears=(business.strugglingYears||0)+1;
+    } else {
+      business.status='active';
+      business.strugglingYears=0;
+    }
+
+    business.history=business.history.slice(-HISTORY_LIMIT+1);
+    business.history.push({type:'annual_finance',year,revenue:result.revenue,expenses:result.expenses,payroll:result.payroll,profit:result.profit,cash:result.cash,debt:result.debt,status:business.status});
+
+    const closureDebtThreshold=Math.max(10000,result.revenue*2.25);
+    if(business.strugglingYears>=3&&business.finances.debt>closureDebtThreshold&&business.finances.cash<=0){
+      close(world,business.id,'insolvency',year);
+    }
+
+    return {applied:true,businessId:business.id,year,revenue:business.finances.revenue,expenses:business.finances.expenses,payroll:business.finances.payroll,profit:business.finances.profit,status:business.status};
+  }
+
+  function tickSettlement(world,settlementId,options){
+    ensure(world);
+    const list=forSettlement(world,settlementId).slice().sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+    const opts=options||{};
+    const year=Number.isFinite(Number(opts.year))?Math.round(Number(opts.year)):Math.round(finite(world.year,0));
+    const totals={year,applied:0,skipped:0,closed:0,revenue:0,expenses:0,payroll:0,profit:0};
+    list.forEach(business=>{
+      const before=business.status;
+      const result=tickBusiness(world,business,{year});
+      if(result.applied){
+        totals.applied++;
+        totals.revenue+=business.finances.revenue;
+        totals.expenses+=business.finances.expenses;
+        totals.payroll+=business.finances.payroll;
+        totals.profit+=business.finances.profit;
+        if(business.status==='closed'&&before!=='closed') totals.closed++;
+      } else totals.skipped++;
+    });
+    return totals;
+  }
+
+  function tickWorld(world,options){
+    ensure(world);
+    const defs=root.WorldSimulation&&typeof root.WorldSimulation.definitions==='function'?root.WorldSimulation.definitions(world):[];
+    migrate(world,defs);
+    if(root.EmploymentSystem&&typeof root.EmploymentSystem.migrate==='function') root.EmploymentSystem.migrate(world);
+    const opts=options||{};
+    const year=Number.isFinite(Number(opts.year))?Math.round(Number(opts.year)):Math.round(finite(world.year,0));
+    const list=all(world).slice().sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+    const totals={year,applied:0,skipped:0,closed:0,revenue:0,expenses:0,payroll:0,profit:0};
+    list.forEach(business=>{
+      const before=business.status;
+      const result=tickBusiness(world,business,{year});
+      if(result.applied){
+        totals.applied++;
+        totals.revenue+=business.finances.revenue;
+        totals.expenses+=business.finances.expenses;
+        totals.payroll+=business.finances.payroll;
+        totals.profit+=business.finances.profit;
+        if(business.status==='closed'&&before!=='closed') totals.closed++;
+      } else totals.skipped++;
+    });
+    if(root.EmploymentSystem&&typeof root.EmploymentSystem.syncAllBusinessEmployees==='function') root.EmploymentSystem.syncAllBusinessEmployees(world);
+    return totals;
   }
 
   function checkInvariants(world){
@@ -377,9 +599,24 @@
         });
         const lastYear=business.finances.lastYear;
         if(lastYear!=null&&(typeof lastYear!=='number'||!Number.isFinite(lastYear))) issues.push('business '+key+' has invalid finances.lastYear');
+        if(typeof business.finances.cash==='number'&&business.finances.cash<0) issues.push('business '+key+' has negative finances.cash');
+        if(typeof business.finances.debt==='number'&&business.finances.debt<0) issues.push('business '+key+' has negative finances.debt');
+        if(business.lastTickYear!=null&&lastYear!=null&&business.lastTickYear!==lastYear) issues.push('business '+key+' lastTickYear does not match finances.lastYear');
       }
       if(!Array.isArray(business.history)) issues.push('business '+key+' history must be an array');
       else if(business.history.length>HISTORY_LIMIT) issues.push('business '+key+' history exceeds limit of '+HISTORY_LIMIT);
+      if(business.lastTickYear!=null&&(typeof business.lastTickYear!=='number'||!Number.isFinite(business.lastTickYear)||!Number.isInteger(business.lastTickYear))) issues.push('business '+key+' has invalid lastTickYear');
+      if(typeof business.strugglingYears!=='number'||!Number.isFinite(business.strugglingYears)||business.strugglingYears<0||!Number.isInteger(business.strugglingYears)) issues.push('business '+key+' has invalid strugglingYears');
+      if(business.closedYear!=null&&(typeof business.closedYear!=='number'||!Number.isFinite(business.closedYear)||!Number.isInteger(business.closedYear))) issues.push('business '+key+' has invalid closedYear');
+      if(business.status==='closed'){
+        if(business.closedYear==null) issues.push('business '+key+' is closed but missing closedYear');
+        if(Array.isArray(business.employeeIds)&&business.employeeIds.length>0) issues.push('business '+key+' is closed but still has employeeIds');
+        if(root.EmploymentSystem&&typeof root.EmploymentSystem.activeForBusiness==='function'&&root.EmploymentSystem.activeForBusiness(world,business.id).length>0){
+          issues.push('business '+key+' is closed but has active employment contracts');
+        }
+      } else if(business.closedYear!=null){
+        issues.push('business '+key+' is not closed but has a closedYear');
+      }
       if(business.settlementId){
         perSettlementCount[business.settlementId]=(perSettlementCount[business.settlementId]||0)+1;
       }
@@ -396,6 +633,7 @@
   root.BusinessSystem={
     SECTORS,
     SCHEMA_VERSION,
+    MAX_BUSINESSES_PER_SETTLEMENT,
     ensure,
     migrate,
     create,
@@ -405,6 +643,12 @@
     seedSettlement,
     seedWorld,
     summary,
-    checkInvariants
+    checkInvariants,
+    financeInputs,
+    calculateAnnualResult,
+    tickBusiness,
+    tickSettlement,
+    tickWorld,
+    close
   };
 })(typeof globalThis!=='undefined'?globalThis:this);

@@ -606,6 +606,41 @@ test('reserving existing IDs before allocation keeps migration byte-for-byte ide
   assert.ok(parsed.counterEqual);
 });
 
+test('migration repairs new finance-tracking fields (lastTickYear, strugglingYears, closedYear)',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['business:00001']={id:'business:00001',name:'Legacy Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},lastTickYear:'oops',strugglingYears:-4,closedYear:'nope',history:[]};
+    World.businessCounter=1;
+    BusinessSystem.migrate(World,[]);
+    const record=World.businesses['business:00001'];
+    return JSON.stringify({lastTickYear:record.lastTickYear,strugglingYears:record.strugglingYears,closedYear:record.closedYear});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.lastTickYear,null);
+  assert.equal(parsed.strugglingYears,0);
+  assert.equal(parsed.closedYear,null);
+});
+
+test('migration preserves closedYear for closed businesses and is idempotent',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['business:00001']={id:'business:00001',name:'Shuttered Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'closed',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:500,revenue:0,expenses:0,payroll:0,profit:0,lastYear:1929},lastTickYear:1929,strugglingYears:3,closedYear:1929,history:[]};
+    World.businessCounter=1;
+    BusinessSystem.migrate(World,[]);
+    const first=JSON.stringify(World.businesses);
+    BusinessSystem.migrate(World,[]);
+    const second=JSON.stringify(World.businesses);
+    const record=World.businesses['business:00001'];
+    return JSON.stringify({closedYear:record.closedYear,debt:record.finances.debt,equal:first===second});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.closedYear,1929);
+  assert.equal(parsed.debt,500);
+  assert.ok(parsed.equal);
+});
+
 test('checkInvariants rejects null, empty-string, and numeric-string finance values',()=>{
   const context=freshWorld();
   const result=expose(context,`(function(){

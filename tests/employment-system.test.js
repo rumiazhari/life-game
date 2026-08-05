@@ -412,3 +412,25 @@ test('checkInvariants detects multiple active contracts for the same person',()=
   const issues=JSON.parse(result);
   assert.ok(issues.some(msg=>/multiple active/i.test(msg)));
 });
+
+test('payBusinessPayroll pays every active and on_leave contract and is idempotent within a year',()=>{
+  const context=migratedWorld();
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.forSettlement(World,'branec')[0];
+    const a=EmploymentSystem.hire(World,{personId:'npc:a',businessId:b.id,annualSalary:1000});
+    const c=EmploymentSystem.hire(World,{personId:'npc:c',businessId:b.id,annualSalary:800});
+    c.status='on_leave';
+    const d=EmploymentSystem.hire(World,{personId:'npc:d',businessId:b.id,annualSalary:400});
+    EmploymentSystem.end(World,d.id,'resigned','left',1930);
+    const first=EmploymentSystem.payBusinessPayroll(World,b.id,1930);
+    const second=EmploymentSystem.payBusinessPayroll(World,b.id,1930);
+    return JSON.stringify({first,second,aPaid:a.annualPaid,aYear:a.lastPaidYear,cPaid:c.annualPaid,dPaid:d.annualPaid});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.first,1800);
+  assert.equal(parsed.second,1800);
+  assert.equal(parsed.aPaid,1000);
+  assert.equal(parsed.aYear,1930);
+  assert.equal(parsed.cPaid,800);
+  assert.equal(parsed.dPaid,0);
+});

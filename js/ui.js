@@ -2306,6 +2306,10 @@ function runHoldTick(){
   const alive=livingHoldMembers();
   if(alive.length){ const avgLoy=alive.reduce((a,m)=>a+holdLoyalty(m),0)/alive.length; Hold.trust=clamp(Math.round(Hold.trust*0.95+avgLoy*0.05),0,100); }
 }
+function runBusinessYearTick(){
+  if(typeof BusinessSystem!=='object'||!BusinessSystem||typeof BusinessSystem.tickWorld!=='function') return null;
+  return BusinessSystem.tickWorld(World,{year:World.year});
+}
 function advanceYear(suppressBurst,quiet){
   if(!S||!S.alive||slipOpen) return;
   if(S.age>0) evaluateYearStreak(quiet);
@@ -2399,6 +2403,7 @@ function advanceYear(suppressBurst,quiet){
     if(typeof EmploymentSystem.reconcileNpcs==='function') EmploymentSystem.reconcileNpcs(World);
     if(typeof EmploymentSystem.syncAllBusinessEmployees==='function') EmploymentSystem.syncAllBusinessEmployees(World);
   }
+  runBusinessYearTick();
   guardianTeachTick();
   guardianAmbientTick();
   guardianIncidentTick();
