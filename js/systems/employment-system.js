@@ -709,6 +709,9 @@
     reconcilePlayer,
     reconcileNpcs,
     summary,
-    checkInvariants
+    checkInvariants,
+    sectorsForCareer,
+    sectorForJobName,
+    normalizedJobSlug
   };
 })(typeof globalThis!=='undefined'?globalThis:this);

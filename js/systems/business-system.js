@@ -525,6 +525,9 @@
         root.EmploymentSystem.end(world,contract.id,'terminated','business_closed',business.closedYear);
       });
     }
+    if(root.VacancySystem&&typeof root.VacancySystem.withdrawForBusiness==='function'){
+      root.VacancySystem.withdrawForBusiness(world,businessId,'business_closed',business.closedYear);
+    }
     business.employeeIds=[];
     business.vacancies=[];
     return business;
