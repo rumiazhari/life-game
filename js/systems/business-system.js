@@ -289,8 +289,20 @@
     ensure(world);
 
     const rawKeys=Object.keys(world.businesses).sort();
-    const normalized={};
+    let reserveHighest=0;
+    rawKeys.forEach(key=>{
+      const raw=world.businesses[key];
+      const keyNum=businessIdNumber(key);
+      if(keyNum!=null) reserveHighest=Math.max(reserveHighest,keyNum);
+      if(raw&&typeof raw==='object'&&!Array.isArray(raw)){
+        const idNum=businessIdNumber(raw.id);
+        if(idNum!=null) reserveHighest=Math.max(reserveHighest,idNum);
+      }
+    });
+    if(world.businessCounter<reserveHighest) world.businessCounter=reserveHighest;
+
     const usedIds=new Set();
+    const assignments=[];
 
     function allocateId(){
       let candidate;
@@ -314,6 +326,11 @@
         finalId=allocateId();
       }
       usedIds.add(finalId);
+      assignments.push({finalId,record});
+    });
+    assignments.sort((a,b)=>a.finalId.localeCompare(b.finalId));
+    const normalized={};
+    assignments.forEach(({finalId,record})=>{
       normalized[finalId]=normalizeRecord(finalId,record,record.settlementId);
     });
     world.businesses=normalized;

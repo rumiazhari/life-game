@@ -536,6 +536,76 @@ test('migration of legacy non-object entries is byte-for-byte idempotent',()=>{
   assert.ok(parsed.counterEqual);
 });
 
+test('a malformed key sorting before business:00001 does not steal that ID from a valid record',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['aaa-malformed']={id:'not-a-valid-id',name:'Malformed Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businesses['business:00001']={id:'business:00001',name:'Valid Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    BusinessSystem.migrate(World,[]);
+    const valid=Object.values(World.businesses).find(b=>b.name==='Valid Co');
+    const malformed=Object.values(World.businesses).find(b=>b.name==='Malformed Co');
+    return JSON.stringify({validId:valid.id,malformedId:malformed.id});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.validId,'business:00001');
+  assert.equal(parsed.malformedId,'business:00002');
+});
+
+test('a future valid ID present only in record.id is reserved before allocation',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['aaa-malformed']={id:'not-a-valid-id',name:'Malformed Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businesses['some-key']={id:'business:00001',name:'Valid Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    BusinessSystem.migrate(World,[]);
+    const valid=Object.values(World.businesses).find(b=>b.name==='Valid Co');
+    const malformed=Object.values(World.businesses).find(b=>b.name==='Malformed Co');
+    return JSON.stringify({validId:valid.id,malformedId:malformed.id});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.validId,'business:00001');
+  assert.equal(parsed.malformedId,'business:00002');
+});
+
+test('multiple malformed records receive sequential IDs above the highest original valid ID',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['aaa-malformed-1']={id:'not-a-valid-id-1',name:'Malformed One',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businesses['bbb-malformed-2']={id:'not-a-valid-id-2',name:'Malformed Two',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businesses['business:00005']={id:'business:00005',name:'Valid Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    BusinessSystem.migrate(World,[]);
+    const valid=Object.values(World.businesses).find(b=>b.name==='Valid Co');
+    const one=Object.values(World.businesses).find(b=>b.name==='Malformed One');
+    const two=Object.values(World.businesses).find(b=>b.name==='Malformed Two');
+    return JSON.stringify({validId:valid.id,oneId:one.id,twoId:two.id});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.validId,'business:00005');
+  assert.equal(parsed.oneId,'business:00006');
+  assert.equal(parsed.twoId,'business:00007');
+});
+
+test('reserving existing IDs before allocation keeps migration byte-for-byte idempotent',()=>{
+  const context=freshWorld();
+  const result=expose(context,`(function(){
+    BusinessSystem.ensure(World);
+    World.businesses['aaa-malformed']={id:'not-a-valid-id',name:'Malformed Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    World.businesses['business:00001']={id:'business:00001',name:'Valid Co',settlementId:'branec',sector:'retail',demandGroup:'services',kind:'private',status:'active',foundedYear:1920,ownerNpcId:null,employeeIds:[],vacancies:[],finances:{cash:0,debt:0,revenue:0,expenses:0,payroll:0,profit:0,lastYear:null},history:[]};
+    BusinessSystem.migrate(World,[]);
+    const first=JSON.stringify(World.businesses);
+    const firstCounter=World.businessCounter;
+    BusinessSystem.migrate(World,[]);
+    BusinessSystem.migrate(World,[]);
+    const second=JSON.stringify(World.businesses);
+    return JSON.stringify({equal:first===second,counterEqual:firstCounter===World.businessCounter});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.equal);
+  assert.ok(parsed.counterEqual);
+});
+
 test('checkInvariants rejects null, empty-string, and numeric-string finance values',()=>{
   const context=freshWorld();
   const result=expose(context,`(function(){
