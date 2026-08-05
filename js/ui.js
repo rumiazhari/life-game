@@ -2394,8 +2394,8 @@ function runVacancyYearTick(){
   if(typeof VacancySystem!=='object'||!VacancySystem||typeof VacancySystem.tickWorld!=='function') return null;
   const result=VacancySystem.tickWorld(World,{year:World.year});
   if(result&&result.applied&&typeof VacancySystem.openVacancies==='function'&&typeof VacancySystem.seedNpcApplications==='function'){
-    VacancySystem.openVacancies(World,{}).forEach(vacancy=>{
-      if(vacancy.openedYear===World.year) VacancySystem.seedNpcApplications(World,vacancy,{year:World.year});
+    VacancySystem.openVacancies(World,{}).slice().sort((a,b)=>a.id.localeCompare(b.id)).forEach(vacancy=>{
+      VacancySystem.seedNpcApplications(World,vacancy,{year:World.year});
     });
   }
   return result;

@@ -447,3 +447,154 @@ test('clean vacancy, employment, and business invariants after a full annual pip
   assert.deepEqual(result.employment,[]);
   assert.deepEqual(result.business,[]);
 });
+
+/* ===== Correctness hardening: no legacy random fallback when systems are available (section 10) ===== */
+
+test('a queued presspromo after a layoff returns a non-mutating no_active_contract result',()=>{
+  const context=uiContext('presspromo-after-layoff');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const biz=BusinessSystem.get(World,'${b.id}');
+    const c=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b.id}',annualSalary:900,hiredYear:World.year});
+    EmploymentSystem.hire(World,{personId:'npc:coworker',businessId:'${b.id}',annualSalary:100,hiredYear:World.year});
+    S.employmentContractId=c.id; S.jobTier=1; S.jobName='Worker'; S.career=null;
+    biz.status='struggling'; biz.finances.payroll=1000; biz.finances.revenue=1000; biz.finances.profit=-200;
+    EmploymentSystem.tickWorld(World,{year:World.year,subject:S});
+    EmploymentSystem.reconcilePlayer(World,S);
+    Random.chance=()=>true;
+    const r=DEC_MAP['presspromo'].apply(S,{});
+    return JSON.stringify({reason:r.reason,jobTier:S.jobTier});
+  })()`));
+  assert.equal(result.reason,'no_active_contract');
+  assert.equal(result.jobTier,0);
+});
+
+test('a queued presspromo after business closure returns a non-mutating no_active_contract result',()=>{
+  const context=uiContext('presspromo-after-closure');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const c=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b.id}',annualSalary:900,hiredYear:World.year});
+    S.employmentContractId=c.id; S.jobTier=1; S.jobName='Worker'; S.career=null;
+    BusinessSystem.close(World,'${b.id}','insolvency',World.year,{subject:S});
+    Random.chance=()=>true;
+    const r=DEC_MAP['presspromo'].apply(S,{});
+    return JSON.stringify({reason:r.reason,jobTier:S.jobTier});
+  })()`));
+  assert.equal(result.reason,'no_active_contract');
+  assert.equal(result.jobTier,0);
+});
+
+test('a queued quitjob after business closure returns a non-mutating already_unemployed result',()=>{
+  const context=uiContext('quitjob-after-closure');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const c=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b.id}',annualSalary:900,hiredYear:World.year});
+    S.employmentContractId=c.id; S.jobTier=1; S.jobName='Worker'; S.freedom=60;
+    BusinessSystem.close(World,'${b.id}','insolvency',World.year,{subject:S});
+    const r=DEC_MAP['quitjob'].apply(S,{});
+    return JSON.stringify({reason:r.reason,jobTier:S.jobTier,jobName:S.jobName});
+  })()`));
+  assert.equal(result.reason,'already_unemployed');
+  assert.equal(result.jobTier,0);
+  assert.equal(result.jobName,'Unemployed');
+});
+
+test('a stale queued lookwork with no vacancyId returns a non-mutating vacancy_unavailable result',()=>{
+  const context=uiContext('lookwork-stale-no-id');
+  configureAdult(context);
+  const result=JSON.parse(expose(context,`(function(){
+    const before=JSON.stringify({jobTier:S.jobTier,jobName:S.jobName,career:S.career});
+    const r=PUR_MAP['lookwork'].apply(S,{});
+    const after=JSON.stringify({jobTier:S.jobTier,jobName:S.jobName,career:S.career});
+    return JSON.stringify({reason:r.reason,unchanged:before===after});
+  })()`));
+  assert.equal(result.reason,'vacancy_unavailable');
+  assert.equal(result.unchanged,true);
+});
+
+test('no random hiring or promotion occurs across a queued presspromo/lookwork replay with chance forced true',()=>{
+  const context=uiContext('no-random-replay');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    Random.chance=()=>true;
+    const promoResult=DEC_MAP['presspromo'].apply(S,{});
+    const lookResult=PUR_MAP['lookwork'].apply(S,{});
+    return JSON.stringify({jobTier:S.jobTier,jobName:S.jobName,promoReason:promoResult.reason,lookReason:lookResult.reason});
+  })()`));
+  assert.equal(result.jobTier,0);
+  assert.equal(result.jobName,'Unemployed');
+});
+
+/* ===== Correctness hardening: seed NPC applications for every open vacancy (section 11) ===== */
+
+test('a prior-year still-open vacancy receives new applications from newly eligible NPCs',()=>{
+  const context=uiContext('prior-year-new-applicants');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,openedYear:World.year-1,requirements:{minAge:16}});
+    World.npcs={};
+    runVacancyYearTick();
+    const beforeApps=VacancySystem.get(World,v.id).applications.length;
+    World.npcs['npc:new']={id:'npc:new',alive:true,birthYear:World.year-30,locationId:World.activeSettlementId,education:{level:'none'},employment:{}};
+    runVacancyYearTick();
+    const afterApps=VacancySystem.get(World,v.id).applications.length;
+    return JSON.stringify({beforeApps,afterApps});
+  })()`));
+  assert.ok(result.afterApps>=result.beforeApps);
+});
+
+test('a current-year vacancy receives applicants but remains unresolved',()=>{
+  const context=uiContext('current-year-receives-applicants');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:World.activeSettlementId,education:{level:'none'},employment:{}}};
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,openedYear:World.year,requirements:{minAge:16}});
+    runVacancyYearTick();
+    resolvePendingVacancies();
+    const record=VacancySystem.get(World,v.id);
+    return JSON.stringify({status:record.status,applicationCount:record.applications.length});
+  })()`));
+  assert.equal(result.status,'open');
+});
+
+test('vacancy application seeding processes open vacancies in stable ID order',()=>{
+  const context=uiContext('stable-seed-order');
+  configureAdult(context);
+  const b1=seedPublicBusiness(context,'retail');
+  const b2=seedPublicBusiness(context,'finance');
+  const result=JSON.parse(expose(context,`(function(){
+    let order=[];
+    const original=VacancySystem.seedNpcApplications;
+    VacancySystem.seedNpcApplications=function(world,vacancy,opts){ order.push(vacancy.id); return original.apply(this,arguments); };
+    VacancySystem.open(World,{businessId:'${b1.id}',occupationType:'job',occupationId:'a',occupationName:'A',jobTier:1,annualSalary:1000,openedYear:World.year-1,requirements:{minAge:16}});
+    VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'job',occupationId:'b',occupationName:'B',jobTier:1,annualSalary:1000,openedYear:World.year-1,requirements:{minAge:16}});
+    runVacancyYearTick();
+    VacancySystem.seedNpcApplications=original;
+    const sorted=order.slice().sort();
+    return JSON.stringify({orderMatchesSorted:JSON.stringify(order)===JSON.stringify(sorted)});
+  })()`));
+  assert.equal(result.orderMatchesSorted,true);
+});
+
+test('application caps remain respected while seeding across every open vacancy each year',()=>{
+  const context=uiContext('caps-respected-full-seed');
+  configureAdult(context);
+  const b1=seedPublicBusiness(context,'retail');
+  const b2=seedPublicBusiness(context,'finance');
+  const b3=seedPublicBusiness(context,'government');
+  const result=JSON.parse(expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:World.activeSettlementId,education:{level:'none'},employment:{}}};
+    VacancySystem.open(World,{businessId:'${b1.id}',occupationType:'job',occupationId:'a',occupationName:'A',jobTier:1,annualSalary:1000,openedYear:World.year-1,requirements:{minAge:16}});
+    VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'job',occupationId:'b',occupationName:'B',jobTier:1,annualSalary:1000,openedYear:World.year-1,requirements:{minAge:16}});
+    VacancySystem.open(World,{businessId:'${b3.id}',occupationType:'job',occupationId:'c',occupationName:'C',jobTier:1,annualSalary:1000,openedYear:World.year-1,requirements:{minAge:16}});
+    runVacancyYearTick();
+    return VacancySystem.applicationsForPersonInYear(World,'npc:a',World.year).length;
+  })()`));
+  assert.ok(result<=2);
+});

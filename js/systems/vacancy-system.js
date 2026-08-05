@@ -153,29 +153,31 @@
       &&(!opts.settlementId||v.settlementId===opts.settlementId));
   }
 
-  function normalizeApplication(app){
+  function normalizeApplication(app,fallbackYear){
     if(!app||typeof app!=='object') return null;
     const personId=app.personId!=null?String(app.personId):null;
     if(!personId) return null;
     const workerType=personId==='subject'?'player':'npc';
+    const status=APPLICATION_STATUSES.includes(app.status)?app.status:'pending';
+    const resolvedYear=status==='pending'?null:(boundedYearOrNull(app.resolvedYear)!=null?boundedYearOrNull(app.resolvedYear):fallbackYear);
     return {
       personId,
       workerType,
       kind:APPLICATION_KINDS.includes(app.kind)?app.kind:'new_hire',
       appliedYear:boundedYear(app.appliedYear,0),
       score:Math.round(clamp(finite(app.score,0),0,100)*100)/100,
-      status:APPLICATION_STATUSES.includes(app.status)?app.status:'pending',
-      resolvedYear:boundedYearOrNull(app.resolvedYear),
-      reason:app.reason!=null?String(app.reason):null
+      status,
+      resolvedYear,
+      reason:status==='pending'?null:(app.reason!=null?String(app.reason):null)
     };
   }
 
-  function normalizeApplications(source){
+  function normalizeApplications(source,fallbackYear){
     if(!Array.isArray(source)) return [];
     const seen=new Set();
     const out=[];
     source.forEach(raw=>{
-      const app=normalizeApplication(raw);
+      const app=normalizeApplication(raw,fallbackYear);
       if(!app||seen.has(app.personId)) return;
       seen.add(app.personId);
       out.push(app);
@@ -205,10 +207,11 @@
       if(status==='open'){ status='withdrawn'; closedReason=closedReason||'business_closed'; }
     }
 
-    let applications=normalizeApplications(record.applications);
+    const fallbackYear=boundedYear(world.year,0);
+    let applications=normalizeApplications(record.applications,fallbackYear);
     let filledByPersonId=status==='filled'?(record.filledByPersonId!=null?String(record.filledByPersonId):null):null;
     let filledContractId=status==='filled'?(record.filledContractId!=null?String(record.filledContractId):null):null;
-    let filledYear=status==='filled'?boundedYearOrNull(record.filledYear):null;
+    let filledYear=status==='filled'?(boundedYearOrNull(record.filledYear)!=null?boundedYearOrNull(record.filledYear):fallbackYear):null;
     if(status==='filled'&&(!filledByPersonId||!filledContractId)){
       status='withdrawn';
       closedReason=closedReason||'invalid_fill_state';
@@ -219,15 +222,38 @@
       applications=applications.map(app=>{
         if(app.status!=='pending') return app;
         if(status==='filled'&&app.personId===filledByPersonId){
-          return Object.assign({},app,{status:'accepted',resolvedYear:app.resolvedYear!=null?app.resolvedYear:(filledYear!=null?filledYear:boundedYear(world.year,0))});
+          return Object.assign({},app,{status:'accepted',resolvedYear:app.resolvedYear!=null?app.resolvedYear:filledYear});
         }
-        return Object.assign({},app,{status:'rejected',resolvedYear:app.resolvedYear!=null?app.resolvedYear:boundedYear(world.year,0),reason:app.reason||(status==='filled'?'better_candidate':status)});
+        return Object.assign({},app,{status:'rejected',resolvedYear:app.resolvedYear!=null?app.resolvedYear:fallbackYear,reason:app.reason||(status==='filled'?'better_candidate':status)});
       });
     }
 
-    const accepted=applications.filter(a=>a.status==='accepted');
-    if(status==='filled'&&accepted.length===0&&filledByPersonId){
-      applications=applications.map(a=>a.personId===filledByPersonId?Object.assign({},a,{status:'accepted',resolvedYear:a.resolvedYear!=null?a.resolvedYear:boundedYear(world.year,0)}):a);
+    if(status==='filled'){
+      // Collapse any malformed multi-accepted state to exactly the one
+      // application matching filledByPersonId.
+      let sawAccepted=false;
+      applications=applications.map(app=>{
+        if(app.status!=='accepted') return app;
+        if(app.personId===filledByPersonId&&!sawAccepted){ sawAccepted=true; return app; }
+        return Object.assign({},app,{status:'rejected',resolvedYear:app.resolvedYear!=null?app.resolvedYear:fallbackYear,reason:'better_candidate'});
+      });
+      if(!sawAccepted&&filledByPersonId){
+        const idx=applications.findIndex(a=>a.personId===filledByPersonId);
+        if(idx>=0){
+          applications=applications.slice();
+          applications[idx]=Object.assign({},applications[idx],{status:'accepted',resolvedYear:applications[idx].resolvedYear!=null?applications[idx].resolvedYear:filledYear});
+          sawAccepted=true;
+        }
+      }
+      if(!sawAccepted){
+        // Irreparable fill state: no application record backs the fill.
+        status='withdrawn';
+        closedReason='invalid_fill_state';
+        filledByPersonId=null; filledContractId=null; filledYear=null;
+        applications=applications.map(app=>app.status==='pending'
+          ?Object.assign({},app,{status:'withdrawn',resolvedYear:fallbackYear,reason:'invalid_fill_state'})
+          :app);
+      }
     }
 
     return {
@@ -348,12 +374,17 @@
               usedIds.add(finalId);
               assignments.push({finalId,record:Object.assign({},item,{businessId:item.businessId||business.id})});
             }
-          } else if(typeof item==='string'){
-            if(isValidVacancyId(item)){
-              if(usedIds.has(item)) return; // already linked to a top-level or earlier record
-              usedIds.add(item);
-              assignments.push({finalId:item,record:{__danglingPlaceholder:true,businessId:business.id}});
-            }
+          } else if(typeof item==='string'&&isValidVacancyId(item)){
+            if(usedIds.has(item)) return; // already linked to a top-level or earlier record
+            usedIds.add(item);
+            assignments.push({finalId:item,record:{__danglingPlaceholder:true,businessId:business.id}});
+          } else {
+            // Malformed embedded entry (invalid/empty string, number, boolean,
+            // null, array, or unusable object) -- must survive migration as a
+            // withdrawn placeholder, never silently dropped.
+            const finalId=allocateId();
+            usedIds.add(finalId);
+            assignments.push({finalId,record:{__placeholder:true,legacyType:item===null?'null':(Array.isArray(item)?'array':typeof item),legacyValue:item,businessId:business.id}});
           }
         });
       });
@@ -363,9 +394,11 @@
     const normalized={};
     assignments.forEach(({finalId,record})=>{
       if(record&&record.__placeholder){
-        normalized[finalId]=withdrawnPlaceholder(finalId,world,record.legacyValue,record.legacyType);
+        const placeholderBusiness=record.businessId?getBusiness(world,record.businessId):null;
+        normalized[finalId]=Object.assign(withdrawnPlaceholder(finalId,world,record.legacyValue,record.legacyType),record.businessId?{businessId:record.businessId,settlementId:placeholderBusiness?placeholderBusiness.settlementId:'unassigned'}:{});
       } else if(record&&record.__danglingPlaceholder){
-        normalized[finalId]=Object.assign(withdrawnPlaceholder(finalId,world,'','string'),{businessId:record.businessId,closedReason:'migration_dangling_reference'});
+        const danglingBusiness=record.businessId?getBusiness(world,record.businessId):null;
+        normalized[finalId]=Object.assign(withdrawnPlaceholder(finalId,world,'','string'),{businessId:record.businessId,settlementId:danglingBusiness?danglingBusiness.settlementId:'unassigned',closedReason:'migration_dangling_reference'});
       } else {
         normalized[finalId]=normalizeVacancyRecord(finalId,record,world);
       }
@@ -484,6 +517,16 @@
     const templates=[];
     CAREERS.filter(track=>ids.includes(track.id)).forEach(track=>{
       (track.stages||[]).forEach((stage,idx)=>{
+        const educationStage=typeof educationCareerEducationRequirement==='function'
+          ?educationCareerEducationRequirement(track,idx)
+          :(track.minEdu||null);
+        const requiredMajor=typeof educationCareerMajorRequirement==='function'
+          ?educationCareerMajorRequirement(track,idx)
+          :(track.requiredMajor||(typeof CAREER_MAJOR_REQUIREMENTS!=='undefined'?CAREER_MAJOR_REQUIREMENTS[track.id]:null));
+        const majorIds=requiredMajor==null?[]:(Array.isArray(requiredMajor)?requiredMajor.slice():[requiredMajor]);
+        const minCareerYears=idx===0?0:(typeof careerYearsRequired==='function'
+          ?careerYearsRequired(track,idx)
+          :(typeof CAREER_EXP!=='undefined'?(CAREER_EXP[idx-1]||1):1));
         templates.push({
           occupationType:'career',
           occupationId:track.id,
@@ -492,10 +535,10 @@
           jobTier:idx+1,
           annualSalary:stage.salary,
           minAge:(typeof TIER_MINAGE!=='undefined'&&TIER_MINAGE[idx+1])||16,
-          educationStage:(typeof track.minEdu==='string')?track.minEdu:null,
-          majorIds:[],
+          educationStage:(typeof educationStage==='string')?educationStage:null,
+          majorIds,
           skills:Object.assign({},stage.req||{}),
-          minCareerYears:idx===0?0:((typeof CAREER_EXP!=='undefined'&&CAREER_EXP[idx-1])||1)
+          minCareerYears
         });
       });
     });
@@ -714,6 +757,22 @@
       if(v.careerStage!=null&&(typeof v.careerStage!=='number'||!Number.isInteger(v.careerStage)||v.careerStage<0||v.careerStage>4)) issues.push('vacancy '+key+' has invalid careerStage');
       if(typeof v.annualSalary!=='number'||!Number.isFinite(v.annualSalary)||!Number.isInteger(v.annualSalary)||v.annualSalary<0||v.annualSalary>MAX_SALARY) issues.push('vacancy '+key+' has invalid or out-of-bound annualSalary');
       if(!v.requirements||typeof v.requirements!=='object') issues.push('vacancy '+key+' missing requirements');
+      else {
+        const req=v.requirements;
+        if(typeof req.minAge!=='number'||!Number.isInteger(req.minAge)||req.minAge<0||req.minAge>100) issues.push('vacancy '+key+' has invalid requirements.minAge');
+        if(!isValidEducationStage(req.educationStage)) issues.push('vacancy '+key+' has invalid requirements.educationStage');
+        if(!Array.isArray(req.majorIds)) issues.push('vacancy '+key+' requirements.majorIds must be an array');
+        else {
+          if(req.majorIds.length>8) issues.push('vacancy '+key+' requirements.majorIds exceeds bound');
+          if(new Set(req.majorIds).size!==req.majorIds.length) issues.push('vacancy '+key+' requirements.majorIds has duplicates');
+        }
+        if(!req.skills||typeof req.skills!=='object'||Array.isArray(req.skills)) issues.push('vacancy '+key+' requirements.skills must be an object');
+        else Object.keys(req.skills).forEach(skillId=>{
+          const v2=req.skills[skillId];
+          if(typeof v2!=='number'||!Number.isInteger(v2)||v2<0||v2>10) issues.push('vacancy '+key+' requirements.skills.'+skillId+' is invalid');
+        });
+        if(typeof req.minCareerYears!=='number'||!Number.isInteger(req.minCareerYears)||req.minCareerYears<0||req.minCareerYears>50) issues.push('vacancy '+key+' has invalid requirements.minCareerYears');
+      }
       if(typeof v.openedYear!=='number'||!Number.isInteger(v.openedYear)||v.openedYear<MIN_YEAR||v.openedYear>MAX_YEAR) issues.push('vacancy '+key+' has invalid openedYear');
       if(typeof v.expiresYear!=='number'||!Number.isInteger(v.expiresYear)||v.expiresYear<MIN_YEAR||v.expiresYear>MAX_YEAR) issues.push('vacancy '+key+' has invalid expiresYear');
       if(v.expiresYear<v.openedYear) issues.push('vacancy '+key+' expiresYear is before openedYear');
@@ -824,6 +883,25 @@
   function playerAge(subject){
     return Number.isFinite(Number(subject.age))?Number(subject.age):null;
   }
+
+  function playerEducationLevel(subject){
+    const education=subject&&subject.education&&typeof subject.education==='object'?subject.education:{};
+    const completed=education.completed&&typeof education.completed==='object'&&!Array.isArray(education.completed)
+      ?education.completed
+      :(subject&&subject.eduCompleted&&typeof subject.eduCompleted==='object'?subject.eduCompleted:{});
+
+    if(completed.university||subject.edu===true) return 'university';
+    if(completed.upper) return 'upper';
+    if(completed.middle) return 'middle';
+    if(completed.lower||completed.basic) return completed.basic?'basic':'lower';
+
+    // Preserve compatibility with malformed/legacy test saves that stored
+    // the completion level as a scalar string.
+    if(typeof education.completed==='string'&&Object.prototype.hasOwnProperty.call(EDUCATION_RANK,education.completed)){
+      return education.completed;
+    }
+    return 'none';
+  }
   function npcAge(world,npc){
     return Number.isFinite(Number(npc.birthYear))?boundedYear(world.year,0)-Number(npc.birthYear):null;
   }
@@ -837,7 +915,7 @@
     if(descriptor.kind==='player'){
       const subject=descriptor.entity;
       age=playerAge(subject); alive=subject.alive!==false;
-      educationLevel=(subject.education&&subject.education.completed)||'none';
+      educationLevel=playerEducationLevel(subject);
       educationMajor=(subject.education&&subject.education.majorId)||null;
     } else {
       const npc=descriptor.entity;
@@ -929,6 +1007,18 @@
     return {personId,qualifies:true,score,components};
   }
 
+  function applicationsForPersonInYear(world,personId,year){
+    ensure(world);
+    const pid=String(personId);
+    const found=[];
+    all(world).forEach(vacancy=>{
+      vacancy.applications.forEach(app=>{
+        if(app.personId===pid&&app.appliedYear===year) found.push(app);
+      });
+    });
+    return found;
+  }
+
   function submitApplication(world,vacancyId,personId,options){
     ensure(world);
     const opts=options||{};
@@ -939,6 +1029,9 @@
     const existing=vacancy.applications.find(a=>a.personId===personId);
     if(existing) return {applied:false,application:existing,vacancy,qualification:null};
     if(vacancy.applications.length>=MAX_APPLICATIONS_PER_VACANCY) return {applied:false,application:null,vacancy,qualification:null};
+    if(applicationsForPersonInYear(world,personId,year).length>=MAX_APPLICATIONS_PER_PERSON_PER_YEAR){
+      return {applied:false,reason:'annual_application_cap',application:null,vacancy,qualification:null};
+    }
 
     const activeContract=activeForPersonSafe(world,personId);
     let kind=opts.kind;
@@ -1152,6 +1245,7 @@
     qualifies,
     qualificationDetails,
     rankApplicant,
+    applicationsForPersonInYear,
     submitApplication,
     seedNpcApplications,
     resolveVacancy,

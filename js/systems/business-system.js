@@ -507,8 +507,9 @@
     return {year,revenue,expenses,payroll,profit,cash,debt,variation,inputs};
   }
 
-  function close(world,businessId,reason,year){
+  function close(world,businessId,reason,year,options){
     ensure(world);
+    const opts=options||{};
     const business=get(world,businessId);
     if(!business) return null;
     const requestedYear=finiteIntOrNull(year);
@@ -522,7 +523,7 @@
     }
     if(root.EmploymentSystem&&typeof root.EmploymentSystem.activeForBusiness==='function'){
       root.EmploymentSystem.activeForBusiness(world,businessId).forEach(contract=>{
-        root.EmploymentSystem.end(world,contract.id,'terminated','business_closed',business.closedYear);
+        root.EmploymentSystem.end(world,contract.id,'terminated','business_closed',business.closedYear,{subject:opts.subject});
       });
     }
     if(root.VacancySystem&&typeof root.VacancySystem.withdrawForBusiness==='function'){
