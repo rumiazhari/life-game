@@ -789,7 +789,7 @@ test('checkInvariants stays clean after repairing manually-injected huge-salary 
   const context=migratedWorld();
   const result=expose(context,`(function(){
     const b=BusinessSystem.forSettlement(World,'branec')[0];
-    World.employmentContracts['employment:00001']={id:'employment:00001',personId:'npc:whale',workerType:'npc',businessId:b.id,settlementId:b.settlementId,occupationType:'generic',occupationId:null,occupationName:'Worker',careerStage:null,jobTier:1,annualSalary:1e15,hiredYear:1930,endedYear:null,status:'active',terminationReason:null,performance:0.5,satisfaction:0.5,lastPaidYear:null,annualPaid:0,history:[],origin:'legacy',stageStartedYear:1930,lastReviewYear:null,lastLifecycleYear:null,lastPromotionAttemptYear:null};
+    World.employmentContracts['employment:00001']={id:'employment:00001',personId:'npc:whale',workerType:'npc',businessId:b.id,settlementId:b.settlementId,occupationType:'generic',occupationId:null,occupationName:'Worker',careerStage:null,jobTier:1,annualSalary:1e15,hiredYear:1930,endedYear:null,status:'active',terminationReason:null,performance:0.5,satisfaction:0.5,lastPaidYear:null,annualPaid:0,history:[],origin:'legacy',stageStartedYear:1930,lastReviewYear:null,lastLifecycleYear:null,lastPromotionAttemptYear:null,vacancyAssignments:[]};
     World.employmentContractCounter=1;
     b.employeeIds=['npc:whale'];
     EmploymentSystem.payBusinessPayroll(World,b.id,1930);

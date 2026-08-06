@@ -46,6 +46,75 @@
   const cloneEntry=entry=>entry&&typeof entry==='object'&&!Array.isArray(entry)?Object.assign({},entry):entry;
   const trimHistory=history=>Array.isArray(history)?history.slice(-HISTORY_LIMIT).map(cloneEntry):[];
 
+  const MAX_VACANCY_ASSIGNMENTS=8;
+
+  function isValidVacancyIdRef(id){
+    return typeof id==='string'&&/^vacancy:\d{5,}$/.test(id);
+  }
+
+  function normalizeVacancyAssignment(entry){
+    if(!entry||typeof entry!=='object'||Array.isArray(entry)) return null;
+    if(!isValidVacancyIdRef(entry.vacancyId)) return null;
+    return {
+      vacancyId:entry.vacancyId,
+      year:boundedYear(entry.year,0),
+      businessId:typeof entry.businessId==='string'&&entry.businessId?entry.businessId:null,
+      occupationType:OCCUPATION_TYPES.includes(entry.occupationType)?entry.occupationType:'generic',
+      occupationId:entry.occupationId!=null?String(entry.occupationId):null,
+      occupationName:typeof entry.occupationName==='string'&&entry.occupationName?entry.occupationName:'Worker',
+      careerStage:(entry.careerStage!=null&&Number.isFinite(Number(entry.careerStage))&&Number(entry.careerStage)>=0)?Math.round(Number(entry.careerStage)):null,
+      jobTier:clampInt(entry.jobTier,0,5,1),
+      annualSalary:boundedSalary(entry.annualSalary,0)
+    };
+  }
+
+  function normalizeVacancyAssignments(source){
+    if(!Array.isArray(source)) return [];
+    const byId={};
+    source.forEach(raw=>{
+      const normalized=normalizeVacancyAssignment(raw);
+      if(!normalized) return;
+      byId[normalized.vacancyId]=normalized;
+    });
+    return Object.values(byId)
+      .sort((a,b)=>(a.year-b.year)||a.vacancyId.localeCompare(b.vacancyId))
+      .slice(-MAX_VACANCY_ASSIGNMENTS);
+  }
+
+  function recordVacancyAssignment(world,contractId,vacancy,year){
+    ensure(world);
+    const contract=get(world,contractId);
+    if(!contract||!vacancy) return null;
+    const entry=normalizeVacancyAssignment({
+      vacancyId:vacancy.id,
+      year:boundedYear(year,boundedYear(world.year,0)),
+      businessId:vacancy.businessId,
+      occupationType:vacancy.occupationType,
+      occupationId:vacancy.occupationId,
+      occupationName:vacancy.occupationName,
+      careerStage:vacancy.careerStage,
+      jobTier:vacancy.jobTier,
+      annualSalary:vacancy.annualSalary
+    });
+    if(!entry) return null;
+    const existing=Array.isArray(contract.vacancyAssignments)?contract.vacancyAssignments:[];
+    const withoutThisVacancy=existing.filter(a=>a&&a.vacancyId!==entry.vacancyId);
+    contract.vacancyAssignments=normalizeVacancyAssignments(withoutThisVacancy.concat([entry]));
+    return entry;
+  }
+
+  function contractHasVacancyAssignment(contract,vacancy){
+    if(!contract||!vacancy||!Array.isArray(contract.vacancyAssignments)) return false;
+    return contract.vacancyAssignments.some(a=>a
+      &&a.vacancyId===vacancy.id
+      &&a.businessId===vacancy.businessId
+      &&a.occupationType===vacancy.occupationType
+      &&occupationIdsMatch(a.occupationId,vacancy.occupationId)
+      &&a.careerStage===vacancy.careerStage
+      &&a.jobTier===vacancy.jobTier
+    );
+  }
+
   function contractIdNumber(id){
     const match=/^employment:(\d{5,})$/.exec(String(id||''));
     return match?Number(match[1]):null;
@@ -136,7 +205,8 @@
       stageStartedYear:Math.max(boundedYear(spec.stageStartedYear,hiredYear),hiredYear),
       lastReviewYear:boundedYearOrNull(spec.lastReviewYear),
       lastLifecycleYear:boundedYearOrNull(spec.lastLifecycleYear),
-      lastPromotionAttemptYear:boundedYearOrNull(spec.lastPromotionAttemptYear)
+      lastPromotionAttemptYear:boundedYearOrNull(spec.lastPromotionAttemptYear),
+      vacancyAssignments:normalizeVacancyAssignments(spec.vacancyAssignments)
     };
   }
 
@@ -266,7 +336,12 @@
       else if(business.status==='closed'){ endInternal(world,contract,'terminated','business_closed',year); affected.add(contract.personId); }
     });
     affected.forEach(personId=>{
-      syncPersonLegacy(world,personId,Object.assign({},options,{terminal:true}));
+      // A person may have had more than one contract (e.g. a duplicate) --
+      // if another one is still active after removing the orphan, that
+      // survivor is authoritative and must not be clobbered as terminal.
+      const survivor=activeForPerson(world,personId)[0]||null;
+      if(survivor) syncPersonLegacy(world,personId,options);
+      else syncPersonLegacy(world,personId,Object.assign({},options,{terminal:true}));
     });
     return affected;
   }
@@ -375,7 +450,8 @@
         stageStartedYear:Math.max(boundedYear(source.stageStartedYear,hiredYear),hiredYear),
         lastReviewYear:boundedYearOrNull(source.lastReviewYear),
         lastLifecycleYear:boundedYearOrNull(source.lastLifecycleYear),
-        lastPromotionAttemptYear:boundedYearOrNull(source.lastPromotionAttemptYear)
+        lastPromotionAttemptYear:boundedYearOrNull(source.lastPromotionAttemptYear),
+        vacancyAssignments:normalizeVacancyAssignments(source.vacancyAssignments)
       };
     });
     world.employmentContracts=normalized;
@@ -467,6 +543,18 @@
         const v=c[field];
         if(v!=null&&(typeof v!=='number'||!Number.isFinite(v)||!Number.isInteger(v)||v<MIN_YEAR||v>MAX_YEAR)) issues.push('employment contract '+key+' has invalid or out-of-bound '+field);
       });
+      if(!Array.isArray(c.vacancyAssignments)) issues.push('employment contract '+key+' vacancyAssignments must be an array');
+      else {
+        if(c.vacancyAssignments.length>MAX_VACANCY_ASSIGNMENTS) issues.push('employment contract '+key+' vacancyAssignments exceeds bound');
+        const seenVacancyIds=new Set();
+        c.vacancyAssignments.forEach(a=>{
+          if(!a||typeof a!=='object'||!isValidVacancyIdRef(a.vacancyId)) issues.push('employment contract '+key+' has an invalid vacancyAssignments entry');
+          else{
+            if(seenVacancyIds.has(a.vacancyId)) issues.push('employment contract '+key+' has a duplicate vacancyAssignments entry: '+a.vacancyId);
+            seenVacancyIds.add(a.vacancyId);
+          }
+        });
+      }
       if(ACTIVE_STATUSES.has(c.status)){
         (activeByPerson[c.personId]=activeByPerson[c.personId]||[]).push(c.id);
         if(business){ (businessEmployeeExpectation[business.id]=businessEmployeeExpectation[business.id]||new Set()).add(c.personId); }
@@ -889,8 +977,9 @@
       origin:'vacancy',
       status:'active'
     });
-    contract.history.push(cloneEntry({type:'hired',year,businessId:contract.businessId,annualSalary:contract.annualSalary,occupationName:contract.occupationName}));
+    contract.history.push(cloneEntry({type:'hired',year,businessId:contract.businessId,annualSalary:contract.annualSalary,occupationName:contract.occupationName,vacancyId:vacancy.id}));
     contract.history=trimHistory(contract.history);
+    recordVacancyAssignment(world,contract.id,vacancy,year);
     syncPersonLegacy(world,personId,opts);
     syncBusinessEmployees(world,business.id);
     if(previousContract&&previousContract.businessId!==business.id) syncBusinessEmployees(world,previousContract.businessId);
@@ -923,8 +1012,14 @@
     contract.annualSalary=vacancy.annualSalary;
     contract.stageStartedYear=y;
     contract.lastPromotionAttemptYear=y;
-    contract.history.push(cloneEntry({type:'promoted',year:y,vacancyId,fromOccupationName,toOccupationName:contract.occupationName,fromSalary,toSalary:contract.annualSalary}));
+    contract.history.push(cloneEntry({
+      type:'promoted',year:y,vacancyId,
+      fromOccupationName,toOccupationName:contract.occupationName,fromSalary,toSalary:contract.annualSalary,
+      occupationType:contract.occupationType,occupationId:contract.occupationId,occupationName:contract.occupationName,
+      careerStage:contract.careerStage,jobTier:contract.jobTier,annualSalary:contract.annualSalary,businessId:contract.businessId
+    }));
     contract.history=trimHistory(contract.history);
+    recordVacancyAssignment(world,contract.id,vacancy,y);
     syncPersonLegacy(world,contract.personId,opts);
     return {accepted:true,contract,previousContract:null,reason:null};
   }
@@ -980,7 +1075,9 @@
       }
     }
     const application=root.VacancySystem.submitApplication(world,vacancy.id,contract.personId,{subject:opts.subject,kind:'promotion',year});
-    if(!application.applied&&application.reason==='annual_application_cap') return {accepted:false,reason:'annual_application_cap'};
+    if(!application.applied&&(application.reason==='annual_application_cap'||application.reason==='vacancy_full'||application.reason==='vacancy_unavailable')){
+      return {accepted:false,reason:application.reason};
+    }
     if(!application.application||application.application.status!=='pending'){
       if(application.application&&application.application.status==='rejected') return {accepted:false,reason:'not_qualified'};
       return {accepted:false,reason:'no_opening'};
@@ -1115,6 +1212,8 @@
     retire,
     requestPromotion,
     considerAutomaticPromotion,
-    tickWorld
+    tickWorld,
+    recordVacancyAssignment,
+    contractHasVacancyAssignment
   };
 })(typeof globalThis!=='undefined'?globalThis:this);

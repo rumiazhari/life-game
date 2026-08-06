@@ -212,10 +212,12 @@
     let filledByPersonId=status==='filled'?(record.filledByPersonId!=null?String(record.filledByPersonId):null):null;
     let filledContractId=status==='filled'?(record.filledContractId!=null?String(record.filledContractId):null):null;
     let filledYear=status==='filled'?(boundedYearOrNull(record.filledYear)!=null?boundedYearOrNull(record.filledYear):fallbackYear):null;
+    let repairedLegacyValue=null;
     if(status==='filled'&&(!filledByPersonId||!filledContractId)){
       status='withdrawn';
       closedReason=closedReason||'invalid_fill_state';
       filledByPersonId=null; filledContractId=null; filledYear=null;
+      repairedLegacyValue='invalid_fill_state';
     }
 
     if(status!=='open'){
@@ -250,22 +252,52 @@
         status='withdrawn';
         closedReason='invalid_fill_state';
         filledByPersonId=null; filledContractId=null; filledYear=null;
+        repairedLegacyValue='invalid_fill_state';
         applications=applications.map(app=>app.status==='pending'
           ?Object.assign({},app,{status:'withdrawn',resolvedYear:fallbackYear,reason:'invalid_fill_state'})
           :app);
       }
     }
 
+    const sourceHistory=Array.isArray(record.history)?record.history:[];
+
     if(status==='filled'&&filledByPersonId&&filledContractId){
+      const finalOccupationId=record.occupationId!=null?String(record.occupationId):null;
       const linkedContract=root.EmploymentSystem&&typeof root.EmploymentSystem.get==='function'
         ?root.EmploymentSystem.get(world,filledContractId):null;
-      const referentialMatch=linkedContract
+      const basicMatch=linkedContract
         &&linkedContract.personId===filledByPersonId
-        &&linkedContract.businessId===businessId
-        &&linkedContract.occupationType===occupationType
-        &&occupationIdsMatchLocal(linkedContract.occupationId,record.occupationId!=null?String(record.occupationId):null)
-        &&linkedContract.jobTier===jobTier
-        &&(occupationType!=='career'||linkedContract.careerStage===careerStage);
+        &&linkedContract.businessId===businessId;
+      let referentialMatch=false;
+      if(basicMatch){
+        const vacancyLike={id,businessId,occupationType,occupationId:finalOccupationId,occupationName:record.occupationName,careerStage,jobTier,annualSalary};
+        const hasAssignmentFn=root.EmploymentSystem&&typeof root.EmploymentSystem.contractHasVacancyAssignment==='function'
+          ?root.EmploymentSystem.contractHasVacancyAssignment:null;
+        // A. an immutable snapshot already records this exact role for this vacancy.
+        if(hasAssignmentFn&&hasAssignmentFn(linkedContract,vacancyLike)) referentialMatch=true;
+        // B. the contract's current role still matches this vacancy's role
+        //    (the common, non-promoted case).
+        if(!referentialMatch
+          &&linkedContract.occupationType===occupationType
+          &&occupationIdsMatchLocal(linkedContract.occupationId,finalOccupationId)
+          &&linkedContract.jobTier===jobTier
+          &&(occupationType!=='career'||linkedContract.careerStage===careerStage)){
+          referentialMatch=true;
+        }
+        // C. legacy initial-hire inference: this vacancy's fill year matches
+        //    the contract's origin='vacancy' hire year.
+        if(!referentialMatch&&linkedContract.origin==='vacancy'&&linkedContract.hiredYear===filledYear&&hasAssignmentFn&&typeof root.EmploymentSystem.recordVacancyAssignment==='function'){
+          root.EmploymentSystem.recordVacancyAssignment(world,linkedContract.id,vacancyLike,filledYear);
+          if(hasAssignmentFn(linkedContract,vacancyLike)) referentialMatch=true;
+        }
+        // D. legacy promotion inference: the contract's own history already
+        //    records a 'promoted' entry naming this exact vacancy ID.
+        if(!referentialMatch&&Array.isArray(linkedContract.history)&&linkedContract.history.some(h=>h&&h.type==='promoted'&&h.vacancyId===id)
+          &&hasAssignmentFn&&typeof root.EmploymentSystem.recordVacancyAssignment==='function'){
+          root.EmploymentSystem.recordVacancyAssignment(world,linkedContract.id,vacancyLike,filledYear);
+          if(hasAssignmentFn(linkedContract,vacancyLike)) referentialMatch=true;
+        }
+      }
       if(!referentialMatch){
         status='withdrawn';
         closedReason='invalid_filled_contract';
@@ -273,8 +305,14 @@
         applications=applications.map(app=>app.status==='pending'||app.status==='accepted'
           ?Object.assign({},app,{status:app.status==='accepted'?'withdrawn':'rejected',resolvedYear:app.resolvedYear!=null?app.resolvedYear:fallbackYear,reason:'invalid_filled_contract'})
           :app);
+        repairedLegacyValue='invalid_filled_contract';
       }
     }
+
+    const alreadyHasRepairEvent=repairedLegacyValue!=null&&sourceHistory.some(h=>h&&h.type==='migration_repaired'&&h.legacyValue===repairedLegacyValue);
+    const history=repairedLegacyValue!=null&&!alreadyHasRepairEvent
+      ?trimHistory(sourceHistory.concat([{type:'migration_repaired',year:fallbackYear,legacyType:'filled_vacancy',legacyValue:repairedLegacyValue}]))
+      :trimHistory(sourceHistory);
 
     return {
       id,
@@ -295,9 +333,7 @@
       filledYear,
       closedReason,
       applications,
-      history:status==='withdrawn'&&closedReason==='invalid_filled_contract'
-        ?trimHistory(record.history.concat([{type:'migration_repaired',year:fallbackYear,legacyType:'filled_vacancy',legacyValue:'invalid_filled_contract'}]))
-        :trimHistory(record.history)
+      history
     };
   }
 
@@ -421,9 +457,41 @@
           if(item&&typeof item==='object'&&!Array.isArray(item)){
             if(isUsableEmbeddedVacancyRecord(item)){
               const recordId=item.id;
-              if(isValidVacancyId(recordId)&&!usedIds.has(recordId)){
-                usedIds.add(recordId);
-                assignments.push({finalId:recordId,record:Object.assign({},item,{businessId:item.businessId||business.id})});
+              const crossBusinessField=typeof item.businessId==='string'&&item.businessId&&item.businessId!==business.id;
+              if(isValidVacancyId(recordId)){
+                if(topLevelIds.has(recordId)){
+                  if(seenInThisBusiness.has(recordId)){
+                    const finalId=allocateId();
+                    usedIds.add(finalId);
+                    assignments.push({finalId,record:{__placeholder:true,legacyType:'object',legacyValue:item,businessId:business.id,closedReason:'migration_duplicate_reference'}});
+                  } else {
+                    seenInThisBusiness.add(recordId);
+                    const ownerBusinessId=topLevelBusinessOf[recordId];
+                    if(ownerBusinessId&&ownerBusinessId!==business.id){
+                      const finalId=allocateId();
+                      usedIds.add(finalId);
+                      assignments.push({finalId,record:{__placeholder:true,legacyType:'object',legacyValue:item,businessId:business.id,closedReason:'migration_cross_business_reference'}});
+                    }
+                    // else: legitimate reference to this business's own
+                    // top-level vacancy -- already covered by the topKeys pass.
+                  }
+                } else if(usedIds.has(recordId)){
+                  const finalId=allocateId();
+                  usedIds.add(finalId);
+                  assignments.push({finalId,record:{__placeholder:true,legacyType:'object',legacyValue:item,businessId:business.id,closedReason:'migration_duplicate_reference'}});
+                } else if(crossBusinessField){
+                  const finalId=allocateId();
+                  usedIds.add(finalId);
+                  assignments.push({finalId,record:{__placeholder:true,legacyType:'object',legacyValue:item,businessId:business.id,closedReason:'migration_cross_business_reference'}});
+                } else {
+                  usedIds.add(recordId);
+                  seenInThisBusiness.add(recordId);
+                  assignments.push({finalId:recordId,record:Object.assign({},item,{businessId:item.businessId||business.id})});
+                }
+              } else if(crossBusinessField){
+                const finalId=allocateId();
+                usedIds.add(finalId);
+                assignments.push({finalId,record:{__placeholder:true,legacyType:'object',legacyValue:item,businessId:business.id,closedReason:'migration_cross_business_reference'}});
               } else {
                 const finalId=allocateId();
                 usedIds.add(finalId);
@@ -830,7 +898,7 @@
     }
     const ids=new Set();
     let highestId=0;
-    const perBusinessOpen={}, perSettlementOpen={};
+    const perBusinessOpen={}, perSettlementOpen={}, roleKeysByBusiness={};
     Object.keys(world.vacancies).forEach(key=>{
       const v=world.vacancies[key];
       if(!v||typeof v!=='object'){ issues.push('vacancy at key '+key+' is not an object'); return; }
@@ -880,10 +948,15 @@
           else {
             if(linkedContract.personId!==v.filledByPersonId) issues.push('vacancy '+key+' filled contract personId does not match filledByPersonId');
             if(linkedContract.businessId!==v.businessId) issues.push('vacancy '+key+' filled contract businessId does not match the vacancy business');
-            if(linkedContract.occupationType!==v.occupationType) issues.push('vacancy '+key+' filled contract occupationType does not match the vacancy');
-            if(String(linkedContract.occupationId)!==String(v.occupationId)) issues.push('vacancy '+key+' filled contract occupationId does not match the vacancy');
-            if(linkedContract.jobTier!==v.jobTier) issues.push('vacancy '+key+' filled contract jobTier does not match the vacancy');
-            if(v.occupationType==='career'&&linkedContract.careerStage!==v.careerStage) issues.push('vacancy '+key+' filled contract careerStage does not match the vacancy');
+            const hasAssignmentFn=root.EmploymentSystem&&typeof root.EmploymentSystem.contractHasVacancyAssignment==='function'
+              ?root.EmploymentSystem.contractHasVacancyAssignment:null;
+            const historicalMatch=hasAssignmentFn&&hasAssignmentFn(linkedContract,{id:v.id,businessId:v.businessId,occupationType:v.occupationType,occupationId:v.occupationId,careerStage:v.careerStage,jobTier:v.jobTier});
+            if(!historicalMatch){
+              if(linkedContract.occupationType!==v.occupationType) issues.push('vacancy '+key+' filled contract occupationType does not match the vacancy');
+              if(String(linkedContract.occupationId)!==String(v.occupationId)) issues.push('vacancy '+key+' filled contract occupationId does not match the vacancy');
+              if(linkedContract.jobTier!==v.jobTier) issues.push('vacancy '+key+' filled contract jobTier does not match the vacancy');
+              if(v.occupationType==='career'&&linkedContract.careerStage!==v.careerStage) issues.push('vacancy '+key+' filled contract careerStage does not match the vacancy');
+            }
           }
         }
       } else if(v.filledByPersonId!=null||v.filledContractId!=null||v.filledYear!=null){
@@ -911,13 +984,23 @@
           }
           if(v.status!=='open'&&app.status==='pending') issues.push('vacancy '+key+' is terminal but retains a pending application');
         });
-        if(acceptedCount>1) issues.push('vacancy '+key+' has more than one accepted application');
+        if(v.status==='filled'){
+          if(acceptedCount!==1) issues.push('vacancy '+key+' is filled but does not have exactly one accepted application');
+        } else if(acceptedCount>0){
+          issues.push('vacancy '+key+' is not filled but has an accepted application');
+        }
       }
       if(!Array.isArray(v.history)) issues.push('vacancy '+key+' history must be an array');
       else if(v.history.length>HISTORY_LIMIT) issues.push('vacancy '+key+' history exceeds limit of '+HISTORY_LIMIT);
       if(v.status==='open'){
         if(v.businessId){ perBusinessOpen[v.businessId]=(perBusinessOpen[v.businessId]||0)+1; }
         perSettlementOpen[v.settlementId]=(perSettlementOpen[v.settlementId]||0)+1;
+        if(v.businessId){
+          const key2=v.occupationType+'|'+String(v.occupationId||'')+'|'+String(v.careerStage==null?'':v.careerStage)+'|'+String(v.jobTier);
+          const set=(roleKeysByBusiness[v.businessId]=roleKeysByBusiness[v.businessId]||new Set());
+          if(set.has(key2)) issues.push('business '+v.businessId+' has more than one open vacancy with role key '+key2);
+          set.add(key2);
+        }
       }
     });
     Object.keys(perBusinessOpen).forEach(businessId=>{
@@ -1141,12 +1224,12 @@
     ensure(world);
     const opts=options||{};
     const vacancy=get(world,vacancyId);
-    if(!vacancy||vacancy.status!=='open') return {applied:false,application:null,vacancy,qualification:null};
+    if(!vacancy||vacancy.status!=='open') return {applied:false,reason:'vacancy_unavailable',application:null,vacancy,qualification:null};
     personId=String(personId);
     const year=boundedYear(opts.year,boundedYear(world.year,0));
     const existing=vacancy.applications.find(a=>a.personId===personId);
-    if(existing) return {applied:false,application:existing,vacancy,qualification:null};
-    if(vacancy.applications.length>=MAX_APPLICATIONS_PER_VACANCY) return {applied:false,application:null,vacancy,qualification:null};
+    if(existing) return {applied:false,reason:'duplicate_application',application:existing,vacancy,qualification:null};
+    if(vacancy.applications.length>=MAX_APPLICATIONS_PER_VACANCY) return {applied:false,reason:'vacancy_full',application:null,vacancy,qualification:null};
     if(applicationsForPersonInYear(world,personId,year).length>=MAX_APPLICATIONS_PER_PERSON_PER_YEAR){
       return {applied:false,reason:'annual_application_cap',application:null,vacancy,qualification:null};
     }
@@ -1173,7 +1256,7 @@
     };
     vacancy.applications=vacancy.applications.concat([application]).slice(-MAX_APPLICATIONS_PER_VACANCY);
     vacancy.history=trimHistory(vacancy.history.concat([{type:'application',year,personId,kind,status:application.status,score:application.score}]));
-    return {applied:true,application,vacancy,qualification:details};
+    return {applied:true,reason:details.qualifies?null:'qualification',application,vacancy,qualification:details};
   }
 
   function isExactPromotionCandidate(activeContract,vacancy){
@@ -1282,10 +1365,13 @@
 
   function applyAndResolve(world,vacancyId,personId,options){
     const applied=submitApplication(world,vacancyId,personId,options);
-    if(!applied.applied&&(!applied.application||applied.application.status==='rejected')) return applied;
+    // Only resolve when a new or existing pending application exists --
+    // never for a vacancy_unavailable/vacancy_full/annual_application_cap/
+    // qualification/duplicate-terminal result.
+    if(!applied.application||applied.application.status!=='pending') return applied;
     const vacancy=resolveVacancy(world,vacancyId,options);
     const application=vacancy.applications.find(a=>a.personId===String(personId));
-    return {applied:true,application,vacancy,qualification:applied.qualification};
+    return {applied:true,reason:application?application.reason:applied.reason,application,vacancy,qualification:applied.qualification};
   }
 
   function cloneRequirements(req){

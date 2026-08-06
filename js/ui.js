@@ -1257,17 +1257,28 @@ function openJobDetail(trackId,vacancyId){
     const reqParts=eduRow+Object.keys(st.req).map(k=>{const have=S.skills[k]||0,need=st.req[k],ok=have>=need,pct=Math.min(100,Math.round(have/need*100));
       return '<div class="reqrow"><span class="'+(ok?'reqok':'reqno')+'">'+SKILLS[k].icon+' '+SKILLS[k].name+' '+have+'/'+need+'</span>'+
         '<div class="sbar mini"><div class="sfill" style="width:'+pct+'%;background:'+(ok?'var(--green)':'var(--blue)')+'"></div></div></div>';}).join('');
+    const canApplySelected=persistent&&isOpen&&openVacancyId&&v&&v.qualifies===true&&v.applicationStatus!=='pending'&&v.applicationStatus!=='accepted';
     const applyBtn=isOpen?(persistent
-      ?(openVacancyId?'<button class="btn small" data-apply data-vacancy="'+openVacancyId+'">Apply ▸</button>':'')
+      ?(canApplySelected?'<button class="btn small" data-apply data-vacancy="'+openVacancyId+'">Apply ▸</button>':'')
       :'<button class="btn small" data-apply data-track="'+trackId+'" data-stage="'+idx+'">Apply ▸</button>'):'';
     rows+='<div class="arow'+(qualifies?'':' locked')+'"><div class="ar-grade">'+(idx+1)+'</div>'+
       '<div style="flex:1"><div class="ar-name">'+st.name+' '+tag+'</div>'+
-      '<div class="ar-meta">'+money(st.salary)+'/yr · age '+minAge+'+'+(idx>0?' · '+expYears+'y served in prior stage':'')+'</div>'+
+      '<div class="ar-meta">'+money(st.salary)+'/yr (standard track salary) · age '+minAge+'+'+(idx>0?' · '+expYears+'y served in prior stage':'')+'</div>'+
       '<div class="ar-meta">'+reqParts+(S.age<minAge?' · too young yet':'')+'</div></div>'+
       applyBtn+
       '</div>';
   });
+  const selectedBanner=(persistent&&v)?(
+    '<div class="aempty" style="margin:6px 2px 12px"><b>SELECTED OPENING</b><br>'+
+    v.occupationName+' at '+v.businessName+' · '+money(v.annualSalary)+'/yr · stage '+(v.stage==null?'-':v.stage+1)+' (tier '+v.jobTier+')<br>'+
+    'Opened '+v.openedYear+(Number.isFinite(v.expiresYear)?' · expires '+v.expiresYear+(Number.isFinite(World.year)?' ('+Math.max(0,v.expiresYear-World.year)+'y left)':''):'')+'<br>'+
+    vacancyRequirementSummary(v)+'<br>'+
+    (v.qualifies?'Qualified for this opening.':'Not yet qualified for this opening.')+
+    (v.applicationStatus?' · application '+v.applicationStatus+(v.applicationReason?' ('+v.applicationReason+')':''):'')+
+    '</div>'
+  ):'';
   $('#jobDetailSheet').innerHTML='<div class="ps-head"><span>'+track.icon+' '+track.name.toUpperCase()+'</span><span>CAREER LADDER</span></div>'+
+    selectedBanner+
     '<div class="aempty" style="margin:6px 2px 12px">'+(typeof CAREER_PATH_LABELS!=='undefined'&&CAREER_PATH_LABELS[track.id]?CAREER_PATH_LABELS[track.id]+'. ':'')+(careerAdvantage.kind!=='none'?careerAdvantage.label+' · improves hiring and progression. ':'')+'Each rung states its education rule: no degree, a general degree, or a specific major. Higher rungs also call for more skill and years served below.</div>'+
     '<div style="margin:0 2px">'+rows+'</div>'+
     '<div class="ps-foot"><button class="btn" id="jobDetailClose">Close ▸</button></div>';

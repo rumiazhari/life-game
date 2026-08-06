@@ -1275,3 +1275,240 @@ test('NPC seeding respects deterministic ranked order and the per-vacancy applic
   })()`);
   assert.ok(result<=4);
 });
+
+/* ===== Correctness hardening: duplicate/cross-business embedded vacancy OBJECTS (section 5) ===== */
+
+test('a usable embedded object referencing this business\'s own top-level vacancy is not duplicated',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.get(World,'${business.id}');
+    const v=VacancySystem.open(World,{businessId:b.id,occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000});
+    b.vacancies=[Object.assign({},v)];
+    VacancySystem.migrate(World);
+    const all=Object.values(World.vacancies);
+    return JSON.stringify({total:all.length,status:World.vacancies[v.id].status});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.total,1);
+  assert.equal(parsed.status,'open');
+});
+
+test('a repeated usable embedded object for the same vacancy becomes a withdrawn duplicate placeholder',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.get(World,'${business.id}');
+    const v=VacancySystem.open(World,{businessId:b.id,occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000});
+    b.vacancies=[Object.assign({},v),Object.assign({},v)];
+    VacancySystem.migrate(World);
+    const all=Object.values(World.vacancies);
+    const duplicatePlaceholder=all.find(r=>r.closedReason==='migration_duplicate_reference');
+    return JSON.stringify({total:all.length,originalStatus:World.vacancies[v.id].status,duplicateFound:!!duplicatePlaceholder,duplicateStatus:duplicatePlaceholder?duplicatePlaceholder.status:null});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.total,2);
+  assert.equal(parsed.originalStatus,'open');
+  assert.equal(parsed.duplicateFound,true);
+  assert.equal(parsed.duplicateStatus,'withdrawn');
+});
+
+test('a usable embedded object referencing another business\'s vacancy id cannot become a second open record',()=>{
+  const context=freshWorld();
+  const b1=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const b2=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'finance'}));
+  const result=expose(context,`(function(){
+    const business1=BusinessSystem.get(World,'${b1.id}');
+    const business2=BusinessSystem.get(World,'${b2.id}');
+    const v=VacancySystem.open(World,{businessId:business1.id,occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000});
+    business2.vacancies=[Object.assign({},v)];
+    VacancySystem.migrate(World);
+    const all=Object.values(World.vacancies);
+    const openCount=all.filter(r=>r.status==='open').length;
+    const crossPlaceholder=all.find(r=>r.closedReason==='migration_cross_business_reference');
+    return JSON.stringify({total:all.length,openCount,ownerBusiness:World.vacancies[v.id].businessId,crossFound:!!crossPlaceholder,crossBusiness:crossPlaceholder?crossPlaceholder.businessId:null});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.total,2);
+  assert.equal(parsed.openCount,1);
+  assert.equal(parsed.ownerBusiness,b1.id);
+  assert.equal(parsed.crossFound,true);
+  assert.equal(parsed.crossBusiness,b2.id);
+});
+
+test('two usable embedded objects sharing the same id never create two open records',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.get(World,'${business.id}');
+    b.vacancies=[
+      {id:'vacancy:00099',businessId:b.id,occupationType:'job',occupationName:'Clerk',jobTier:1,annualSalary:900,status:'open'},
+      {id:'vacancy:00099',businessId:b.id,occupationType:'job',occupationName:'Clerk',jobTier:1,annualSalary:900,status:'open'}
+    ];
+    VacancySystem.migrate(World);
+    const all=Object.values(World.vacancies);
+    return JSON.stringify({total:all.length,openCount:all.filter(r=>r.status==='open').length});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.openCount,1);
+});
+
+test('duplicate open role keys at the same business are reported by checkInvariants',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.get(World,'${business.id}');
+    VacancySystem.open(World,{businessId:b.id,occupationType:'job',occupationId:'clerk',occupationName:'Clerk A',jobTier:1,annualSalary:1000});
+    World.vacancies['vacancy:00090']={id:'vacancy:00090',businessId:b.id,settlementId:'branec',occupationType:'job',occupationId:'clerk',occupationName:'Clerk B',careerStage:null,jobTier:1,annualSalary:1000,requirements:{minAge:0,educationStage:null,majorIds:[],skills:{},minCareerYears:0},openedYear:World.year,expiresYear:World.year+2,status:'open',filledByPersonId:null,filledContractId:null,filledYear:null,closedReason:null,applications:[],history:[]};
+    return JSON.stringify(VacancySystem.checkInvariants(World));
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.some(issue=>/more than one open vacancy with role key/.test(issue)));
+});
+
+test('migrating a business with duplicate and cross-business embedded objects twice is byte-for-byte identical',()=>{
+  const context=freshWorld();
+  const b1=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const b2=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'finance'}));
+  const result=expose(context,`(function(){
+    const business1=BusinessSystem.get(World,'${b1.id}');
+    const business2=BusinessSystem.get(World,'${b2.id}');
+    const v=VacancySystem.open(World,{businessId:business1.id,occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000});
+    business1.vacancies=[Object.assign({},v),Object.assign({},v)];
+    business2.vacancies=[Object.assign({},v)];
+    VacancySystem.migrate(World);
+    const first=JSON.stringify(World.vacancies);
+    VacancySystem.migrate(World);
+    const second=JSON.stringify(World.vacancies);
+    return first===second?'stable':'changed';
+  })()`);
+  assert.equal(result,'stable');
+});
+
+/* ===== Correctness hardening: concrete application failure reasons (section 6) ===== */
+
+test('submitApplication reports vacancy_unavailable for a missing or non-open vacancy',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000});
+    VacancySystem.withdraw(World,v.id,'cleanup',World.year);
+    const result=VacancySystem.submitApplication(World,v.id,'npc:a',{year:World.year});
+    return JSON.stringify({applied:result.applied,reason:result.reason});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.applied,false);
+  assert.equal(parsed.reason,'vacancy_unavailable');
+});
+
+test('submitApplication reports duplicate_application and returns the existing application unresolved',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}}};
+    const first=VacancySystem.submitApplication(World,v.id,'npc:a',{year:World.year});
+    const second=VacancySystem.submitApplication(World,v.id,'npc:a',{year:World.year});
+    return JSON.stringify({firstApplied:first.applied,secondApplied:second.applied,secondReason:second.reason,sameApplication:second.application&&first.application&&second.application.personId===first.application.personId});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.firstApplied,true);
+  assert.equal(parsed.secondApplied,false);
+  assert.equal(parsed.secondReason,'duplicate_application');
+  assert.equal(parsed.sameApplication,true);
+});
+
+test('submitApplication reports vacancy_full once the per-vacancy application cap is reached',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail',kind:'public'}));
+  const result=expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    for(let i=0;i<VacancySystem.MAX_APPLICATIONS_PER_VACANCY;i++){
+      const id='npc:full'+i;
+      World.npcs=World.npcs||{};
+      World.npcs[id]={id,alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}};
+      VacancySystem.submitApplication(World,v.id,id,{year:World.year});
+    }
+    World.npcs['npc:overflow']={id:'npc:overflow',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}};
+    const overflow=VacancySystem.submitApplication(World,v.id,'npc:overflow',{year:World.year});
+    return JSON.stringify({applied:overflow.applied,reason:overflow.reason});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.applied,false);
+  assert.equal(parsed.reason,'vacancy_full');
+});
+
+test('applyAndResolve preserves the submitApplication reason and never resolves a non-pending result',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000});
+    VacancySystem.withdraw(World,v.id,'cleanup',World.year);
+    const before=JSON.stringify(World.vacancies[v.id]);
+    const result=VacancySystem.applyAndResolve(World,v.id,'npc:a',{year:World.year});
+    const after=JSON.stringify(World.vacancies[v.id]);
+    return JSON.stringify({applied:result.applied,reason:result.reason,unchanged:before===after});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.applied,false);
+  assert.equal(parsed.reason,'vacancy_unavailable');
+  assert.equal(parsed.unchanged,true);
+});
+
+/* ===== Correctness hardening: exactly-one-accepted-application invariant (section 9) ===== */
+
+test('checkInvariants flags a filled vacancy with zero accepted applications',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    const c=EmploymentSystem.hire(World,{personId:'npc:a',businessId:'${business.id}',annualSalary:1000,hiredYear:World.year});
+    v.status='filled'; v.filledByPersonId='npc:a'; v.filledContractId=c.id; v.filledYear=World.year;
+    v.applications=[];
+    return JSON.stringify(VacancySystem.checkInvariants(World));
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.some(issue=>/does not have exactly one accepted application/.test(issue)));
+});
+
+test('checkInvariants flags a filled vacancy with two accepted applications',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    const c=EmploymentSystem.hire(World,{personId:'npc:a',businessId:'${business.id}',annualSalary:1000,hiredYear:World.year});
+    v.status='filled'; v.filledByPersonId='npc:a'; v.filledContractId=c.id; v.filledYear=World.year;
+    v.applications=[
+      {personId:'npc:a',workerType:'npc',kind:'new_hire',appliedYear:World.year,score:80,status:'accepted',resolvedYear:World.year,reason:null},
+      {personId:'npc:b',workerType:'npc',kind:'new_hire',appliedYear:World.year,score:70,status:'accepted',resolvedYear:World.year,reason:null}
+    ];
+    return JSON.stringify(VacancySystem.checkInvariants(World));
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.some(issue=>/does not have exactly one accepted application/.test(issue)));
+});
+
+test('checkInvariants flags a non-filled vacancy that still has an accepted application',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    v.applications=[{personId:'npc:a',workerType:'npc',kind:'new_hire',appliedYear:World.year,score:80,status:'accepted',resolvedYear:World.year,reason:null}];
+    return JSON.stringify(VacancySystem.checkInvariants(World));
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.ok(parsed.some(issue=>/is not filled but has an accepted application/.test(issue)));
+});
+
+test('checkInvariants stays clean for a valid filled vacancy with exactly one accepted application',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}}};
+    const applied=VacancySystem.applyAndResolve(World,v.id,'npc:a',{year:World.year});
+    return JSON.stringify({accepted:applied.reason,invariants:VacancySystem.checkInvariants(World)});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.deepEqual(parsed.invariants,[]);
+});

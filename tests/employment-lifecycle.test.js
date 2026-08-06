@@ -973,3 +973,253 @@ test('a non-vacancy NPC contract ended from legacy unemployment receives income 
   const employment=JSON.parse(result);
   assert.equal(employment.income,0);
 });
+
+/* ===== Correctness hardening: historical vacancy assignments survive promotions (section 1/2) ===== */
+
+test('a stage-zero filled vacancy remains valid after the same contract is promoted to stage one',()=>{
+  const context=freshWorld();
+  const biz=business(context,{settlementId:'branec',sector:'healthcare',kind:'public'});
+  registerNpc(context,'npc:a');
+  const result=expose(context,`(function(){
+    const v0=VacancySystem.open(World,{businessId:'${biz.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    const r0=EmploymentSystem.acceptVacancy(World,v0,'npc:a',{year:1928});
+    VacancySystem.resolveVacancy===VacancySystem.resolveVacancy;
+    v0.status='filled'; v0.filledByPersonId='npc:a'; v0.filledContractId=r0.contract.id; v0.filledYear=1928;
+    v0.applications=[{personId:'npc:a',status:'accepted',resolvedYear:1928}];
+    const v1=VacancySystem.open(World,{businessId:'${biz.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minCareerYears:0}});
+    const r1=EmploymentSystem.promote(World,r0.contract.id,v1.id,1930);
+    v1.status='filled'; v1.filledByPersonId='npc:a'; v1.filledContractId=r0.contract.id; v1.filledYear=1930;
+    v1.applications=[{personId:'npc:a',status:'accepted',resolvedYear:1930}];
+    VacancySystem.migrate(World);
+    const firstMigrate=JSON.stringify(World.vacancies);
+    VacancySystem.migrate(World);
+    const secondMigrate=JSON.stringify(World.vacancies);
+    return JSON.stringify({
+      sameContract:r1.contract.id===r0.contract.id,
+      v0Status:World.vacancies[v0.id].status,
+      v1Status:World.vacancies[v1.id].status,
+      v0Contract:World.vacancies[v0.id].filledContractId,
+      v1Contract:World.vacancies[v1.id].filledContractId,
+      invariantsClean:VacancySystem.checkInvariants(World).length===0,
+      migrationStable:firstMigrate===secondMigrate
+    });
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.sameContract,true);
+  assert.equal(parsed.v0Status,'filled');
+  assert.equal(parsed.v1Status,'filled');
+  assert.equal(parsed.v0Contract,parsed.v1Contract);
+  assert.equal(parsed.invariantsClean,true);
+  assert.equal(parsed.migrationStable,true);
+});
+
+test('two consecutive internal promotions leave three historical fills all valid',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'healthcare',kind:'public'});
+  registerNpc(context,'npc:a');
+  const result=expose(context,`(function(){
+    const v0=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    const r0=EmploymentSystem.acceptVacancy(World,v0,'npc:a',{year:1920});
+    v0.status='filled'; v0.filledByPersonId='npc:a'; v0.filledContractId=r0.contract.id; v0.filledYear=1920;
+    v0.applications=[{personId:'npc:a',status:'accepted',resolvedYear:1920}];
+    const v1=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minCareerYears:0}});
+    EmploymentSystem.promote(World,r0.contract.id,v1.id,1925);
+    v1.status='filled'; v1.filledByPersonId='npc:a'; v1.filledContractId=r0.contract.id; v1.filledYear=1925;
+    v1.applications=[{personId:'npc:a',status:'accepted',resolvedYear:1925}];
+    const v2=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'career',occupationId:'medicine',occupationName:'Chief',careerStage:2,jobTier:3,annualSalary:2000,requirements:{minCareerYears:0}});
+    EmploymentSystem.promote(World,r0.contract.id,v2.id,1930);
+    v2.status='filled'; v2.filledByPersonId='npc:a'; v2.filledContractId=r0.contract.id; v2.filledYear=1930;
+    v2.applications=[{personId:'npc:a',status:'accepted',resolvedYear:1930}];
+    VacancySystem.migrate(World);
+    return JSON.stringify({v0:World.vacancies[v0.id].status,v1:World.vacancies[v1.id].status,v2:World.vacancies[v2.id].status,invariants:VacancySystem.checkInvariants(World)});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.v0,'filled');
+  assert.equal(parsed.v1,'filled');
+  assert.equal(parsed.v2,'filled');
+  assert.deepEqual(parsed.invariants,[]);
+});
+
+test('recordVacancyAssignment copies the vacancy and does not retain a mutable reference',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail'});
+  const result=expose(context,`(function(){
+    const c=EmploymentSystem.hire(World,{personId:'npc:a',businessId:'${b.id}',annualSalary:1000,hiredYear:1930});
+    const vacancy={id:'vacancy:00050',businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',careerStage:null,jobTier:1,annualSalary:1000};
+    EmploymentSystem.recordVacancyAssignment(World,c.id,vacancy,1930);
+    vacancy.annualSalary=999999;
+    const stored=EmploymentSystem.get(World,c.id).vacancyAssignments.find(a=>a.vacancyId==='vacancy:00050');
+    return stored.annualSalary;
+  })()`);
+  assert.equal(result,1000);
+});
+
+test('contractHasVacancyAssignment requires an exact role match, not just the vacancy ID',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail'});
+  const result=expose(context,`(function(){
+    const c=EmploymentSystem.hire(World,{personId:'npc:a',businessId:'${b.id}',annualSalary:1000,hiredYear:1930});
+    const vacancy={id:'vacancy:00051',businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',careerStage:null,jobTier:1,annualSalary:1000};
+    EmploymentSystem.recordVacancyAssignment(World,c.id,vacancy,1930);
+    const contract=EmploymentSystem.get(World,c.id);
+    const sameRole={id:'vacancy:00051',businessId:'${b.id}',occupationType:'job',occupationId:'clerk',careerStage:null,jobTier:1};
+    const differentTier={id:'vacancy:00051',businessId:'${b.id}',occupationType:'job',occupationId:'clerk',careerStage:null,jobTier:2};
+    return JSON.stringify({
+      matches:EmploymentSystem.contractHasVacancyAssignment(contract,sameRole),
+      mismatches:EmploymentSystem.contractHasVacancyAssignment(contract,differentTier)
+    });
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.matches,true);
+  assert.equal(parsed.mismatches,false);
+});
+
+/* ===== Correctness hardening: invalid-filled repair is safe and idempotent (section 3) ===== */
+
+test('a filled vacancy record with missing history does not throw during migration',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail'});
+  const result=expose(context,`(function(){
+    World.vacancies['vacancy:00001']={id:'vacancy:00001',businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',careerStage:null,jobTier:1,annualSalary:1000,requirements:{},openedYear:1928,expiresYear:1935,status:'filled',filledByPersonId:'npc:ghost',filledContractId:'employment:00099',filledYear:1929,closedReason:null,applications:[]};
+    VacancySystem.migrate(World);
+    return World.vacancies['vacancy:00001'].status;
+  })()`);
+  assert.equal(result,'withdrawn');
+});
+
+test('a filled vacancy record with null history does not throw during migration',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail'});
+  const result=expose(context,`(function(){
+    World.vacancies['vacancy:00001']={id:'vacancy:00001',businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',careerStage:null,jobTier:1,annualSalary:1000,requirements:{},openedYear:1928,expiresYear:1935,status:'filled',filledByPersonId:'npc:ghost',filledContractId:'employment:00099',filledYear:1929,closedReason:null,applications:[],history:null};
+    VacancySystem.migrate(World);
+    return World.vacancies['vacancy:00001'].status;
+  })()`);
+  assert.equal(result,'withdrawn');
+});
+
+test('an invalid linked contract is repaired exactly once across repeated migrations',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail'});
+  const result=expose(context,`(function(){
+    World.vacancies['vacancy:00001']={id:'vacancy:00001',businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',careerStage:null,jobTier:1,annualSalary:1000,requirements:{},openedYear:1928,expiresYear:1935,status:'filled',filledByPersonId:'npc:ghost',filledContractId:'employment:00099',filledYear:1929,closedReason:null,applications:[{personId:'npc:ghost',status:'accepted',resolvedYear:1929}],history:[]};
+    VacancySystem.migrate(World);
+    const firstHistory=JSON.stringify(World.vacancies['vacancy:00001'].history);
+    VacancySystem.migrate(World);
+    const secondHistory=JSON.stringify(World.vacancies['vacancy:00001'].history);
+    VacancySystem.migrate(World);
+    const thirdHistory=JSON.stringify(World.vacancies['vacancy:00001'].history);
+    const record=World.vacancies['vacancy:00001'];
+    const repairEvents=record.history.filter(h=>h.type==='migration_repaired'&&h.legacyValue==='invalid_filled_contract');
+    return JSON.stringify({firstEqualsSecond:firstHistory===secondHistory,secondEqualsThird:secondHistory===thirdHistory,repairEventCount:repairEvents.length});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.firstEqualsSecond,true);
+  assert.equal(parsed.secondEqualsThird,true);
+  assert.equal(parsed.repairEventCount,1);
+});
+
+test('legitimate historical fills from prior-stage backfill inference are not repaired',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'healthcare',kind:'public'});
+  registerNpc(context,'npc:a');
+  const result=expose(context,`(function(){
+    const v0=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    const r0=EmploymentSystem.acceptVacancy(World,v0,'npc:a',{year:1920});
+    v0.status='filled'; v0.filledByPersonId='npc:a'; v0.filledContractId=r0.contract.id; v0.filledYear=1920;
+    v0.applications=[{personId:'npc:a',status:'accepted',resolvedYear:1920}];
+    const v1=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minCareerYears:0}});
+    EmploymentSystem.promote(World,r0.contract.id,v1.id,1925);
+    v1.status='filled'; v1.filledByPersonId='npc:a'; v1.filledContractId=r0.contract.id; v1.filledYear=1925;
+    v1.applications=[{personId:'npc:a',status:'accepted',resolvedYear:1925}];
+    // Drop the immutable snapshots to force the migration to fall back to
+    // legacy promoted-history inference (section 2, path D).
+    EmploymentSystem.get(World,r0.contract.id).vacancyAssignments=[];
+    VacancySystem.migrate(World);
+    return JSON.stringify({v0:World.vacancies[v0.id].status,v1:World.vacancies[v1.id].status});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.v0,'filled');
+  assert.equal(parsed.v1,'filled');
+});
+
+/* ===== Correctness hardening: orphan repair preserves a valid survivor (section 4) ===== */
+
+test('a subject with one orphan contract and one valid active contract keeps the valid contract authoritative',()=>{
+  const context=freshWorld();
+  const b1=business(context,{settlementId:'branec',sector:'retail'});
+  const b2=business(context,{settlementId:'branec',sector:'finance'});
+  const result=expose(context,`(function(){
+    const subject={employmentContractId:null,jobTier:0,jobName:'Unemployed',career:null,careerYears:0,location:{settlementId:'branec'}};
+    const orphan=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b1.id}',occupationType:'job',occupationName:'Old',jobTier:1,annualSalary:900,hiredYear:1925});
+    World.employmentContractCounter=World.employmentContractCounter+1;
+    const survivorId='employment:'+String(World.employmentContractCounter).padStart(5,'0');
+    World.employmentContracts[survivorId]={id:survivorId,personId:'subject',workerType:'player',businessId:'${b2.id}',settlementId:'branec',occupationType:'job',occupationId:'newjob',occupationName:'New Job',careerStage:null,jobTier:3,annualSalary:2500,hiredYear:1930,endedYear:null,status:'active',terminationReason:null,performance:0.5,satisfaction:0.5,lastPaidYear:null,annualPaid:0,history:[],origin:'legacy',stageStartedYear:1930,lastReviewYear:null,lastLifecycleYear:null,lastPromotionAttemptYear:null,vacancyAssignments:[]};
+    delete World.businesses['${b1.id}'];
+    EmploymentSystem.migrate(World,{subject});
+    EmploymentSystem.reconcilePlayer(World,subject);
+    return JSON.stringify({subject,active:EmploymentSystem.activeForPerson(World,'subject').map(c=>c.id),orphanStatus:EmploymentSystem.get(World,orphan.id).status});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.orphanStatus,'terminated');
+  assert.equal(parsed.active.length,1);
+  assert.equal(parsed.subject.jobTier,3);
+  assert.equal(parsed.subject.jobName,'New Job');
+  assert.equal(parsed.subject.careerYears,0);
+});
+
+test('an NPC equivalent orphan repair remains employed through its valid contract',()=>{
+  const context=freshWorld();
+  const b1=business(context,{settlementId:'branec',sector:'retail'});
+  const b2=business(context,{settlementId:'branec',sector:'finance'});
+  registerNpc(context,'npc:a');
+  const result=expose(context,`(function(){
+    const orphan=EmploymentSystem.hire(World,{personId:'npc:a',businessId:'${b1.id}',annualSalary:900,hiredYear:1925});
+    World.employmentContractCounter=World.employmentContractCounter+1;
+    const survivorId='employment:'+String(World.employmentContractCounter).padStart(5,'0');
+    World.employmentContracts[survivorId]={id:survivorId,personId:'npc:a',workerType:'npc',businessId:'${b2.id}',settlementId:'branec',occupationType:'job',occupationId:'newjob',occupationName:'New Job',careerStage:null,jobTier:2,annualSalary:1200,hiredYear:1930,endedYear:null,status:'active',terminationReason:null,performance:0.5,satisfaction:0.5,lastPaidYear:null,annualPaid:0,history:[],origin:'legacy',stageStartedYear:1930,lastReviewYear:null,lastLifecycleYear:null,lastPromotionAttemptYear:null,vacancyAssignments:[]};
+    delete World.businesses['${b1.id}'];
+    EmploymentSystem.migrate(World);
+    return JSON.stringify({employment:World.npcs['npc:a'].employment,active:EmploymentSystem.activeForPerson(World,'npc:a').map(c=>c.id)});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.employment.status,'employed');
+  assert.equal(parsed.employment.income,1200);
+  assert.equal(parsed.active.length,1);
+});
+
+test('a person with only orphan contracts becomes unemployed after migration',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail'});
+  const result=expose(context,`(function(){
+    const subject={employmentContractId:null,jobTier:1,jobName:'Worker',career:null,careerYears:1,location:{settlementId:'branec'}};
+    const c=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b.id}',annualSalary:900,hiredYear:1930});
+    subject.employmentContractId=c.id;
+    delete World.businesses['${b.id}'];
+    EmploymentSystem.migrate(World,{subject});
+    return JSON.stringify(subject);
+  })()`);
+  const subject=JSON.parse(result);
+  assert.equal(subject.jobTier,0);
+  assert.equal(subject.jobName,'Unemployed');
+});
+
+test('orphan-plus-survivor migration is idempotent',()=>{
+  const context=freshWorld();
+  const b1=business(context,{settlementId:'branec',sector:'retail'});
+  const b2=business(context,{settlementId:'branec',sector:'finance'});
+  const result=expose(context,`(function(){
+    const subject={employmentContractId:null,jobTier:0,jobName:'Unemployed',career:null,careerYears:0,location:{settlementId:'branec'}};
+    EmploymentSystem.hire(World,{personId:'subject',businessId:'${b1.id}',annualSalary:900,hiredYear:1925});
+    World.employmentContractCounter=World.employmentContractCounter+1;
+    const survivorId='employment:'+String(World.employmentContractCounter).padStart(5,'0');
+    World.employmentContracts[survivorId]={id:survivorId,personId:'subject',workerType:'player',businessId:'${b2.id}',settlementId:'branec',occupationType:'job',occupationId:'newjob',occupationName:'New Job',careerStage:null,jobTier:3,annualSalary:2500,hiredYear:1930,endedYear:null,status:'active',terminationReason:null,performance:0.5,satisfaction:0.5,lastPaidYear:null,annualPaid:0,history:[],origin:'legacy',stageStartedYear:1930,lastReviewYear:null,lastLifecycleYear:null,lastPromotionAttemptYear:null,vacancyAssignments:[]};
+    delete World.businesses['${b1.id}'];
+    EmploymentSystem.migrate(World,{subject});
+    const first=JSON.stringify(World.employmentContracts);
+    EmploymentSystem.migrate(World,{subject});
+    const second=JSON.stringify(World.employmentContracts);
+    return first===second?'stable':'changed';
+  })()`);
+  assert.equal(result,'stable');
+});

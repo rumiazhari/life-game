@@ -628,7 +628,9 @@ test('selecting a specific vacancy detail marks only that vacancy stage OPEN NOW
   const b2=seedPublicBusiness(context,'healthcare');
   const result=JSON.parse(expose(context,`(function(){
     VacancySystem.open(World,{businessId:'${b1.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior A',careerStage:0,jobTier:1,annualSalary:1000,requirements:{minAge:16}});
-    const v2=VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior B',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minAge:16}});
+    const c=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b2.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior B',careerStage:0,jobTier:1,annualSalary:1000,hiredYear:World.year-2,stageStartedYear:World.year-2});
+    S.employmentContractId=c.id; S.jobTier=1; S.career='medicine'; S.jobName='Junior B';
+    const v2=VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior B',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minAge:16,minCareerYears:0}});
     rollJobVacancies();
     openJobDetail('medicine',v2.id);
     const html=$('#jobDetailSheet').innerHTML;
@@ -637,6 +639,35 @@ test('selecting a specific vacancy detail marks only that vacancy stage OPEN NOW
   })()`));
   assert.equal(result.openNowCount,1);
   assert.equal(result.hasApplyForV2,true);
+});
+
+test('an unqualified selected opening has no Apply button',()=>{
+  const context=uiContext('unqualified-no-apply');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'healthcare');
+  const result=JSON.parse(expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minAge:16}});
+    rollJobVacancies();
+    openJobDetail('medicine',v.id);
+    const html=$('#jobDetailSheet').innerHTML;
+    return html.includes('data-vacancy="'+v.id+'"');
+  })()`));
+  assert.equal(result,false);
+});
+
+test('a pending application on the selected opening has no second Apply button',()=>{
+  const context=uiContext('pending-no-second-apply');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'career',occupationId:'business',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    VacancySystem.submitApplication(World,v.id,'subject',{subject:S,year:World.year});
+    rollJobVacancies();
+    openJobDetail('business',v.id);
+    const html=$('#jobDetailSheet').innerHTML;
+    return html.includes('data-vacancy="'+v.id+'"');
+  })()`));
+  assert.equal(result,false);
 });
 
 test('applying from each row targets the correct business',()=>{
@@ -789,4 +820,79 @@ test('a qualification-failed promotion attempt reports not_qualified and leaves 
   assert.equal(result.accepted,false);
   assert.equal(result.reason,'insufficient_tenure');
   assert.equal(result.vacancyStatus,'open');
+});
+
+test('lookwork reports vacancy_full through the actual pursuit path without mutating employment',()=>{
+  const context=uiContext('lookwork-vacancy-full');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    for(let i=0;i<VacancySystem.MAX_APPLICATIONS_PER_VACANCY;i++){
+      const id='npc:full'+i;
+      World.npcs=World.npcs||{};
+      World.npcs[id]={id,alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}};
+      VacancySystem.submitApplication(World,v.id,id,{year:World.year});
+    }
+    const jobTierBefore=S.jobTier;
+    const r=PUR_MAP['lookwork'].apply(S,{vacancyId:v.id});
+    return JSON.stringify({reason:r.reason,jobTierBefore,jobTierAfter:S.jobTier,vacancyStatus:VacancySystem.get(World,v.id).status});
+  })()`));
+  assert.equal(result.reason,'vacancy_full');
+  assert.equal(result.jobTierAfter,result.jobTierBefore);
+  assert.equal(result.vacancyStatus,'open');
+});
+
+test('presspromo reports vacancy_full through the actual decision path without resolving the vacancy',()=>{
+  const context=uiContext('presspromo-vacancy-full');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'healthcare');
+  const result=JSON.parse(expose(context,`(function(){
+    const c=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,hiredYear:World.year-5,stageStartedYear:World.year-5});
+    S.employmentContractId=c.id; S.jobTier=1; S.career='medicine'; S.jobName='Junior';
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minCareerYears:0}});
+    for(let i=0;i<VacancySystem.MAX_APPLICATIONS_PER_VACANCY;i++){
+      const id='npc:full'+i;
+      World.npcs=World.npcs||{};
+      World.npcs[id]={id,alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}};
+      VacancySystem.submitApplication(World,v.id,id,{year:World.year});
+    }
+    const r=DEC_MAP['presspromo'].apply(S,{});
+    return JSON.stringify({reason:r.reason,jobTier:EmploymentSystem.get(World,c.id).jobTier,vacancyStatus:VacancySystem.get(World,v.id).status});
+  })()`));
+  assert.equal(result.reason,'vacancy_full');
+  assert.equal(result.jobTier,1);
+  assert.equal(result.vacancyStatus,'open');
+});
+
+/* ===== Correctness hardening: employer-specific career detail banner (section 8) ===== */
+
+test('selecting employer A vs employer B shows only that employer\'s salary, requirements, and vacancyId in the banner',()=>{
+  const context=uiContext('banner-employer-specific');
+  configureAdult(context);
+  const b1=seedPublicBusiness(context,'healthcare');
+  const b2=seedPublicBusiness(context,'healthcare');
+  const result=JSON.parse(expose(context,`(function(){
+    const vA=VacancySystem.open(World,{businessId:'${b1.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior A',careerStage:0,jobTier:1,annualSalary:1200,requirements:{minAge:16}});
+    const vB=VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior B',careerStage:0,jobTier:1,annualSalary:1800,requirements:{minAge:16}});
+    rollJobVacancies();
+    openJobDetail('medicine',vA.id);
+    const htmlA=$('#jobDetailSheet').innerHTML;
+    openJobDetail('medicine',vB.id);
+    const htmlB=$('#jobDetailSheet').innerHTML;
+    return JSON.stringify({
+      aHasOwnSalary:htmlA.includes('1,200')||htmlA.includes('1200'),
+      aExcludesOtherSalary:!htmlA.includes('1,800')&&!htmlA.includes('1800'),
+      bHasOwnSalary:htmlB.includes('1,800')||htmlB.includes('1800'),
+      bExcludesOtherSalary:!htmlB.includes('1,200')&&!htmlB.includes('1200'),
+      aHasOwnVacancyId:htmlA.includes(vA.id),
+      bHasOwnVacancyId:htmlB.includes(vB.id)
+    });
+  })()`));
+  assert.equal(result.aHasOwnSalary,true);
+  assert.equal(result.aExcludesOtherSalary,true);
+  assert.equal(result.bHasOwnSalary,true);
+  assert.equal(result.bExcludesOtherSalary,true);
+  assert.equal(result.aHasOwnVacancyId,true);
+  assert.equal(result.bHasOwnVacancyId,true);
 });

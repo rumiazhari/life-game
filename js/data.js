@@ -770,10 +770,14 @@ const PURSUITS=[
          const business=BusinessSystem&&typeof BusinessSystem.get==='function'?BusinessSystem.get(World,vacancy.businessId):null;
          return{fx:{happiness:4,assets:signingBonus-100},text:'Subject applied through the portal and was taken on as '+vacancy.occupationName+(track?', '+track.name:'')+' at '+(business?business.name:'a new employer')+'. '+money(vacancy.annualSalary)+' a year.'+(signingBonus?' A signing bonus of '+money(signingBonus)+' reflected the subject’s credentials.':'')};
        }
-       const reason=application?application.reason:'unfilled';
-       if(reason==='better_candidate') return{fx:{happiness:-4},text:'Subject applied through the portal, but the position went to a stronger candidate.'};
-       if(reason==='qualification') return{fx:{happiness:-2},text:'Subject applied through the portal, but did not meet what the position required.'};
-       return{fx:{happiness:-2},text:'Subject applied through the portal. Nothing came of it this year.'};
+       const reason=result.reason||(application?application.reason:'unfilled');
+       if(reason==='annual_application_cap') return{fx:{happiness:-2},text:'Subject had already used this year’s application allowance. The portal would not accept another form.',reason};
+       if(reason==='vacancy_full') return{fx:{happiness:-2},text:'Subject applied through the portal, but the employer had already stopped accepting forms for that opening.',reason};
+       if(reason==='vacancy_unavailable') return{fx:{happiness:-2},text:'Subject went back to the portal, but that opening had already closed.',reason};
+       if(reason==='better_candidate') return{fx:{happiness:-4},text:'Subject applied through the portal, but the position went to a stronger candidate.',reason};
+       if(reason==='qualification') return{fx:{happiness:-2},text:'Subject applied through the portal, but did not meet what the position required.',reason};
+       if(reason==='duplicate_application') return{fx:{happiness:-1},text:'Subject already had an application on file for that opening — it remains pending.',reason};
+       return{fx:{happiness:-2},text:'Subject applied through the portal. Nothing came of it this year.',reason:'unfilled'};
      }
      // Legacy fallback: only reached when VacancySystem/World are unavailable.
      const track=item&&CAREERS.find(c=>c.id===item.track); const stageIdx=item?item.stage:-1;
@@ -1044,10 +1048,13 @@ const DECISIONS=[
         const business=BusinessSystem&&typeof BusinessSystem.get==='function'?BusinessSystem.get(World,contract.businessId):null;
         return{fx:{happiness:5,assets:150},text:'Subject pressed for the promotion — and got it: '+contract.occupationName+' at '+(business?business.name:'the same employer')+'. '+money(contract.annualSalary)+' now, on paper.'};
       }
-      if(result.reason==='no_opening') return{fx:{happiness:-2},text:'Subject pressed for the promotion. There is no higher opening at this employer right now.'};
-      if(result.reason==='not_qualified'||result.reason==='insufficient_tenure') return{fx:{happiness:-2},text:'Subject pressed for the promotion. Not without more time or qualification, they said.'};
-      if(result.reason==='rejected') return{fx:{happiness:-4},text:'Subject pressed for the promotion. It went to a stronger candidate instead.'};
-      return{fx:{happiness:-2},text:'Subject pressed for the promotion. Nothing came of it this year.'};
+      if(result.reason==='annual_application_cap') return{fx:{happiness:-2},text:'Subject had already used this year’s application allowance. The promotion form was not accepted.',reason:'annual_application_cap'};
+      if(result.reason==='vacancy_full') return{fx:{happiness:-2},text:'Subject pressed for the promotion, but the employer had already stopped accepting forms for that opening.',reason:'vacancy_full'};
+      if(result.reason==='vacancy_unavailable') return{fx:{happiness:-2},text:'Subject pressed for the promotion, but the opening had already closed.',reason:'vacancy_unavailable'};
+      if(result.reason==='no_opening') return{fx:{happiness:-2},text:'Subject pressed for the promotion. There is no higher opening at this employer right now.',reason:'no_opening'};
+      if(result.reason==='not_qualified'||result.reason==='insufficient_tenure') return{fx:{happiness:-2},text:'Subject pressed for the promotion. Not without more time or qualification, they said.',reason:result.reason};
+      if(result.reason==='rejected') return{fx:{happiness:-4},text:'Subject pressed for the promotion. It went to a stronger candidate instead.',reason:'rejected'};
+      return{fx:{happiness:-2},text:'Subject pressed for the promotion. Nothing came of it this year.',reason:result.reason||'unfilled'};
     }
     if(S.career){ const track=CAREERS.find(c=>c.id===S.career);
       if(!careerStageQualifies(track,S.jobTier)){ const missing=careerMissingRequirements(track,S.jobTier);
