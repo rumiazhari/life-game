@@ -45,17 +45,18 @@ live branch head before trusting the step numbers below.
 12. `runEmploymentLifecycleYearTick()` — wrapper around
     `EmploymentSystem.tickWorld`; runs annual performance/satisfaction
     reviews, automatic age-65 retirement, and business-driven layoffs.
-13. `runVacancyYearTick()` — wrapper around `VacancySystem.tickWorld`
-    (expires stale openings, withdraws openings at missing/closed
-    businesses, then deterministically generates new openings per business
-    up to its target workforce), then, only if the tick actually applied
-    this year, seeds NPC applications (`VacancySystem.seedNpcApplications`)
-    for every open vacancy.
-14. `checkCareerProgress()` — remaining legacy player career-ladder
-    progression not yet expressed as an explicit vacancy/application (e.g.
-    passive tenure-based advancement); where it still changes
-    `S.jobTier`/`S.career`/`S.jobName` directly, the reconciliation in step
-    10 (and again in step 19) is what turns that into a contract.
+13. `runVacancyYearTick()` — calls `VacancySystem.tickWorld` to expire,
+    withdraw, and deterministically generate vacancies. It then seeds NPC
+    applications for every open vacancy in stable vacancy-ID order when the
+    tick either newly applied or reports `already_applied` for the current
+    year. A stale-year result does not seed. Application uniqueness and
+    annual caps make repeated same-year seeding safe.
+14. `checkCareerProgress()` — performs contract-backed automatic promotion.
+    It requires an active career contract, skips when `presspromo` is queued,
+    and delegates to `EmploymentSystem.considerAutomaticPromotion`.
+    Eligible automatic promotions use a prior-year next-stage vacancy,
+    retain the same contract ID, and synchronize the player compatibility
+    projection through EmploymentSystem.
 15. `syncPlayerVacancyPortal()` — first refresh of `S.vacancies` from
     `VacancySystem.playerPortalVacancies`. **Same-year openings remain
     visible here** — they are not auto-resolved this early, so the player
@@ -100,12 +101,19 @@ Notes on invariants this ordering is meant to preserve:
   player can act on it via `resolvePlan()` (step 17) before the automatic
   pending-resolution pass (step 18) only sweeps up openings from *previous*
   years that nobody explicitly resolved yet.
-- **`checkCareerProgress()` (step 14) is legacy**, not the persistent hiring
-  path — real hiring/promotion/dismissal/retirement go through
-  `EmploymentSystem`/`VacancySystem` directly (steps 12, 13, 17); step 14
-  remains only for whatever passive career-ladder behavior in `js/data.js`
-  has not yet been fully replaced, and its effects still get reconciled
-  into a contract by the surrounding steps.
+- **`checkCareerProgress()` (step 14) is the automatic persistent-promotion
+  adapter**, not a legacy path — it requires an active career contract and
+  delegates to `EmploymentSystem.considerAutomaticPromotion`, which
+  evaluates a prior-year next-stage vacancy and, when accepted, updates the
+  existing contract in place (same contract ID) via the same `promote()`
+  used by explicit hiring. It is distinct from the player's explicit
+  `presspromo` action (handled during `resolvePlan()`, step 17) — step 14 is
+  skipped whenever `presspromo` is already queued for the year, so the two
+  paths never compete for the same promotion. Both paths operate on real
+  persistent vacancies and `EmploymentSystem` contracts; neither is a
+  normal direct-`S`-mutation or random-promotion path (direct `S` mutation
+  in `checkCareerProgress()`'s source remains only as a fallback for the
+  case where `EmploymentSystem`/`World` are genuinely unavailable).
 
 `fastForward()` simply calls `advance()` (which calls `advanceYear()`) in a
 loop up to 15 times, quietly — it does not run a separate code path, so
@@ -146,9 +154,24 @@ assume any step below already runs in this position.
 20. Build the annual report and render UI.
 ```
 
-Steps 3, 9 (hiring/layoffs portion), 14 (taxes/mortgages portion), 15, 16,
-and 18 correspond to systems that are PLANNED, not IMPLEMENTED — see the
-linked phase pages.
+Target step 9's business-finance, hiring, and layoff capabilities are
+already IMPLEMENTED, through Phase 4C-3 and Phase 4C-5 (business finance/
+payroll, and hiring/promotion/layoffs/retirement, respectively) — see
+[Current actual order](#current-actual-order) above for where they actually
+run today. What remains PLANNED for step 9 is not the
+functionality itself but its future consolidation into a single registered
+`YearEngine` phase (see [Refactor strategy](#refactor-strategy) below).
+
+The genuinely unimplemented target-order items are:
+
+- step 3, national policy modifiers (Phase 10);
+- the mortgage and tax portions of step 14 (Phase 8 for mortgages/loans,
+  Phase 5 for taxes);
+- step 15, legal cases, surveillance, and government actions (Phase 5);
+- step 16, advancing narrative event chains (Phase 7);
+- step 18, estate settlement after deaths (Phase 9).
+
+See the linked phase pages for each.
 
 ## Refactor strategy
 
