@@ -598,3 +598,195 @@ test('application caps remain respected while seeding across every open vacancy 
   })()`));
   assert.ok(result<=2);
 });
+
+/* ===== Correctness hardening: job portal shows every opening (section 8) ===== */
+
+test('two same-track vacancies from different businesses both render with their own vacancy IDs',()=>{
+  const context=uiContext('portal-two-employers');
+  configureAdult(context);
+  const b1=seedPublicBusiness(context,'healthcare');
+  const b2=seedPublicBusiness(context,'healthcare');
+  const result=JSON.parse(expose(context,`(function(){
+    VacancySystem.open(World,{businessId:'${b1.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior A',careerStage:0,jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior B',careerStage:0,jobTier:1,annualSalary:1100,requirements:{minAge:16}});
+    rollJobVacancies();
+    openJobPortal();
+    const html=$('#jobSheet').innerHTML;
+    return JSON.stringify({
+      vacancyCount:S.vacancies.filter(v=>v.occupationType==='career').length,
+      hasBothIds:html.includes('data-vacancy-row=')&&S.vacancies.every(v=>html.includes(v.vacancyId))
+    });
+  })()`));
+  assert.equal(result.vacancyCount,2);
+  assert.equal(result.hasBothIds,true);
+});
+
+test('selecting a specific vacancy detail marks only that vacancy stage OPEN NOW',()=>{
+  const context=uiContext('detail-marks-correct-stage');
+  configureAdult(context);
+  const b1=seedPublicBusiness(context,'healthcare');
+  const b2=seedPublicBusiness(context,'healthcare');
+  const result=JSON.parse(expose(context,`(function(){
+    VacancySystem.open(World,{businessId:'${b1.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior A',careerStage:0,jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    const v2=VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior B',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minAge:16}});
+    rollJobVacancies();
+    openJobDetail('medicine',v2.id);
+    const html=$('#jobDetailSheet').innerHTML;
+    const openNowCount=(html.match(/OPEN NOW/g)||[]).length;
+    return JSON.stringify({openNowCount,hasApplyForV2:html.includes('data-vacancy="'+v2.id+'"')});
+  })()`));
+  assert.equal(result.openNowCount,1);
+  assert.equal(result.hasApplyForV2,true);
+});
+
+test('applying from each row targets the correct business',()=>{
+  const context=uiContext('apply-targets-correct-business');
+  configureAdult(context);
+  const b1=seedPublicBusiness(context,'retail');
+  const b2=seedPublicBusiness(context,'finance');
+  const result=JSON.parse(expose(context,`(function(){
+    const v1=VacancySystem.open(World,{businessId:'${b1.id}',occupationType:'job',occupationId:'clerk1',occupationName:'Clerk A',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    const v2=VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'job',occupationId:'clerk2',occupationName:'Clerk B',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    const r1=PUR_MAP['lookwork'].apply(S,{vacancyId:v1.id});
+    applyFx(r1.fx);
+    const businessId=EmploymentSystem.activeForPerson(World,'subject')[0].businessId;
+    return JSON.stringify({businessId,expected:'${b1.id}'});
+  })()`));
+  assert.equal(result.businessId,result.expected);
+});
+
+test('a general opening shows explicit requirements in its rendered row',()=>{
+  const context=uiContext('general-opening-requirements');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:21,skills:{retail:3}}});
+    rollJobVacancies();
+    openJobPortal();
+    const html=$('#jobSheet').innerHTML;
+    return JSON.stringify({hasAge:html.includes('age 21'),hasSkill:html.includes('3/10')});
+  })()`));
+  assert.equal(result.hasAge,true);
+  assert.equal(result.hasSkill,true);
+});
+
+test('no real career vacancy disappears from S.vacancies with multiple stages and employers open',()=>{
+  const context=uiContext('no-vacancy-disappears');
+  configureAdult(context);
+  const b1=seedPublicBusiness(context,'healthcare');
+  const b2=seedPublicBusiness(context,'healthcare');
+  const result=JSON.parse(expose(context,`(function(){
+    VacancySystem.open(World,{businessId:'${b1.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minAge:16}});
+    rollJobVacancies();
+    return S.vacancies.filter(v=>v.occupationType==='career').length;
+  })()`));
+  assert.equal(result,2);
+});
+
+/* ===== Correctness hardening: vacancy seeding robust to already-applied tick (section 10) ===== */
+
+test('calling VacancySystem.tickWorld directly then runVacancyYearTick in the same year still seeds applications',()=>{
+  const context=uiContext('already-applied-still-seeds');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:World.activeSettlementId,education:{level:'none'},employment:{}}};
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,openedYear:World.year-1,requirements:{minAge:16}});
+    VacancySystem.tickWorld(World,{year:World.year});
+    const beforeApps=VacancySystem.get(World,v.id).applications.length;
+    const result=runVacancyYearTick();
+    const afterApps=VacancySystem.get(World,v.id).applications.length;
+    return JSON.stringify({reason:result.reason,beforeApps,afterApps});
+  })()`));
+  assert.equal(result.reason,'already_applied');
+  assert.ok(result.afterApps>=result.beforeApps);
+  assert.ok(result.afterApps>0);
+});
+
+test('no duplicate applications are created when seeding runs after an already-applied tick',()=>{
+  const context=uiContext('no-duplicate-after-already-applied');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:World.activeSettlementId,education:{level:'none'},employment:{}}};
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,openedYear:World.year-1,requirements:{minAge:16}});
+    VacancySystem.tickWorld(World,{year:World.year});
+    runVacancyYearTick();
+    runVacancyYearTick();
+    const applications=VacancySystem.get(World,v.id).applications.filter(a=>a.personId==='npc:a');
+    return applications.length;
+  })()`));
+  assert.equal(result,1);
+});
+
+test('a stale-year tickWorld result does not trigger seeding',()=>{
+  const context=uiContext('stale-year-no-seed');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:World.activeSettlementId,education:{level:'none'},employment:{}}};
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,openedYear:World.year-1,requirements:{minAge:16}});
+    VacancySystem.tickWorld(World,{year:World.year});
+    World.year-=1;
+    const result=runVacancyYearTick();
+    World.year+=1;
+    return JSON.stringify({reason:result.reason,apps:VacancySystem.get(World,v.id).applications.length});
+  })()`));
+  assert.equal(result.reason,'stale_year');
+  assert.equal(result.apps,0);
+});
+
+test('current-year vacancy remains unresolved after seeding via an already-applied tick',()=>{
+  const context=uiContext('current-year-still-unresolved');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:World.activeSettlementId,education:{level:'none'},employment:{}}};
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,openedYear:World.year,requirements:{minAge:16}});
+    VacancySystem.tickWorld(World,{year:World.year});
+    runVacancyYearTick();
+    resolvePendingVacancies();
+    return JSON.stringify(VacancySystem.get(World,v.id).status);
+  })()`));
+  assert.equal(result,'open');
+});
+
+/* ===== Correctness hardening: failed application submission must not resolve (section 11) ===== */
+
+test('presspromo delegation reports annual_application_cap without resolving the vacancy',()=>{
+  const context=uiContext('presspromo-cap-reason');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'healthcare');
+  const b2=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const c=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,hiredYear:World.year-5,stageStartedYear:World.year-5});
+    S.employmentContractId=c.id; S.jobTier=1; S.career='medicine'; S.jobName='Junior';
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minCareerYears:0}});
+    const filler1=VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'job',occupationId:'filler1',occupationName:'Filler1',jobTier:1,annualSalary:900,requirements:{minAge:16}});
+    const filler2=VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'job',occupationId:'filler2',occupationName:'Filler2',jobTier:1,annualSalary:900,requirements:{minAge:16}});
+    VacancySystem.submitApplication(World,filler1.id,'subject',{subject:S,year:World.year});
+    VacancySystem.submitApplication(World,filler2.id,'subject',{subject:S,year:World.year});
+    const result=EmploymentSystem.requestPromotion(World,c.id,{year:World.year,subject:S});
+    return JSON.stringify({reason:result.reason,accepted:result.accepted,vacancyStatus:VacancySystem.get(World,v.id).status});
+  })()`));
+  assert.equal(result.accepted,false);
+  assert.equal(result.reason,'annual_application_cap');
+  assert.equal(result.vacancyStatus,'open');
+});
+
+test('a qualification-failed promotion attempt reports not_qualified and leaves the vacancy open',()=>{
+  const context=uiContext('qualification-fail-no-resolve');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'healthcare');
+  const result=JSON.parse(expose(context,`(function(){
+    const c=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,hiredYear:World.year,stageStartedYear:World.year});
+    S.employmentContractId=c.id; S.jobTier=1; S.career='medicine'; S.jobName='Junior';
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minCareerYears:10}});
+    const result=EmploymentSystem.requestPromotion(World,c.id,{year:World.year,subject:S});
+    return JSON.stringify({reason:result.reason,accepted:result.accepted,vacancyStatus:VacancySystem.get(World,v.id).status});
+  })()`));
+  assert.equal(result.accepted,false);
+  assert.equal(result.reason,'insufficient_tenure');
+  assert.equal(result.vacancyStatus,'open');
+});

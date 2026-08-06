@@ -80,8 +80,9 @@
     ed.capacityPressure=bounded(ed.enrolledStudents/Math.max(1,ed.schoolCapacity));
     return runtime;
   }
-  function migrate(world){
+  function migrate(world,options){
     if(!world||typeof world!=='object') throw new Error('WorldSimulation.migrate requires a world object');
+    const opts=options||{};
     if(!world.settlements||typeof world.settlements!=='object'||Array.isArray(world.settlements)) world.settlements={};
     if(!world.seed) world.seed='karsen:'+String(world.year||0)+':'+String(world.activeSettlementId||'unknown');
     if(!world.publicHealth||typeof world.publicHealth!=='object') world.publicHealth={};
@@ -97,7 +98,7 @@
     defs.forEach(settlement=>{world.settlements[settlement.id]=repairRuntime(world.settlements[settlement.id]||runtimeState(settlement),settlement);});
     world.simulationSchemaVersion=SIMULATION_SCHEMA_VERSION;
     if(root.BusinessSystem&&typeof root.BusinessSystem.migrate==='function') root.BusinessSystem.migrate(world,defs);
-    if(root.EmploymentSystem&&typeof root.EmploymentSystem.migrate==='function') root.EmploymentSystem.migrate(world);
+    if(root.EmploymentSystem&&typeof root.EmploymentSystem.migrate==='function') root.EmploymentSystem.migrate(world,{subject:opts.subject});
     if(root.VacancySystem&&typeof root.VacancySystem.migrate==='function') root.VacancySystem.migrate(world);
     return world;
   }
@@ -209,7 +210,7 @@
     if(!world) throw new Error('WorldSimulation.tick requires a world object');
     const ctx=context||{}, year=Number.isFinite(Number(ctx.year))?Number(ctx.year):Number(world.year)||0;
     const national=Object.assign({},world.nationalModifiers||{},ctx.national||{});
-    const defs=definitions(migrate(world));
+    const defs=definitions(migrate(world,{subject:ctx.subject}));
     const before=defs.reduce((sum,settlement)=>sum+world.settlements[settlement.id].demographics.population,0);
     defs.forEach(settlement=>{
       const runtime=repairRuntime(world.settlements[settlement.id],settlement);

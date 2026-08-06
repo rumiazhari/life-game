@@ -256,6 +256,26 @@
       }
     }
 
+    if(status==='filled'&&filledByPersonId&&filledContractId){
+      const linkedContract=root.EmploymentSystem&&typeof root.EmploymentSystem.get==='function'
+        ?root.EmploymentSystem.get(world,filledContractId):null;
+      const referentialMatch=linkedContract
+        &&linkedContract.personId===filledByPersonId
+        &&linkedContract.businessId===businessId
+        &&linkedContract.occupationType===occupationType
+        &&occupationIdsMatchLocal(linkedContract.occupationId,record.occupationId!=null?String(record.occupationId):null)
+        &&linkedContract.jobTier===jobTier
+        &&(occupationType!=='career'||linkedContract.careerStage===careerStage);
+      if(!referentialMatch){
+        status='withdrawn';
+        closedReason='invalid_filled_contract';
+        filledByPersonId=null; filledContractId=null; filledYear=null;
+        applications=applications.map(app=>app.status==='pending'||app.status==='accepted'
+          ?Object.assign({},app,{status:app.status==='accepted'?'withdrawn':'rejected',resolvedYear:app.resolvedYear!=null?app.resolvedYear:fallbackYear,reason:'invalid_filled_contract'})
+          :app);
+      }
+    }
+
     return {
       id,
       businessId,
@@ -275,8 +295,37 @@
       filledYear,
       closedReason,
       applications,
-      history:trimHistory(record.history)
+      history:status==='withdrawn'&&closedReason==='invalid_filled_contract'
+        ?trimHistory(record.history.concat([{type:'migration_repaired',year:fallbackYear,legacyType:'filled_vacancy',legacyValue:'invalid_filled_contract'}]))
+        :trimHistory(record.history)
     };
+  }
+
+  function serializeLegacyValue(value){
+    try{
+      const serialized=typeof value==='string'?value:JSON.stringify(value);
+      return String(serialized==null?value:serialized).slice(0,500);
+    } catch(error){
+      return String(value).slice(0,500);
+    }
+  }
+
+  function isUsableEmbeddedVacancyRecord(value){
+    if(!value||typeof value!=='object'||Array.isArray(value)) return false;
+    const occupationType=OCCUPATION_TYPES.includes(value.occupationType)?value.occupationType:null;
+    const occupationName=typeof value.occupationName==='string'?value.occupationName.trim():'';
+    const jobTier=Number(value.jobTier);
+    const annualSalary=Number(value.annualSalary);
+    if(!occupationType) return false;
+    if(!occupationName) return false;
+    if(!Number.isFinite(jobTier)||!Number.isInteger(jobTier)||jobTier<1||jobTier>5) return false;
+    if(!Number.isFinite(annualSalary)||annualSalary<0) return false;
+    if(value.status!=null&&!VACANCY_STATUSES.includes(value.status)) return false;
+    if(occupationType==='career'&&(
+      typeof value.occupationId!=='string'||!value.occupationId||
+      !Number.isInteger(Number(value.careerStage))||Number(value.careerStage)<0||Number(value.careerStage)>4
+    )) return false;
+    return true;
   }
 
   function withdrawnPlaceholder(id,world,legacyValue,legacyType){
@@ -299,7 +348,7 @@
       filledYear:null,
       closedReason:'migration_invalid_record',
       applications:[],
-      history:[{type:'migration_repaired',year:boundedYear(world.year,0),legacyType,legacyValue:String(legacyValue).slice(0,120)}]
+      history:[{type:'migration_repaired',year:boundedYear(world.year,0),legacyType,legacyValue:serializeLegacyValue(legacyValue)}]
     };
   }
 
@@ -360,28 +409,63 @@
       }
     });
 
+    const topLevelIds=new Set(usedIds);
+    const topLevelBusinessOf={};
+    assignments.forEach(a=>{ if(topLevelIds.has(a.finalId)) topLevelBusinessOf[a.finalId]=a.record&&a.record.businessId; });
+
     if(root.BusinessSystem&&typeof root.BusinessSystem.all==='function'){
       root.BusinessSystem.all(world).slice().sort((a,b)=>a.id.localeCompare(b.id)).forEach(business=>{
         const embedded=Array.isArray(business.vacancies)?business.vacancies:[];
+        const seenInThisBusiness=new Set();
         embedded.forEach(item=>{
           if(item&&typeof item==='object'&&!Array.isArray(item)){
-            const recordId=item.id;
-            if(isValidVacancyId(recordId)&&!usedIds.has(recordId)){
-              usedIds.add(recordId);
-              assignments.push({finalId:recordId,record:Object.assign({},item,{businessId:item.businessId||business.id})});
+            if(isUsableEmbeddedVacancyRecord(item)){
+              const recordId=item.id;
+              if(isValidVacancyId(recordId)&&!usedIds.has(recordId)){
+                usedIds.add(recordId);
+                assignments.push({finalId:recordId,record:Object.assign({},item,{businessId:item.businessId||business.id})});
+              } else {
+                const finalId=allocateId();
+                usedIds.add(finalId);
+                assignments.push({finalId,record:Object.assign({},item,{businessId:item.businessId||business.id})});
+              }
             } else {
+              // Object lacks the minimum real fields (occupationType,
+              // occupationName, valid jobTier/annualSalary, ...) -- must not
+              // become an open vacancy through normalized defaults.
               const finalId=allocateId();
               usedIds.add(finalId);
-              assignments.push({finalId,record:Object.assign({},item,{businessId:item.businessId||business.id})});
+              assignments.push({finalId,record:{__placeholder:true,legacyType:'object',legacyValue:item,businessId:business.id}});
             }
           } else if(typeof item==='string'&&isValidVacancyId(item)){
-            if(usedIds.has(item)) return; // already linked to a top-level or earlier record
-            usedIds.add(item);
-            assignments.push({finalId:item,record:{__danglingPlaceholder:true,businessId:business.id}});
+            if(topLevelIds.has(item)){
+              if(seenInThisBusiness.has(item)){
+                const finalId=allocateId();
+                usedIds.add(finalId);
+                assignments.push({finalId,record:{__placeholder:true,legacyType:'string',legacyValue:item,businessId:business.id,closedReason:'migration_duplicate_reference'}});
+              } else {
+                seenInThisBusiness.add(item);
+                const ownerBusinessId=topLevelBusinessOf[item];
+                if(ownerBusinessId&&ownerBusinessId!==business.id){
+                  const finalId=allocateId();
+                  usedIds.add(finalId);
+                  assignments.push({finalId,record:{__placeholder:true,legacyType:'string',legacyValue:item,businessId:business.id,closedReason:'migration_cross_business_reference'}});
+                }
+                // else: a single legitimate reference to this business's own
+                // top-level vacancy -- already covered by the topKeys pass.
+              }
+            } else if(usedIds.has(item)){
+              const finalId=allocateId();
+              usedIds.add(finalId);
+              assignments.push({finalId,record:{__placeholder:true,legacyType:'string',legacyValue:item,businessId:business.id,closedReason:'migration_duplicate_reference'}});
+            } else {
+              usedIds.add(item);
+              assignments.push({finalId:item,record:{__danglingPlaceholder:true,businessId:business.id}});
+            }
           } else {
             // Malformed embedded entry (invalid/empty string, number, boolean,
-            // null, array, or unusable object) -- must survive migration as a
-            // withdrawn placeholder, never silently dropped.
+            // null, array) -- must survive migration as a withdrawn
+            // placeholder, never silently dropped.
             const finalId=allocateId();
             usedIds.add(finalId);
             assignments.push({finalId,record:{__placeholder:true,legacyType:item===null?'null':(Array.isArray(item)?'array':typeof item),legacyValue:item,businessId:business.id}});
@@ -395,7 +479,11 @@
     assignments.forEach(({finalId,record})=>{
       if(record&&record.__placeholder){
         const placeholderBusiness=record.businessId?getBusiness(world,record.businessId):null;
-        normalized[finalId]=Object.assign(withdrawnPlaceholder(finalId,world,record.legacyValue,record.legacyType),record.businessId?{businessId:record.businessId,settlementId:placeholderBusiness?placeholderBusiness.settlementId:'unassigned'}:{});
+        normalized[finalId]=Object.assign(
+          withdrawnPlaceholder(finalId,world,record.legacyValue,record.legacyType),
+          record.businessId?{businessId:record.businessId,settlementId:placeholderBusiness?placeholderBusiness.settlementId:'unassigned'}:{},
+          record.closedReason?{closedReason:record.closedReason}:{}
+        );
       } else if(record&&record.__danglingPlaceholder){
         const danglingBusiness=record.businessId?getBusiness(world,record.businessId):null;
         normalized[finalId]=Object.assign(withdrawnPlaceholder(finalId,world,'','string'),{businessId:record.businessId,settlementId:danglingBusiness?danglingBusiness.settlementId:'unassigned',closedReason:'migration_dangling_reference'});
@@ -786,6 +874,18 @@
       }
       if(v.status==='filled'){
         if(!v.filledByPersonId||!v.filledContractId||v.filledYear==null) issues.push('vacancy '+key+' is filled but missing filled fields');
+        else if(root.EmploymentSystem&&typeof root.EmploymentSystem.get==='function'){
+          const linkedContract=root.EmploymentSystem.get(world,v.filledContractId);
+          if(!linkedContract) issues.push('vacancy '+key+' is filled but references a missing contract: '+v.filledContractId);
+          else {
+            if(linkedContract.personId!==v.filledByPersonId) issues.push('vacancy '+key+' filled contract personId does not match filledByPersonId');
+            if(linkedContract.businessId!==v.businessId) issues.push('vacancy '+key+' filled contract businessId does not match the vacancy business');
+            if(linkedContract.occupationType!==v.occupationType) issues.push('vacancy '+key+' filled contract occupationType does not match the vacancy');
+            if(String(linkedContract.occupationId)!==String(v.occupationId)) issues.push('vacancy '+key+' filled contract occupationId does not match the vacancy');
+            if(linkedContract.jobTier!==v.jobTier) issues.push('vacancy '+key+' filled contract jobTier does not match the vacancy');
+            if(v.occupationType==='career'&&linkedContract.careerStage!==v.careerStage) issues.push('vacancy '+key+' filled contract careerStage does not match the vacancy');
+          }
+        }
       } else if(v.filledByPersonId!=null||v.filledContractId!=null||v.filledYear!=null){
         issues.push('vacancy '+key+' is not filled but has filled fields set');
       }
@@ -944,15 +1044,33 @@
       skillResults[skillId]={have,required,ok};
     });
     if(!skillsOk) reasons.push('skills');
-    let careerYears=0, careerYearsOk=true;
+    let careerYears=0, careerYearsOk=true, careerStageOk=true;
     if(vacancy.occupationType==='career'&&vacancy.careerStage!=null&&vacancy.careerStage>0){
       const activeContract=activeForPersonSafe(world,personId);
-      careerYears=activeContract?Math.max(0,boundedYear(world.year,0)-activeContract.stageStartedYear):0;
-      careerYearsOk=careerYears>=vacancy.requirements.minCareerYears;
-      if(!careerYearsOk) reasons.push('career_years');
+      const priorStageMatch=activeContract
+        &&activeContract.occupationType==='career'
+        &&occupationIdsMatchLocal(activeContract.occupationId,vacancy.occupationId)
+        &&activeContract.careerStage===vacancy.careerStage-1
+        &&activeContract.jobTier===vacancy.jobTier-1;
+      if(priorStageMatch){
+        careerYears=Math.max(0,boundedYear(world.year,0)-activeContract.stageStartedYear);
+        careerYearsOk=careerYears>=vacancy.requirements.minCareerYears;
+        if(!careerYearsOk) reasons.push('career_years');
+      } else {
+        careerYears=0;
+        careerYearsOk=false;
+        careerStageOk=false;
+        reasons.push('career_stage');
+      }
     }
-    const qualifies=alive&&ageOk&&educationOk&&majorOk&&skillsOk&&careerYearsOk;
-    return {qualifies,age,ageOk,educationRank,educationOk,majorOk,skillResults,careerYears,careerYearsOk,reasons};
+    const qualifies=alive&&ageOk&&educationOk&&majorOk&&skillsOk&&careerYearsOk&&careerStageOk;
+    return {qualifies,age,ageOk,educationRank,educationOk,majorOk,skillResults,careerYears,careerYearsOk,careerStageOk,reasons};
+  }
+
+  function occupationIdsMatchLocal(a,b){
+    const an=a==null?null:String(a);
+    const bn=b==null?null:String(b);
+    return an===bn;
   }
 
   function activeForPersonSafe(world,personId){
@@ -1058,6 +1176,16 @@
     return {applied:true,application,vacancy,qualification:details};
   }
 
+  function isExactPromotionCandidate(activeContract,vacancy){
+    return !!activeContract
+      &&activeContract.businessId===vacancy.businessId
+      &&activeContract.occupationType==='career'
+      &&vacancy.occupationType==='career'
+      &&occupationIdsMatchLocal(activeContract.occupationId,vacancy.occupationId)
+      &&vacancy.careerStage===activeContract.careerStage+1
+      &&vacancy.jobTier===activeContract.jobTier+1;
+  }
+
   function seedNpcApplications(world,vacancy,options){
     ensure(world);
     const opts=options||{};
@@ -1070,7 +1198,12 @@
       if(age==null||age<16||age>64) return false;
       if(npc.locationId!==vacancy.settlementId) return false;
       const activeContract=activeForPersonSafe(world,id);
-      if(activeContract&&activeContract.businessId===vacancy.businessId) return false;
+      if(activeContract&&activeContract.businessId===vacancy.businessId){
+        // Same-business employees may only apply as an exact internal
+        // promotion (next stage, next tier, same career) -- never to the
+        // same/lower stage, an unrelated career, or a generic role.
+        return isExactPromotionCandidate(activeContract,vacancy);
+      }
       if(activeContract){
         const betterTier=vacancy.jobTier>activeContract.jobTier;
         const betterSalary=vacancy.annualSalary>=activeContract.annualSalary*1.15;
@@ -1078,14 +1211,20 @@
       }
       return true;
     });
-    const ranked=candidates.map(id=>rankApplicant(world,id,vacancy,opts)).filter(r=>r.qualifies)
-      .sort((a,b)=>(b.score-a.score)||a.personId.localeCompare(b.personId))
-      .slice(0,MAX_NPC_APPLICANTS_PER_VACANCY);
+    const ranked=candidates.map(id=>{
+      const activeContract=activeForPersonSafe(world,id);
+      const kind=isExactPromotionCandidate(activeContract,vacancy)?'promotion':undefined;
+      return Object.assign({},rankApplicant(world,id,vacancy,opts),{kind});
+    }).filter(r=>r.qualifies)
+      .sort((a,b)=>(b.score-a.score)||a.personId.localeCompare(b.personId));
     const submitted=[];
-    ranked.forEach(candidate=>{
-      const result=submitApplication(world,vacancy.id,candidate.personId,Object.assign({},opts,{year}));
+    for(const candidate of ranked){
+      if(submitted.length>=MAX_NPC_APPLICANTS_PER_VACANCY) break;
+      const result=submitApplication(world,vacancy.id,candidate.personId,Object.assign({},opts,{year,kind:candidate.kind}));
       if(result.applied) submitted.push(result.application);
-    });
+      // A cap/duplicate rejection for this candidate must not consume a slot
+      // that a lower-ranked, still-eligible candidate could otherwise fill.
+    }
     return submitted;
   }
 
@@ -1149,6 +1288,14 @@
     return {applied:true,application,vacancy,qualification:applied.qualification};
   }
 
+  function cloneRequirements(req){
+    if(!req||typeof req!=='object') return req;
+    return Object.assign({},req,{
+      majorIds:Array.isArray(req.majorIds)?req.majorIds.slice():[],
+      skills:Object.assign({},req.skills||{})
+    });
+  }
+
   function playerPortalVacancies(world,subject){
     ensure(world);
     if(!subject) return [];
@@ -1158,57 +1305,42 @@
       &&age!=null&&age>=16&&age<65
       &&getBusiness(world,v.businessId)&&getBusiness(world,v.businessId).status!=='closed');
 
-    const byTrack={};
-    const standalone=[];
-    open.forEach(v=>{
-      if(v.occupationType==='career'){
-        const key=v.occupationId;
-        if(!byTrack[key]) byTrack[key]=[];
-        byTrack[key].push(v);
-      } else {
-        standalone.push(v);
-      }
-    });
+    // Every open vacancy gets its own projected entry -- no collapsing by
+    // career track, so multiple employers/stages/openings all stay visible.
+    open.sort((a,b)=>
+      a.occupationType.localeCompare(b.occupationType)||
+      String(a.occupationId||'').localeCompare(String(b.occupationId||''))||
+      ((a.careerStage==null?1:0)-(b.careerStage==null?1:0))||
+      (a.careerStage==null||b.careerStage==null?0:a.careerStage-b.careerStage)||
+      a.businessId.localeCompare(b.businessId)||
+      a.id.localeCompare(b.id)
+    );
 
-    const activeContract=activeForPersonSafe(world,'subject');
-    const projected=[];
-
-    Object.keys(byTrack).sort().forEach(trackId=>{
-      const candidates=byTrack[trackId];
-      candidates.sort((a,b)=>{
-        const aPromo=activeContract&&a.businessId===activeContract.businessId&&a.careerStage===(activeContract.careerStage||0)+1;
-        const bPromo=activeContract&&b.businessId===activeContract.businessId&&b.careerStage===(activeContract.careerStage||0)+1;
-        if(aPromo!==bPromo) return aPromo?-1:1;
-        const aQual=qualifies(world,'subject',a,{subject});
-        const bQual=qualifies(world,'subject',b,{subject});
-        if(aQual!==bQual) return aQual?-1:1;
-        if(b.annualSalary!==a.annualSalary) return b.annualSalary-a.annualSalary;
-        if(a.openedYear!==b.openedYear) return a.openedYear-b.openedYear;
-        return a.id.localeCompare(b.id);
-      });
-      const rep=candidates[0];
-      const business=getBusiness(world,rep.businessId);
-      projected.push({
-        vacancyId:rep.id,businessId:rep.businessId,businessName:business?business.name:rep.businessId,settlementId:rep.settlementId,
-        occupationType:rep.occupationType,occupationId:rep.occupationId,occupationName:rep.occupationName,
-        track:rep.occupationId,stage:rep.careerStage,jobTier:rep.jobTier,annualSalary:rep.annualSalary,
-        qualifies:qualifies(world,'subject',rep,{subject}),
-        applicationStatus:(rep.applications.find(a=>a.personId==='subject')||{}).status||null
-      });
-    });
-
-    standalone.sort((a,b)=>a.id.localeCompare(b.id)).forEach(v=>{
+    return open.map(v=>{
       const business=getBusiness(world,v.businessId);
-      projected.push({
-        vacancyId:v.id,businessId:v.businessId,businessName:business?business.name:v.businessId,settlementId:v.settlementId,
-        occupationType:v.occupationType,occupationId:v.occupationId,occupationName:v.occupationName,
-        track:null,stage:-1,jobTier:v.jobTier,annualSalary:v.annualSalary,
-        qualifies:qualifies(world,'subject',v,{subject}),
-        applicationStatus:(v.applications.find(a=>a.personId==='subject')||{}).status||null
-      });
+      const qualification=qualificationDetails(world,'subject',v,{subject});
+      const application=v.applications.find(a=>a.personId==='subject')||null;
+      return {
+        vacancyId:v.id,
+        businessId:v.businessId,
+        businessName:business?business.name:v.businessId,
+        settlementId:v.settlementId,
+        occupationType:v.occupationType,
+        occupationId:v.occupationId,
+        occupationName:v.occupationName,
+        track:v.occupationType==='career'?v.occupationId:null,
+        stage:v.careerStage==null?-1:v.careerStage,
+        jobTier:v.jobTier,
+        annualSalary:v.annualSalary,
+        requirements:cloneRequirements(v.requirements),
+        qualification,
+        qualifies:qualification.qualifies,
+        applicationStatus:application?application.status:null,
+        applicationReason:application?application.reason:null,
+        openedYear:v.openedYear,
+        expiresYear:v.expiresYear
+      };
     });
-
-    return projected;
   }
 
   root.VacancySystem={

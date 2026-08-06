@@ -802,10 +802,11 @@ test('multiple malformed accepted applications collapse to exactly one matching 
   const context=freshWorld();
   const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
   const result=expose(context,`(function(){
-    World.vacancies={'vacancy:00001':{id:'vacancy:00001',businessId:'${business.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',careerStage:null,jobTier:1,annualSalary:1000,requirements:{},openedYear:1928,expiresYear:1930,status:'filled',filledByPersonId:'npc:a',filledContractId:'employment:00001',filledYear:1929,closedReason:null,
-      applications:[{personId:'npc:a',workerType:'npc',kind:'new_hire',appliedYear:1928,score:80,status:'accepted',resolvedYear:1929,reason:null},{personId:'npc:b',workerType:'npc',kind:'new_hire',appliedYear:1928,score:70,status:'accepted',resolvedYear:1929,reason:null}],history:[]}};
+    const contract=EmploymentSystem.hire(World,{personId:'npc:a',businessId:'${business.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,hiredYear:1928});
+    World.vacancies['vacancy:00002']={id:'vacancy:00002',businessId:'${business.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',careerStage:null,jobTier:1,annualSalary:1000,requirements:{},openedYear:1928,expiresYear:1930,status:'filled',filledByPersonId:'npc:a',filledContractId:contract.id,filledYear:1929,closedReason:null,
+      applications:[{personId:'npc:a',workerType:'npc',kind:'new_hire',appliedYear:1928,score:80,status:'accepted',resolvedYear:1929,reason:null},{personId:'npc:b',workerType:'npc',kind:'new_hire',appliedYear:1928,score:70,status:'accepted',resolvedYear:1929,reason:null}],history:[]};
     VacancySystem.migrate(World);
-    const v=World.vacancies['vacancy:00001'];
+    const v=World.vacancies['vacancy:00002'];
     const accepted=v.applications.filter(a=>a.status==='accepted');
     return JSON.stringify({status:v.status,acceptedCount:accepted.length,acceptedPersonId:accepted[0]&&accepted[0].personId,bPersonStatus:v.applications.find(a=>a.personId==='npc:b').status});
   })()`);
@@ -844,4 +845,433 @@ test('migration involving every malformed embedded type remains byte-for-byte id
     return first===second?'stable':'changed';
   })()`);
   assert.equal(result,'stable');
+});
+
+/* ===== Correctness hardening: usable vs malformed embedded objects (section 1) ===== */
+
+test('a malformed object with only occupationName becomes withdrawn, not an open vacancy',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.get(World,'${business.id}');
+    b.vacancies=[{occupationName:'Weird'}];
+    VacancySystem.migrate(World);
+    const record=Object.values(World.vacancies)[0];
+    return JSON.stringify({status:record.status,businessId:record.businessId});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.status,'withdrawn');
+  assert.equal(parsed.businessId,business.id);
+});
+
+test('a malformed object with an unsupported occupationType becomes withdrawn',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.get(World,'${business.id}');
+    b.vacancies=[{occupationType:'wizard',occupationName:'Wizard',jobTier:1,annualSalary:900}];
+    VacancySystem.migrate(World);
+    return Object.values(World.vacancies)[0].status;
+  })()`);
+  assert.equal(result,'withdrawn');
+});
+
+test('a malformed career object missing careerStage becomes withdrawn',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'healthcare'}));
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.get(World,'${business.id}');
+    b.vacancies=[{occupationType:'career',occupationId:'medicine',occupationName:'Junior',jobTier:1,annualSalary:900}];
+    VacancySystem.migrate(World);
+    return Object.values(World.vacancies)[0].status;
+  })()`);
+  assert.equal(result,'withdrawn');
+});
+
+test('malformed object content is preserved as bounded JSON in migration history',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.get(World,'${business.id}');
+    b.vacancies=[{occupationName:'Weird',extra:'data'}];
+    VacancySystem.migrate(World);
+    const record=Object.values(World.vacancies)[0];
+    return record.history[0].legacyValue;
+  })()`);
+  assert.match(result,/Weird/);
+  assert.match(result,/extra/);
+});
+
+test('a complete legacy embedded vacancy object remains a real usable vacancy',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.get(World,'${business.id}');
+    b.vacancies=[{occupationType:'job',occupationName:'Clerk',jobTier:1,annualSalary:900,status:'open'}];
+    VacancySystem.migrate(World);
+    const record=Object.values(World.vacancies)[0];
+    return JSON.stringify({status:record.status,occupationName:record.occupationName});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.status,'open');
+  assert.equal(parsed.occupationName,'Clerk');
+});
+
+test('migration of a mix of usable and malformed embedded objects is byte-for-byte idempotent',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.get(World,'${business.id}');
+    b.vacancies=[{occupationName:'Weird'},{occupationType:'job',occupationName:'Clerk',jobTier:1,annualSalary:900,status:'open'}];
+    VacancySystem.migrate(World);
+    const first=JSON.stringify(World.vacancies);
+    VacancySystem.migrate(World);
+    const second=JSON.stringify(World.vacancies);
+    return first===second?'stable':'changed';
+  })()`);
+  assert.equal(result,'stable');
+});
+
+/* ===== Correctness hardening: duplicate/cross-business embedded ID references (section 2) ===== */
+
+test('a duplicate valid string reference in one business preserves one real reference plus one withdrawn placeholder',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.get(World,'${business.id}');
+    const v=VacancySystem.open(World,{businessId:b.id,occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000});
+    b.vacancies=[v.id,v.id];
+    VacancySystem.migrate(World);
+    const all=Object.values(World.vacancies);
+    const duplicatePlaceholder=all.find(r=>r.closedReason==='migration_duplicate_reference');
+    return JSON.stringify({total:all.length,originalStillOpen:World.vacancies[v.id].status,duplicateFound:!!duplicatePlaceholder,duplicateStatus:duplicatePlaceholder?duplicatePlaceholder.status:null});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.total,2);
+  assert.equal(parsed.originalStillOpen,'open');
+  assert.equal(parsed.duplicateFound,true);
+  assert.equal(parsed.duplicateStatus,'withdrawn');
+});
+
+test('the same vacancy ID referenced by a second business preserves the true owner and a cross-business placeholder',()=>{
+  const context=freshWorld();
+  const b1=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const b2=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'finance'}));
+  const result=expose(context,`(function(){
+    const business1=BusinessSystem.get(World,'${b1.id}');
+    const business2=BusinessSystem.get(World,'${b2.id}');
+    const v=VacancySystem.open(World,{businessId:business1.id,occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000});
+    business2.vacancies=[v.id];
+    VacancySystem.migrate(World);
+    const all=Object.values(World.vacancies);
+    const crossPlaceholder=all.find(r=>r.closedReason==='migration_cross_business_reference');
+    return JSON.stringify({total:all.length,ownerStatus:World.vacancies[v.id].status,ownerBusiness:World.vacancies[v.id].businessId,crossFound:!!crossPlaceholder,crossBusiness:crossPlaceholder?crossPlaceholder.businessId:null});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.total,2);
+  assert.equal(parsed.ownerStatus,'open');
+  assert.equal(parsed.ownerBusiness,b1.id);
+  assert.equal(parsed.crossFound,true);
+  assert.equal(parsed.crossBusiness,b2.id);
+});
+
+test('no embedded input entry disappears across duplicate and cross-business references',()=>{
+  const context=freshWorld();
+  const b1=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const b2=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'finance'}));
+  const result=expose(context,`(function(){
+    const business1=BusinessSystem.get(World,'${b1.id}');
+    const business2=BusinessSystem.get(World,'${b2.id}');
+    const v=VacancySystem.open(World,{businessId:business1.id,occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000});
+    business1.vacancies=[v.id,v.id];
+    business2.vacancies=[v.id];
+    VacancySystem.migrate(World);
+    return Object.keys(World.vacancies).length;
+  })()`);
+  assert.equal(result,3);
+});
+
+test('duplicate and cross-business embedded reference migration is byte-for-byte idempotent',()=>{
+  const context=freshWorld();
+  const b1=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const b2=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'finance'}));
+  const result=expose(context,`(function(){
+    const business1=BusinessSystem.get(World,'${b1.id}');
+    const business2=BusinessSystem.get(World,'${b2.id}');
+    const v=VacancySystem.open(World,{businessId:business1.id,occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000});
+    business1.vacancies=[v.id,v.id];
+    business2.vacancies=[v.id];
+    VacancySystem.migrate(World);
+    const first=JSON.stringify(World.vacancies);
+    VacancySystem.migrate(World);
+    const second=JSON.stringify(World.vacancies);
+    return first===second?'stable':'changed';
+  })()`);
+  assert.equal(result,'stable');
+});
+
+/* ===== Correctness hardening: NPC internal promotion applications (section 5) ===== */
+
+test('an NPC same-business exact promotion is submitted with kind promotion and can win',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'healthcare',kind:'public'}));
+  const result=expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}}};
+    const contract=EmploymentSystem.hire(World,{personId:'npc:a',businessId:'${business.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,hiredYear:1928,stageStartedYear:1928,origin:'vacancy'});
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minCareerYears:0}});
+    const submitted=VacancySystem.seedNpcApplications(World,v,{year:1930});
+    const application=v.applications.find(a=>a.personId==='npc:a');
+    const resolved=VacancySystem.resolveVacancy(World,v.id,{year:1930});
+    const finalContract=EmploymentSystem.get(World,contract.id);
+    return JSON.stringify({
+      submittedKind:application?application.kind:null,
+      status:resolved.status,filledContractId:resolved.filledContractId,
+      sameContractId:finalContract.id===contract.id,
+      occupationName:finalContract.occupationName,careerStage:finalContract.careerStage,jobTier:finalContract.jobTier,
+      salary:finalContract.annualSalary,stageStartedYear:finalContract.stageStartedYear,
+      employeeIds:BusinessSystem.get(World,'${business.id}').employeeIds,
+      contractCount:EmploymentSystem.forPerson(World,'npc:a').length
+    });
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.submittedKind,'promotion');
+  assert.equal(parsed.status,'filled');
+  assert.equal(parsed.sameContractId,true);
+  assert.equal(parsed.occupationName,'Senior');
+  assert.equal(parsed.careerStage,1);
+  assert.equal(parsed.jobTier,2);
+  assert.equal(parsed.salary,1500);
+  assert.equal(parsed.stageStartedYear,1930);
+  assert.deepEqual(parsed.employeeIds,['npc:a']);
+  assert.equal(parsed.contractCount,1);
+});
+
+test('an unrelated same-business role is excluded from NPC seeding',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'healthcare',kind:'public'}));
+  const result=expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}}};
+    EmploymentSystem.hire(World,{personId:'npc:a',businessId:'${business.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,hiredYear:1928,stageStartedYear:1928,origin:'vacancy'});
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'career',occupationId:'law',occupationName:'Associate',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minCareerYears:0}});
+    const submitted=VacancySystem.seedNpcApplications(World,v,{year:1930});
+    return submitted.length;
+  })()`);
+  assert.equal(result,0);
+});
+
+test('a same-stage vacancy is excluded from same-business NPC seeding',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'healthcare',kind:'public'}));
+  const result=expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}}};
+    EmploymentSystem.hire(World,{personId:'npc:a',businessId:'${business.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,hiredYear:1928,stageStartedYear:1928,origin:'vacancy'});
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior 2',careerStage:0,jobTier:1,annualSalary:1000,requirements:{minCareerYears:0}});
+    const submitted=VacancySystem.seedNpcApplications(World,v,{year:1930});
+    return submitted.length;
+  })()`);
+  assert.equal(result,0);
+});
+
+test('a competing external applicant can still win a promotion vacancy over the internal candidate deterministically',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'healthcare',kind:'public'}));
+  const result=expose(context,`(function(){
+    World.npcs={
+      'npc:internal':{id:'npc:internal',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}},
+      'npc:external':{id:'npc:external',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'university',quality:1,years:8},personality:{ambition:1,loyalty:1},employment:{}}
+    };
+    EmploymentSystem.hire(World,{personId:'npc:internal',businessId:'${business.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,hiredYear:1920,stageStartedYear:1920,origin:'vacancy'});
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minCareerYears:0}});
+    VacancySystem.seedNpcApplications(World,v,{year:1930});
+    const resolved=VacancySystem.resolveVacancy(World,v.id,{year:1930});
+    return JSON.stringify({filledBy:resolved.filledByPersonId,status:resolved.status});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.status,'filled');
+  assert.ok(['npc:internal','npc:external'].includes(parsed.filledBy));
+});
+
+test('when the top candidate fails acceptance, the next valid candidate wins',()=>{
+  const context=freshWorld();
+  const b1=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail',kind:'public'}));
+  const b2=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'finance',kind:'public'}));
+  const result=expose(context,`(function(){
+    World.npcs={
+      'npc:top':{id:'npc:top',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'university',quality:1,years:8},personality:{ambition:1,loyalty:1},employment:{}},
+      'npc:second':{id:'npc:second',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}}
+    };
+    EmploymentSystem.hire(World,{personId:'npc:top',businessId:'${b1.id}',annualSalary:100,hiredYear:1930});
+    const v=VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    VacancySystem.submitApplication(World,v.id,'npc:top',{year:1930});
+    VacancySystem.submitApplication(World,v.id,'npc:second',{year:1930});
+    const original=EmploymentSystem.acceptVacancy;
+    EmploymentSystem.acceptVacancy=function(world,vacancy,personId,opts){
+      if(personId==='npc:top') return {accepted:false,reason:'forced_failure'};
+      return original.apply(this,arguments);
+    };
+    const resolved=VacancySystem.resolveVacancy(World,v.id,{year:1930});
+    EmploymentSystem.acceptVacancy=original;
+    return JSON.stringify({status:resolved.status,filledBy:resolved.filledByPersonId});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.status,'filled');
+  assert.equal(parsed.filledBy,'npc:second');
+});
+
+/* ===== Correctness hardening: prior-stage career tenure requirement (section 6) ===== */
+
+test('five years in retail does not qualify for medicine stage one',()=>{
+  const context=freshWorld();
+  const b1=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail',kind:'public'}));
+  const b2=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'healthcare',kind:'public'}));
+  const result=expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'university',quality:1,years:8},employment:{}}};
+    EmploymentSystem.hire(World,{personId:'npc:a',businessId:'${b1.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,hiredYear:1925,stageStartedYear:1925});
+    const v=VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minCareerYears:0}});
+    return VacancySystem.qualifies(World,'npc:a',v)?'yes':'no';
+  })()`);
+  assert.equal(result,'no');
+});
+
+test('five years in law does not qualify for medicine stage one',()=>{
+  const context=freshWorld();
+  const b1=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'government',kind:'public'}));
+  const b2=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'healthcare',kind:'public'}));
+  const result=expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'university',quality:1,years:8},employment:{}}};
+    EmploymentSystem.hire(World,{personId:'npc:a',businessId:'${b1.id}',occupationType:'career',occupationId:'law',occupationName:'Junior Counsel',careerStage:0,jobTier:1,annualSalary:1000,hiredYear:1925,stageStartedYear:1925});
+    const v=VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minCareerYears:0}});
+    return VacancySystem.qualifies(World,'npc:a',v)?'yes':'no';
+  })()`);
+  assert.equal(result,'no');
+});
+
+test('medicine stage zero qualifies for stage one after sufficient years',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'healthcare',kind:'public'}));
+  const result=expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'university',quality:1,years:8},employment:{}}};
+    EmploymentSystem.hire(World,{personId:'npc:a',businessId:'${business.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,hiredYear:1920,stageStartedYear:1920});
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minCareerYears:5}});
+    return VacancySystem.qualifies(World,'npc:a',v)?'yes':'no';
+  })()`);
+  assert.equal(result,'yes');
+});
+
+test('medicine stage zero with insufficient years fails to qualify for stage one',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'healthcare',kind:'public'}));
+  const result=expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'university',quality:1,years:8},employment:{}}};
+    EmploymentSystem.hire(World,{personId:'npc:a',businessId:'${business.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,hiredYear:1929,stageStartedYear:1929});
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minCareerYears:5}});
+    const details=VacancySystem.qualificationDetails(World,'npc:a',v);
+    return JSON.stringify({qualifies:details.qualifies,reasons:details.reasons});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.qualifies,false);
+  assert.ok(parsed.reasons.includes('career_years'));
+});
+
+test('an employer switch at the next stage works when the worker is in the correct prior stage elsewhere',()=>{
+  const context=freshWorld();
+  const b1=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'healthcare',kind:'public'}));
+  const b2=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'healthcare',kind:'public'}));
+  const result=expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'university',quality:1,years:8},employment:{}}};
+    EmploymentSystem.hire(World,{personId:'npc:a',businessId:'${b1.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,hiredYear:1920,stageStartedYear:1920});
+    const v=VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minCareerYears:5}});
+    return VacancySystem.qualifies(World,'npc:a',v)?'yes':'no';
+  })()`);
+  assert.equal(result,'yes');
+});
+
+/* ===== Correctness hardening: every career vacancy in the player portal (section 7) ===== */
+
+test('playerPortalVacancies returns two vacancies from the same career track at different employers',()=>{
+  const context=freshWorld();
+  const b1=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'healthcare',kind:'public'}));
+  const b2=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'healthcare',kind:'public'}));
+  const result=expose(context,`(function(){
+    const subject={age:30,alive:true,location:{settlementId:'branec'},education:{completed:{lower:true,middle:true}},skills:{}};
+    VacancySystem.open(World,{businessId:'${b1.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior A',careerStage:0,jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    VacancySystem.open(World,{businessId:'${b2.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior B',careerStage:0,jobTier:1,annualSalary:1100,requirements:{minAge:16}});
+    const projected=VacancySystem.playerPortalVacancies(World,subject);
+    return JSON.stringify(projected.map(p=>({vacancyId:p.vacancyId,businessId:p.businessId,salary:p.annualSalary})));
+  })()`);
+  const projected=JSON.parse(result);
+  assert.equal(projected.length,2);
+  assert.equal(new Set(projected.map(p=>p.vacancyId)).size,2);
+  assert.equal(new Set(projected.map(p=>p.businessId)).size,2);
+});
+
+test('playerPortalVacancies includes multiple stages of the same career simultaneously',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'healthcare',kind:'public'}));
+  const result=expose(context,`(function(){
+    const subject={age:30,alive:true,location:{settlementId:'branec'},education:{completed:{}},skills:{}};
+    VacancySystem.open(World,{businessId:'${business.id}',occupationType:'career',occupationId:'medicine',occupationName:'Junior',careerStage:0,jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    VacancySystem.open(World,{businessId:'${business.id}',occupationType:'career',occupationId:'medicine',occupationName:'Senior',careerStage:1,jobTier:2,annualSalary:1500,requirements:{minAge:16}});
+    const projected=VacancySystem.playerPortalVacancies(World,subject);
+    return JSON.stringify(projected.map(p=>p.stage));
+  })()`);
+  assert.deepEqual(JSON.parse(result).sort(),[0,1]);
+});
+
+test('playerPortalVacancies clones requirements so UI mutation cannot affect the stored vacancy',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail',kind:'public'}));
+  const result=expose(context,`(function(){
+    const subject={age:30,alive:true,location:{settlementId:'branec'},education:{completed:{}},skills:{}};
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16,majorIds:[],skills:{}}});
+    const projected=VacancySystem.playerPortalVacancies(World,subject);
+    projected[0].requirements.majorIds.push('mutated');
+    projected[0].requirements.skills.mutated=5;
+    return JSON.stringify({majorIds:VacancySystem.get(World,v.id).requirements.majorIds,skills:VacancySystem.get(World,v.id).requirements.skills});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.deepEqual(parsed.majorIds,[]);
+  assert.deepEqual(parsed.skills,{});
+});
+
+/* ===== Correctness hardening: capped candidates must not starve others (section 9) ===== */
+
+test('four highest-ranked candidates already capped still lets a fifth eligible candidate submit',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail',kind:'public'}));
+  const result=expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    World.npcs={};
+    for(let i=0;i<4;i++){
+      const id='npc:capped'+i;
+      World.npcs[id]={id,alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}};
+      const filler1=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'job',occupationId:'filler1-'+i,occupationName:'Filler1',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+      const filler2=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'job',occupationId:'filler2-'+i,occupationName:'Filler2',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+      VacancySystem.submitApplication(World,filler1.id,id,{year:World.year});
+      VacancySystem.submitApplication(World,filler2.id,id,{year:World.year});
+      VacancySystem.withdraw(World,filler1.id,'cleanup',World.year);
+      VacancySystem.withdraw(World,filler2.id,'cleanup',World.year);
+    }
+    World.npcs['npc:fifth']={id:'npc:fifth',alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}};
+    const submitted=VacancySystem.seedNpcApplications(World,v,{year:World.year});
+    return JSON.stringify(submitted.map(a=>a.personId));
+  })()`);
+  const submitted=JSON.parse(result);
+  assert.ok(submitted.includes('npc:fifth'));
+});
+
+test('NPC seeding respects deterministic ranked order and the per-vacancy applicant cap',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail',kind:'public'}));
+  const result=expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${business.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    World.npcs={};
+    for(let i=0;i<6;i++){
+      const id='npc:cand'+i;
+      World.npcs[id]={id,alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}};
+    }
+    const submitted=VacancySystem.seedNpcApplications(World,v,{year:World.year});
+    return submitted.length;
+  })()`);
+  assert.ok(result<=4);
 });

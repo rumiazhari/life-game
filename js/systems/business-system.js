@@ -601,8 +601,8 @@
     ensure(world);
     const defs=root.WorldSimulation&&typeof root.WorldSimulation.definitions==='function'?root.WorldSimulation.definitions(world):[];
     migrate(world,defs);
-    if(root.EmploymentSystem&&typeof root.EmploymentSystem.migrate==='function') root.EmploymentSystem.migrate(world);
     const opts=options||{};
+    if(root.EmploymentSystem&&typeof root.EmploymentSystem.migrate==='function') root.EmploymentSystem.migrate(world,{subject:opts.subject});
     const year=boundedYear(opts.year,world.year);
     const list=all(world).slice().sort((a,b)=>String(a.id).localeCompare(String(b.id)));
     const totals={year,applied:0,skipped:0,closed:0,revenue:0,expenses:0,payroll:0,profit:0};

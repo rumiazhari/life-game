@@ -1139,21 +1139,38 @@ function openJobPortal(){
   };
   $('#jobWrap').classList.remove('hidden');
 }
+function vacancyRequirementSummary(entry){
+  const req=entry.requirements||{};
+  const parts=[];
+  if(req.minAge!=null) parts.push('age '+req.minAge+'+');
+  if(req.educationStage) parts.push(req.educationStage+' education');
+  if(Array.isArray(req.majorIds)&&req.majorIds.length){
+    parts.push('major: '+req.majorIds.map(id=>typeof educationMajorLabel==='function'?educationMajorLabel(id):id).join(' or '));
+  }
+  Object.keys(req.skills||{}).forEach(skillId=>{
+    const skill=typeof SKILLS!=='undefined'?SKILLS[skillId]:null;
+    parts.push((skill?skill.name:skillId)+' '+req.skills[skillId]+'/10');
+  });
+  if(req.minCareerYears) parts.push(req.minCareerYears+'y in prior stage');
+  return parts.length?parts.join(' · '):'no additional requirements';
+}
 function openJobPortalPersistent(){
   const careerEntries=S.vacancies.filter(v=>v&&v.occupationType==='career');
   const jobEntries=S.vacancies.filter(v=>v&&v.occupationType!=='career');
   let rows='';
   careerEntries.forEach(v=>{
     const track=CAREERS.find(c=>c.id===v.track);
-    const sub=track?track.name+' · '+money(v.annualSalary)+'/yr'+(v.qualifies?'':' · requirements not met yet'):money(v.annualSalary)+'/yr';
-    rows+='<div class="arow clickable" data-track-row="'+(track?track.id:'')+'" data-vacancy-row="'+v.vacancyId+'"><div class="ar-grade">'+(track?track.icon:'💼')+'</div><div style="flex:1"><div class="ar-name">'+v.occupationName+'</div>'+
+    const yearsLeft=Number.isFinite(v.expiresYear)&&Number.isFinite(World.year)?Math.max(0,v.expiresYear-World.year):null;
+    const sub=(track?track.name:'Career')+' · '+money(v.annualSalary)+'/yr'+(yearsLeft!=null?' · '+yearsLeft+'y left':'')+(v.qualifies?'':' · '+vacancyRequirementSummary(v));
+    rows+='<div class="arow clickable" data-track-row="'+(track?track.id:'')+'" data-vacancy-row="'+v.vacancyId+'"><div class="ar-grade">'+(track?track.icon:'💼')+'</div><div style="flex:1"><div class="ar-name">'+v.occupationName+' · stage '+(v.stage==null?'-':v.stage+1)+'</div>'+
       '<div class="ar-meta">'+sub+' · '+v.businessName+'</div></div>'+
       (v.qualifies?'<button class="btn small" data-apply data-vacancy="'+v.vacancyId+'">Apply ▸</button>':'<div class="ar-chev">VIEW LADDER ›</div>')+'</div>';
   });
   let jobRows='';
   jobEntries.forEach(v=>{
     jobRows+='<div class="arow'+(v.qualifies?'':' locked')+'"><div class="ar-grade">💼</div><div style="flex:1"><div class="ar-name">'+v.occupationName+'</div>'+
-      '<div class="ar-meta">'+v.businessName+' · tier '+v.jobTier+' · '+money(v.annualSalary)+'/yr'+(v.qualifies?'':' · requirements not met yet')+'</div></div>'+
+      '<div class="ar-meta">'+v.businessName+' · tier '+v.jobTier+' · '+money(v.annualSalary)+'/yr</div>'+
+      '<div class="ar-meta">'+vacancyRequirementSummary(v)+'</div></div>'+
       (v.qualifies?'<button class="btn small" data-apply data-vacancy="'+v.vacancyId+'">Apply ▸</button>':'')+'</div>';
   });
   $('#jobSheet').innerHTML='<div class="ps-head"><span>THIS YEAR’S OPENINGS</span><span>FORM W-2</span></div>'+
@@ -1167,7 +1184,7 @@ function openJobPortalPersistent(){
     const b=e.target.closest('[data-apply]'); if(b){ queueAdd('p','lookwork',{vacancyId:b.dataset.vacancy}); $('#jobWrap').classList.add('hidden'); return; }
     if(e.target.id==='jobCancel'){ $('#jobWrap').classList.add('hidden'); return; }
     if(e.target.closest('#openGigs')){ $('#jobWrap').classList.add('hidden'); openGigPicker(); return; }
-    const row=e.target.closest('[data-track-row]'); if(row&&row.dataset.trackRow){ openJobDetail(row.dataset.trackRow); }
+    const row=e.target.closest('[data-track-row]'); if(row&&row.dataset.trackRow){ openJobDetail(row.dataset.trackRow,row.dataset.vacancyRow); }
   };
   $('#jobWrap').classList.remove('hidden');
 }
@@ -1217,11 +1234,13 @@ function openMeetPicker(){
   };
   $('#skillWrap').classList.remove('hidden');
 }
-function openJobDetail(trackId){
+function openJobDetail(trackId,vacancyId){
   const track=CAREERS.find(c=>c.id===trackId); if(!track) return;
   const careerAdvantage=typeof educationCareerAdvantage==='function'?educationCareerAdvantage(track):{kind:'none',label:'No degree-specific advantage'};
   const persistent=isPersistentVacancyProjection();
-  const v=persistent?S.vacancies.find(x=>x.track===trackId):S.vacancies.find(x=>x.track===trackId);
+  const v=persistent
+    ?(vacancyId?S.vacancies.find(x=>x.track===trackId&&x.vacancyId===vacancyId):S.vacancies.find(x=>x.track===trackId))
+    :S.vacancies.find(x=>x.track===trackId);
   const openStage=persistent?(v?v.stage:-1):((v&&v.stage>=0)?v.stage:-1);
   const openVacancyId=persistent&&v?v.vacancyId:null;
   let rows='';
@@ -2377,7 +2396,7 @@ function runHoldTick(){
 }
 function runBusinessYearTick(){
   if(typeof BusinessSystem!=='object'||!BusinessSystem||typeof BusinessSystem.tickWorld!=='function') return null;
-  return BusinessSystem.tickWorld(World,{year:World.year});
+  return BusinessSystem.tickWorld(World,{year:World.year,subject:S});
 }
 function runEmploymentReconciliation(){
   if(typeof EmploymentSystem!=='object'||!EmploymentSystem||typeof EmploymentSystem.reconcilePlayer!=='function') return null;
@@ -2393,7 +2412,8 @@ function runEmploymentLifecycleYearTick(){
 function runVacancyYearTick(){
   if(typeof VacancySystem!=='object'||!VacancySystem||typeof VacancySystem.tickWorld!=='function') return null;
   const result=VacancySystem.tickWorld(World,{year:World.year});
-  if(result&&result.applied&&typeof VacancySystem.openVacancies==='function'&&typeof VacancySystem.seedNpcApplications==='function'){
+  const maySeed=result&&(result.applied===true||(result.reason==='already_applied'&&result.year===World.year));
+  if(maySeed&&typeof VacancySystem.openVacancies==='function'&&typeof VacancySystem.seedNpcApplications==='function'){
     VacancySystem.openVacancies(World,{}).slice().sort((a,b)=>a.id.localeCompare(b.id)).forEach(vacancy=>{
       VacancySystem.seedNpcApplications(World,vacancy,{year:World.year});
     });
@@ -2415,7 +2435,7 @@ function advanceYear(suppressBurst,quiet){
   // The world tick runs after the calendar advances and before travel, economy,
   // and personal systems. It establishes this year's settlement conditions;
   // every existing yearly call remains in its original order after this point.
-  if(typeof WorldSimulation==='object'&&WorldSimulation&&typeof WorldSimulation.tick==='function') WorldSimulation.tick(World,{random:Random,year:World.year});
+  if(typeof WorldSimulation==='object'&&WorldSimulation&&typeof WorldSimulation.tick==='function') WorldSimulation.tick(World,{random:Random,year:World.year,subject:S});
   // Household medical cases are prepared and family/autonomous treatment
   // decisions resolved before any NPC's own annual medical progression runs
   // below, so a condition treated this year is already 'treated' by the

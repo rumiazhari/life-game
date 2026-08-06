@@ -784,3 +784,192 @@ test('EmploymentSystem.tickWorld retiring an overlooked age-65 subject sets a co
   assert.equal(parsed.jobName,'Pensioner (retired)');
   assert.equal(parsed.status,'retired');
 });
+
+/* ===== Correctness hardening: synchronized orphan/duplicate migration repairs (section 3) ===== */
+
+test('subject contract at a missing business is terminated and all S fields become Unemployed',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail'});
+  const result=expose(context,`(function(){
+    const subject={employmentContractId:null,jobTier:1,jobName:'Worker',career:null,careerYears:2,location:{settlementId:'branec'}};
+    const c=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b.id}',annualSalary:900,hiredYear:1930});
+    subject.employmentContractId=c.id;
+    delete World.businesses['${b.id}'];
+    EmploymentSystem.migrate(World,{subject});
+    EmploymentSystem.reconcilePlayer(World,subject);
+    return JSON.stringify({subject,status:EmploymentSystem.get(World,c.id).status,activeCount:EmploymentSystem.activeForPerson(World,'subject').length});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.subject.jobTier,0);
+  assert.equal(parsed.subject.jobName,'Unemployed');
+  assert.equal(parsed.subject.career,null);
+  assert.equal(parsed.subject.employmentContractId,null);
+  assert.equal(parsed.status,'terminated');
+  assert.equal(parsed.activeCount,0);
+});
+
+test('an NPC contract at a missing business zeros income and becomes unemployed after migration',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail'});
+  registerNpc(context,'npc:orphan');
+  const result=expose(context,`(function(){
+    const c=EmploymentSystem.hire(World,{personId:'npc:orphan',businessId:'${b.id}',annualSalary:900,hiredYear:1930});
+    delete World.businesses['${b.id}'];
+    EmploymentSystem.migrate(World);
+    return JSON.stringify({employment:World.npcs['npc:orphan'].employment,status:EmploymentSystem.get(World,c.id).status});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.employment.status,'unemployed');
+  assert.equal(parsed.employment.income,0);
+  assert.equal(parsed.status,'terminated');
+});
+
+test('a preexisting closed-business contract is synchronized identically to a missing-business contract',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail'});
+  const result=expose(context,`(function(){
+    const subject={employmentContractId:null,jobTier:1,jobName:'Worker',career:null,careerYears:2,location:{settlementId:'branec'}};
+    const c=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b.id}',annualSalary:900,hiredYear:1930});
+    subject.employmentContractId=c.id;
+    BusinessSystem.get(World,'${b.id}').status='closed';
+    EmploymentSystem.migrate(World,{subject});
+    return JSON.stringify(subject);
+  })()`);
+  const subject=JSON.parse(result);
+  assert.equal(subject.jobTier,0);
+  assert.equal(subject.jobName,'Unemployed');
+});
+
+test('duplicate subject contracts retain one deterministic winner and S reflects the survivor',()=>{
+  const context=freshWorld();
+  const b1=business(context,{settlementId:'branec',sector:'retail'});
+  const b2=business(context,{settlementId:'branec',sector:'finance'});
+  const result=expose(context,`(function(){
+    const subject={employmentContractId:null,jobTier:1,jobName:'Old',career:null,careerYears:0,location:{settlementId:'branec'}};
+    const c1=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b1.id}',occupationType:'job',occupationName:'Old',jobTier:1,annualSalary:900,hiredYear:1925});
+    World.employmentContracts[c1.id].status='active';
+    const c2Id='employment:00099';
+    World.employmentContracts[c2Id]={id:c2Id,personId:'subject',workerType:'player',businessId:'${b2.id}',settlementId:'branec',occupationType:'job',occupationId:'new',occupationName:'New',careerStage:null,jobTier:2,annualSalary:1200,hiredYear:1930,endedYear:null,status:'active',terminationReason:null,performance:0.5,satisfaction:0.5,lastPaidYear:null,annualPaid:0,history:[],origin:'legacy',stageStartedYear:1930,lastReviewYear:null,lastLifecycleYear:null,lastPromotionAttemptYear:null};
+    World.employmentContractCounter=99;
+    EmploymentSystem.migrate(World,{subject});
+    const active=EmploymentSystem.activeForPerson(World,'subject');
+    return JSON.stringify({subject,activeCount:active.length,winnerId:active[0]&&active[0].id});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.activeCount,1);
+  assert.equal(parsed.winnerId,'employment:00099');
+  assert.equal(parsed.subject.jobTier,2);
+  assert.equal(parsed.subject.jobName,'New');
+});
+
+test('duplicate NPC contracts retain one winner and synchronize npc.employment to it',()=>{
+  const context=freshWorld();
+  const b1=business(context,{settlementId:'branec',sector:'retail'});
+  const b2=business(context,{settlementId:'branec',sector:'finance'});
+  registerNpc(context,'npc:dup');
+  const result=expose(context,`(function(){
+    const c1=EmploymentSystem.hire(World,{personId:'npc:dup',businessId:'${b1.id}',annualSalary:900,hiredYear:1925});
+    const c2Id='employment:00099';
+    World.employmentContracts[c2Id]={id:c2Id,personId:'npc:dup',workerType:'npc',businessId:'${b2.id}',settlementId:'branec',occupationType:'job',occupationId:'new',occupationName:'New',careerStage:null,jobTier:2,annualSalary:1200,hiredYear:1930,endedYear:null,status:'active',terminationReason:null,performance:0.5,satisfaction:0.5,lastPaidYear:null,annualPaid:0,history:[],origin:'legacy',stageStartedYear:1930,lastReviewYear:null,lastLifecycleYear:null,lastPromotionAttemptYear:null};
+    World.employmentContractCounter=99;
+    EmploymentSystem.migrate(World);
+    const active=EmploymentSystem.activeForPerson(World,'npc:dup');
+    return JSON.stringify({activeCount:active.length,winnerId:active[0]&&active[0].id,employment:World.npcs['npc:dup'].employment});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.activeCount,1);
+  assert.equal(parsed.winnerId,'employment:00099');
+  assert.equal(parsed.employment.income,1200);
+});
+
+test('repeated migration of orphan/duplicate repairs is idempotent',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail'});
+  const result=expose(context,`(function(){
+    EmploymentSystem.hire(World,{personId:'npc:1',businessId:'${b.id}',annualSalary:900,hiredYear:1930});
+    delete World.businesses['${b.id}'];
+    EmploymentSystem.migrate(World);
+    const first=JSON.stringify(World.employmentContracts);
+    EmploymentSystem.migrate(World);
+    const second=JSON.stringify(World.employmentContracts);
+    return first===second?'stable':'changed';
+  })()`);
+  assert.equal(result,'stable');
+});
+
+/* ===== Correctness hardening: vacancy-origin NPC reconciliation fallbacks (section 4) ===== */
+
+test('a vacancy-origin NPC contract with a missing employment object is not terminated',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail',kind:'public'});
+  const result=expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:'branec'}};
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:900,requirements:{minAge:16}});
+    const r=EmploymentSystem.acceptVacancy(World,v,'npc:a',{year:1930});
+    delete World.npcs['npc:a'].employment;
+    World.year=1931;
+    EmploymentSystem.reconcileNpcs(World);
+    return EmploymentSystem.get(World,r.contract.id).status;
+  })()`);
+  assert.equal(result,'active');
+});
+
+test('a vacancy-origin NPC contract with an empty employment status is not terminated',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail',kind:'public'});
+  const result=expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:'branec',employment:{status:''}}};
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:900,requirements:{minAge:16}});
+    const r=EmploymentSystem.acceptVacancy(World,v,'npc:a',{year:1930});
+    World.year=1931;
+    EmploymentSystem.reconcileNpcs(World);
+    return EmploymentSystem.get(World,r.contract.id).status;
+  })()`);
+  assert.equal(result,'active');
+});
+
+test('an unknown legacy employment status is repaired to employed, not terminated',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail',kind:'public'});
+  const result=expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:'branec',employment:{status:'furloughed'}}};
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:900,requirements:{minAge:16}});
+    const r=EmploymentSystem.acceptVacancy(World,v,'npc:a',{year:1930});
+    World.year=1931;
+    EmploymentSystem.reconcileNpcs(World);
+    return JSON.stringify({status:EmploymentSystem.get(World,r.contract.id).status,employment:World.npcs['npc:a'].employment.status});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.status,'active');
+  assert.equal(parsed.employment,'employed');
+});
+
+test('an alive vacancy-origin NPC is never assigned npc_deceased',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail',kind:'public'});
+  const result=expose(context,`(function(){
+    World.npcs={'npc:a':{id:'npc:a',alive:true,birthYear:World.year-30,locationId:'branec',employment:{status:'garbage-value'}}};
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:900,requirements:{minAge:16}});
+    const r=EmploymentSystem.acceptVacancy(World,v,'npc:a',{year:1930});
+    World.year=1931;
+    EmploymentSystem.reconcileNpcs(World);
+    const c=EmploymentSystem.get(World,r.contract.id);
+    return JSON.stringify({status:c.status,reason:c.terminationReason});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.notEqual(parsed.reason,'npc_deceased');
+});
+
+test('a non-vacancy NPC contract ended from legacy unemployment receives income 0',()=>{
+  const context=freshWorld();
+  const b=business(context,{settlementId:'branec',sector:'retail'});
+  registerNpc(context,'npc:legacy');
+  const result=expose(context,`(function(){
+    EmploymentSystem.hire(World,{personId:'npc:legacy',businessId:'${b.id}',annualSalary:900,hiredYear:1930});
+    World.npcs['npc:legacy'].employment.status='unemployed';
+    EmploymentSystem.reconcileNpcs(World);
+    return JSON.stringify(World.npcs['npc:legacy'].employment);
+  })()`);
+  const employment=JSON.parse(result);
+  assert.equal(employment.income,0);
+});

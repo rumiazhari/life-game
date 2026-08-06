@@ -257,30 +257,43 @@
     root.BusinessSystem.all(world).forEach(business=>syncBusinessEmployees(world,business.id));
   }
 
-  function terminateOrphanedContracts(world,year){
+  function terminateOrphanedContracts(world,year,options){
+    const affected=new Set();
     all(world).forEach(contract=>{
       if(!ACTIVE_STATUSES.has(contract.status)) return;
       const business=getBusiness(world,contract.businessId);
-      if(!business) endInternal(world,contract,'terminated','missing_business',year);
-      else if(business.status==='closed') endInternal(world,contract,'terminated','business_closed',year);
+      if(!business){ endInternal(world,contract,'terminated','missing_business',year); affected.add(contract.personId); }
+      else if(business.status==='closed'){ endInternal(world,contract,'terminated','business_closed',year); affected.add(contract.personId); }
     });
+    affected.forEach(personId=>{
+      syncPersonLegacy(world,personId,Object.assign({},options,{terminal:true}));
+    });
+    return affected;
   }
 
-  function resolveDuplicateActiveContracts(world,year){
+  function resolveDuplicateActiveContracts(world,year,options){
     const byPerson={};
     all(world).forEach(contract=>{
       if(!ACTIVE_STATUSES.has(contract.status)) return;
       (byPerson[contract.personId]=byPerson[contract.personId]||[]).push(contract);
     });
+    const winners=new Set();
     Object.keys(byPerson).forEach(personId=>{
       const list=byPerson[personId];
       if(list.length<=1) return;
       list.sort((a,b)=>(b.hiredYear-a.hiredYear)||String(b.id).localeCompare(String(a.id)));
       list.slice(1).forEach(contract=>endInternal(world,contract,'terminated','migration_duplicate_active_contract',year));
+      winners.add(personId);
     });
+    winners.forEach(personId=>{
+      // The surviving contract remains active -- synchronize it outward as
+      // authoritative, never as a terminal/unemployed transition.
+      syncPersonLegacy(world,personId,options);
+    });
+    return winners;
   }
 
-  function migrate(world){
+  function migrate(world,options){
     ensure(world);
     const rawKeys=Object.keys(world.employmentContracts).sort();
 
@@ -367,8 +380,8 @@
     });
     world.employmentContracts=normalized;
 
-    terminateOrphanedContracts(world,year);
-    resolveDuplicateActiveContracts(world,year);
+    terminateOrphanedContracts(world,year,options);
+    resolveDuplicateActiveContracts(world,year,options);
 
     const highest=highestContractIdNumber(world);
     if(world.employmentContractCounter<highest) world.employmentContractCounter=highest;
@@ -726,21 +739,18 @@
           syncNpcLegacy(world,id);
           return;
         }
-        if(employment.status==='employed'){
-          // Vacancy-origin contract remains authoritative: retain it exactly,
-          // only pushing it outward into npc.employment for legacy readers.
-          syncNpcLegacy(world,id);
-          results.push(existing);
-          return;
-        }
-        endInternal(world,existing,'terminated','npc_deceased',year);
+        // Vacancy-origin contract remains authoritative unless an explicit
+        // terminal fact exists. A missing/null/empty/unknown legacy status
+        // is repaired outward to 'employed' via syncNpcLegacy -- it is never
+        // treated as a death (death is only decided by npc.alive above).
         syncNpcLegacy(world,id);
+        results.push(existing);
         return;
       }
 
       const employment=npc.employment||{};
       if(employment.status!=='employed'){
-        if(existing) endInternal(world,existing,'resigned','legacy_unemployed',year);
+        if(existing){ endInternal(world,existing,'resigned','legacy_unemployed',year); syncNpcLegacy(world,id); }
         return;
       }
       const jobTier=1;
@@ -963,9 +973,17 @@
     if(!candidates.length) return {accepted:false,reason:'no_opening'};
     const vacancy=candidates[0];
     if(typeof root.VacancySystem.submitApplication!=='function') return {accepted:false,reason:'no_opening'};
+    if(typeof root.VacancySystem.qualificationDetails==='function'){
+      const details=root.VacancySystem.qualificationDetails(world,contract.personId,vacancy,{subject:opts.subject});
+      if(!details.qualifies){
+        return {accepted:false,reason:details.reasons&&details.reasons.includes('career_years')?'insufficient_tenure':'not_qualified'};
+      }
+    }
     const application=root.VacancySystem.submitApplication(world,vacancy.id,contract.personId,{subject:opts.subject,kind:'promotion',year});
-    if(!application.applied&&application.application&&application.application.status==='rejected'){
-      return {accepted:false,reason:'not_qualified'};
+    if(!application.applied&&application.reason==='annual_application_cap') return {accepted:false,reason:'annual_application_cap'};
+    if(!application.application||application.application.status!=='pending'){
+      if(application.application&&application.application.status==='rejected') return {accepted:false,reason:'not_qualified'};
+      return {accepted:false,reason:'no_opening'};
     }
     const resolved=root.VacancySystem.resolveVacancy(world,vacancy.id,{year,subject:opts.subject});
     if(resolved&&resolved.filledByPersonId===contract.personId) return {accepted:true,reason:'accepted',contract:get(world,contractId)};
