@@ -3,13 +3,20 @@
 - **Current merged phase:** Phase 4B (household health) — merged in
   `origin/master` @ `2d5b89d40068bb6d7747337feb48c54c75232dbc`.
 - **Current development branch:** `agent/phase-4c1-business-foundation`.
-- **Current branch head:** `98c14b6311a2532b1d6538988cf3542c06b7e7cb`
-  ("Fix fallback employer capacity handling").
-- **Current implementation status:** Phase 4C slices 4C-1 (business
-  registry), 4C-2 (employment contracts), and 4C-3 (annual business
-  finance) are IMPLEMENTED ON BRANCH, not yet merged to `master`.
-- **Next planned implementation slice:** Phase 4C-4 — employer-generated
-  persistent vacancies. See
+- **Current implementation status:** Phase 4C slices 4C-1 through 4C-5
+  (business registry, employment contracts, annual business finance,
+  persistent vacancies, and hiring/career lifecycle) are IMPLEMENTED ON
+  BRANCH, not yet merged to `master`.
+- **Current pull request:** [PR #9 — Add persistent business and employment
+  systems](https://github.com/rumiazhari/life-game/pull/9), base `master`,
+  head `agent/phase-4c1-business-foundation`, open and under review.
+- **Verified implementation baseline:** `c1d28f83fdea036b4caacfcaab1f1010da5e3922`
+  ("Finish persistent employment transition coverage") — the commit reviewed
+  when this page was last written. The branch may have advanced since; run
+  `git rev-parse origin/agent/phase-4c1-business-foundation` for the live
+  head rather than trusting this SHA.
+- **Next planned implementation slice:** Phase 4C-6 — workplace life. It
+  should not begin until PR #9 is reviewed and merged to `master`. See
   [docs/roadmap/CURRENT-STATUS.md](docs/roadmap/CURRENT-STATUS.md#immediate-next-action).
 
 Full roadmap: [docs/roadmap/README.md](docs/roadmap/README.md)

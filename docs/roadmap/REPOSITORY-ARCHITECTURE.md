@@ -1,8 +1,12 @@
 # Repository Architecture
 
-Verified against `agent/phase-4c1-business-foundation` @ `98c14b6` (which is
-`origin/master` @ `2d5b89d` plus the branch's business/employment commits).
-Re-read the source before trusting API lists — this page can go stale.
+Verified against `agent/phase-4c1-business-foundation` at implementation
+baseline `c1d28f83fdea036b4caacfcaab1f1010da5e3922` (which is `origin/master`
+@ `2d5b89d` plus the branch's business/employment/vacancy commits, open as
+[PR #9](https://github.com/rumiazhari/life-game/pull/9)). Run
+`git rev-parse origin/agent/phase-4c1-business-foundation` for the live head
+before trusting this baseline. Re-read the source before trusting API
+lists — this page can go stale.
 
 The game is plain browser JavaScript: no build step, no bundler, no
 framework, no npm dependencies. `life-game.html` loads every file directly
@@ -25,7 +29,7 @@ the VM sandbox's context object in tests).
 
 | File | Responsibility | Notes |
 |---|---|---|
-| `data.js` | Static game content: names, skills, `INC` (legacy flat income table by job tier), `JOBLIST`, `CAREERS`, career-stage qualification logic, and most of the player-facing event/action catalog. | Read-only reference data for `EmploymentSystem`'s legacy-reconciliation sector mapping. `JOBLIST`/`CAREERS`/`INC` must not be renamed — `EmploymentSystem` reads them directly. |
+| `data.js` | Static game content: names, skills, `INC` (legacy flat income table by job tier), `JOBLIST`, `CAREERS`, career-stage qualification logic, and most of the player-facing event/action catalog. Also defines the `terminateSubjectEmployment` helper shared with `ui.js` for forced job-loss paths (Bureau detention, incarceration). | Read-only reference data for `EmploymentSystem`'s legacy-reconciliation sector mapping and `VacancySystem`'s sector-to-role-template generation. `JOBLIST`/`CAREERS`/`INC` must not be renamed — both systems read them directly. Player actions here (`lookwork`, `favor`, `presspromo`, `quitjob`, `earlyret`) call `VacancySystem`/`EmploymentSystem` directly rather than mutating `S` employment fields; direct mutation remains only as a documented fallback when those systems/`World` are unavailable. |
 | `lore.js` | `KARSEN_SETTLEMENTS` and other static world-flavor data. | Consumed by `WorldSimulation.definitions()` and `BusinessSystem.seedWorld()`. |
 | `state.js` | Defines the `World` object shape at new-game start (`newGame()`), the player-facing `S` object shape (`newSubject()`), settlement lookup helpers (`settlementById`, `currentSettlement`), and travel. | `World` and `S` are both declared as top-level globals here (`let World`, `let S`). |
 | `main.js` | Entry point: wires DOM buttons to game actions, boots a new game or resumes. | Thin; most logic lives in `ui.js`. |
@@ -47,13 +51,17 @@ the VM sandbox's context object in tests).
 | `household-health.js` | Illness transmission between household members, caregiving, family treatment decisions, treatment charges, medical debt, notices. | `household.medical` (via `HouseholdHealthSystem`) | Runs late in `advanceYear()`, after both player and NPC medical progression. | `HouseholdHealthSystem.migrate` | `tests/household-health*.test.js`, `tests/household-treatment.test.js` |
 | `npc-system.js` | Persistent NPC registry: identity, family links, employment/education/health snapshot fields, household linkage, subject promotion on death. | `World.npcs` | `NpcSystem.tick` runs during `advanceYear()`; also drives household-case preparation/resolution. | `NpcSystem.migrate` | `tests/npc-system.test.js`, `tests/spouse-death.test.js` |
 | `persistent-people-ui.js` | Rendering helpers for household/person panels. | None | UI only | N/A | Exercised indirectly via `tests/household-health-ui.test.js` |
-| `business-system.js` | Persistent business registry, deterministic settlement seeding, and deterministic annual business finances. | `World.businesses`, `World.businessCounter`, `World.businessSchemaVersion` | `BusinessSystem.migrate` runs inside `WorldSimulation.migrate`; `BusinessSystem.tickWorld` (via `runBusinessYearTick()`) runs late in `advanceYear()`. | `BusinessSystem.migrate` | `tests/business-system.test.js`, `tests/business-finance.test.js` |
-| `employment-system.js` | Persistent employment contracts, deterministic employer selection (including a capacity-aware fallback policy), player/NPC legacy reconciliation, business/employee synchronization, annual payroll. | `World.employmentContracts`, `World.employmentContractCounter`, `World.employmentSchemaVersion`; also writes `subject.employmentContractId` on `S` | `EmploymentSystem.migrate` runs inside `WorldSimulation.migrate` (after `BusinessSystem.migrate`); reconciliation + sync run in `advanceYear()` after `checkCareerProgress()`, before `runBusinessYearTick()`. | `EmploymentSystem.migrate` | `tests/employment-system.test.js` |
+| `business-system.js` | Persistent business registry, deterministic settlement seeding, and deterministic annual business finances. | `World.businesses`, `World.businessCounter`, `World.businessSchemaVersion` | `BusinessSystem.migrate` runs inside `WorldSimulation.migrate` (first of the three); `BusinessSystem.tickWorld` (via `runBusinessYearTick()`) runs in `advanceYear()` after employment reconciliation, before the employment lifecycle tick. | `BusinessSystem.migrate` | `tests/business-system.test.js`, `tests/business-finance.test.js` |
+| `employment-system.js` | Persistent employment contracts; deterministic employer selection (including a capacity-aware fallback policy); the full vacancy-backed hiring/promotion/employer-switching/salary-adjustment/resignation/dismissal/layoff/retirement lifecycle; player/NPC legacy reconciliation; business/employee synchronization; annual payroll and lifecycle reviews. | `World.employmentContracts`, `World.employmentContractCounter`, `World.employmentSchemaVersion`, `World.employmentLifecycleLastTickYear`; also writes `subject.employmentContractId` on `S` | `EmploymentSystem.migrate` runs inside `WorldSimulation.migrate` (second, after `BusinessSystem.migrate`, before `VacancySystem.migrate`); `reconcilePlayer`/`reconcileNpcs`/`syncAllBusinessEmployees` run early in `advanceYear()` (before `runBusinessYearTick()`), `EmploymentSystem.tickWorld` (via `runEmploymentLifecycleYearTick()`) runs right after business finance, and reconciliation runs again after `resolvePlan()`/`resolvePendingVacancies()`. | `EmploymentSystem.migrate` | `tests/employment-system.test.js`, `tests/employment-lifecycle.test.js` |
+| `vacancy-system.js` | Persistent employer-generated job vacancies: deterministic per-business generation against a target-workforce calculation, expiry/withdrawal, qualification/ranking, application seeding and resolution, and the player job-portal compatibility projection. | `World.vacancies`, `World.vacancyCounter`, `World.vacancySchemaVersion`, `World.vacancyLastTickYear` | `VacancySystem.migrate` runs inside `WorldSimulation.migrate` (third, after `BusinessSystem.migrate`/`EmploymentSystem.migrate`); `VacancySystem.tickWorld` (via `runVacancyYearTick()`) runs in `advanceYear()` after the employment lifecycle tick, seeding NPC applications the same year it applies; `VacancySystem.resolvePending` resolves prior-year openings after `resolvePlan()`. | `VacancySystem.migrate` | `tests/vacancy-system.test.js`, `tests/vacancy-ui-integration.test.js` |
 | `world-gameplay.js` | Installs adapters that route certain legacy player-facing calculations (local cost of living, health pressure, paid income) through `WorldSimulation`/`PublicHealth` instead of static constants. | None (adapter layer) | Installed once at boot (`install()`), not itself an annual step. | N/A | Exercised via `tests/world-gameplay.test.js` |
 
 **Present on the `agent/phase-4c1-business-foundation` branch only, not yet
-on `origin/master`:** `business-system.js`, `employment-system.js`, and their
-wiring into `world-simulation.js`, `ui.js`, and `life-game.html`.
+on `origin/master`:** `business-system.js`, `employment-system.js`,
+`vacancy-system.js`, and their wiring into `world-simulation.js`, `ui.js`,
+`data.js`, and `life-game.html` — open as
+[PR #9](https://github.com/rumiazhari/life-game/pull/9), pending review and
+merge.
 
 ## Tests, tools, assets
 
@@ -82,8 +90,9 @@ js/data.js
 js/state.js
 js/systems/settlement-economy.js
 js/systems/public-health.js
-js/systems/business-system.js        (branch only)
-js/systems/employment-system.js      (branch only)
+js/systems/business-system.js        (branch only, PR #9)
+js/systems/employment-system.js      (branch only, PR #9)
+js/systems/vacancy-system.js         (branch only, PR #9)
 js/systems/world-simulation.js
 js/systems/relationship-memory.js
 js/systems/condition-registry.js
@@ -106,17 +115,26 @@ both `life-game.html` and `vm-loader.js`'s `worldFiles`.
 ## Authoritative state
 
 - **`World`** — owns every persistent world entity: settlements, NPCs,
-  households, and (branch-only, not yet merged) businesses and employment
-  contracts. This is the object every system's `ensure`/`migrate`/`tick`
-  functions read and write. Future systems (property, loans, legal cases,
-  event chains, estates, government) belong here too — see
+  households, and (branch-only, not yet merged — [PR #9](https://github.com/rumiazhari/life-game/pull/9))
+  businesses, employment contracts, and vacancies. This is the object every
+  system's `ensure`/`migrate`/`tick` functions read and write. Future
+  systems (property, loans, legal cases, event chains, estates, government)
+  belong here too — see
   [Engineering Rules](ENGINEERING-RULES.md#persistent-authority).
 - **`S`** — the legacy/player-facing compatibility state (age, stats, job
   fields, skills, relationships-as-seen-by-the-player, etc.). It is not a
-  second authoritative entity store: where a persistent equivalent exists
-  (e.g. employment), `S` holds only a stable pointer
-  (`S.employmentContractId`) or fields that get reconciled into `World`
-  each year, not a duplicate copy of the record itself.
+  second authoritative entity store: where a persistent equivalent exists,
+  `S` holds only a stable pointer or a synchronized projection, never a
+  duplicate authoritative copy —
+  - **employment**: `S.employmentContractId` is a stable pointer;
+    `S.jobTier`/`S.jobName`/`S.career`/`S.careerYears` are compatibility
+    fields kept in sync with the active `World.employmentContracts` record
+    each year by `EmploymentSystem.syncPersonLegacy`/`reconcilePlayer`,
+    never the other way around for an `origin:'vacancy'` contract;
+  - **vacancies**: `S.vacancies` is a **compatibility projection**, rebuilt
+    each portal refresh from `VacancySystem.playerPortalVacancies(World, S)`
+    — it is not an independently authoritative or randomly-generated list;
+    `World.vacancies` is the sole authority.
 - **`Lineage`** — owns cross-generation family continuity data used when
   promoting an NPC descendant into the player role after death.
 - **`Hold`** — owns resistance/underworld organization state where

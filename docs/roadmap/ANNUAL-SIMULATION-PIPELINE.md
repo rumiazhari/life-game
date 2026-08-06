@@ -3,59 +3,109 @@
 ## Current actual order
 
 Verified by reading `advanceYear()` in `js/ui.js` on
-`agent/phase-4c1-business-foundation` @ `98c14b6`. This is the real order
-today, not an aspiration:
+`agent/phase-4c1-business-foundation` at implementation baseline `c1d28f8`.
+This is the real order today, not an aspiration — re-verify against the
+live branch head before trusting the step numbers below.
 
 1. `S.age++; World.year++` — advance the calendar.
 2. `WorldSimulation.tick(World, {random, year})` — settlement economy,
    public health, education capacity, security, demographics for every
    settlement (this call internally runs `WorldSimulation.migrate`, which in
-   turn runs `BusinessSystem.migrate` then `EmploymentSystem.migrate`).
+   turn runs `BusinessSystem.migrate`, then `EmploymentSystem.migrate`, then
+   `VacancySystem.migrate`, in that order).
 3. `NpcSystem.prepareAndResolveHouseholdCases(...)` — prepare/resolve
    household medical cases before anyone's own annual medical progression.
 4. `NpcSystem.resolveQueuedFamilyDecisions(...)` — resolve the player's
    queued family-health decisions (still before `NpcSystem.tick`, so a
    member treated this year is already reflected in their own progression
    roll below).
-5. `NpcSystem.tick(...)` — persistent NPC lifecycle/employment/health
-   progression, deferring household aggregation.
+5. `NpcSystem.tick(..., {deferHousehold:true})` — persistent NPC lifecycle/
+   employment/health progression, deferring household aggregation.
 6. `NpcSystem.settleHouseholdTreatmentCharges(...)` — settle this year's
    treatment charges into household finances before `HouseholdSystem.tick`
    reads them.
 7. `resolveTravel(); runHoldTick(); ...; runFollowups(); runHistory();
-   runMilestones(); runEconomy()` — travel resolution and the legacy
-   player economy tick (local cost of living, legacy wage payment).
-8. `HouseholdSystem.tick(...)` — household finance settlement using the
-   player's economy results from step 7.
+   runMilestones(); runEconomy()` — travel resolution and the player
+   economy tick. `runEconomy()` pays the player's salary from the
+   **already-existing authoritative employment contract** (not a flat
+   `INC[]` lookup once a contract exists) and records the paid amount on
+   `S.__worldWagePaid` via `WorldGameplay.adjustPaidIncome` (wage-index
+   adjusted).
+8. `HouseholdSystem.tick(World, {..., subjectIncome: S.__worldWagePaid, ...})`
+   — household finance settlement consuming the wage paid in step 7.
 9. `runPersonalStandingYearTick()` — legacy player standing/reputation tick.
-10. `rollJobVacancies()` (only if unemployed, working-age) — **legacy random
-    vacancy roll**, still the only live vacancy path; not yet backed by
-    `BusinessSystem`'s persistent `vacancies` array. See
-    [Phase 4C](PHASE-4C-BUSINESSES-AND-EMPLOYMENT.md#4c-4--real-employer-generated-vacancies).
-11. `resolvePlan(); runPersonalYearTick()` — legacy player plan/queue and
-    personal-year effects.
-12. `NpcSystem.applyHouseholdHealthTick(...)` — household illness
-    transmission and caregiving, run **after** both player and NPC medical
-    progression above so transmission reflects everyone's post-progression
-    state.
-13. `runAffairs(); runReverseAffairs(); tickSkills(); checkCareerProgress()`
-    — legacy player relationship/skill/career-ladder progression (this is
-    where `S.jobTier`/`S.career`/`S.jobName` actually change).
-14. `EmploymentSystem.reconcilePlayer(World, S)`,
-    `EmploymentSystem.reconcileNpcs(World)`,
-    `EmploymentSystem.syncAllBusinessEmployees(World)` — reconcile the
-    legacy career/job change from step 13 into a persistent employment
-    contract, do the same for NPCs, then resynchronize every business's
-    `employeeIds`.
-15. `runBusinessYearTick()` — wrapper around `BusinessSystem.tickWorld`;
+10. `runEmploymentReconciliation()` — `EmploymentSystem.reconcilePlayer(World,
+    S)`, `EmploymentSystem.reconcileNpcs(World)`, and
+    `EmploymentSystem.syncAllBusinessEmployees(World)`: reconcile the
+    player's and every NPC's legacy career/job fields into persistent
+    employment contracts, then resynchronize every business's `employeeIds`.
+11. `runBusinessYearTick()` — wrapper around `BusinessSystem.tickWorld`;
     computes deterministic annual business finances (revenue, expenses,
     payroll, profit, cash, debt, struggling/closure) for every business.
-16. `guardianTeachTick(); guardianAmbientTick(); guardianIncidentTick();
-    schoolYearTick(); runRandomEvents()` — remaining legacy player-facing
-    annual systems.
-17. `if (S.alive) checkMortality()` — player mortality roll.
-18. End-of-year bookkeeping (`fileRecentYearReport()`, render calls,
+12. `runEmploymentLifecycleYearTick()` — wrapper around
+    `EmploymentSystem.tickWorld`; runs annual performance/satisfaction
+    reviews, automatic age-65 retirement, and business-driven layoffs.
+13. `runVacancyYearTick()` — wrapper around `VacancySystem.tickWorld`
+    (expires stale openings, withdraws openings at missing/closed
+    businesses, then deterministically generates new openings per business
+    up to its target workforce), then, only if the tick actually applied
+    this year, seeds NPC applications (`VacancySystem.seedNpcApplications`)
+    for every open vacancy.
+14. `checkCareerProgress()` — remaining legacy player career-ladder
+    progression not yet expressed as an explicit vacancy/application (e.g.
+    passive tenure-based advancement); where it still changes
+    `S.jobTier`/`S.career`/`S.jobName` directly, the reconciliation in step
+    10 (and again in step 19) is what turns that into a contract.
+15. `syncPlayerVacancyPortal()` — first refresh of `S.vacancies` from
+    `VacancySystem.playerPortalVacancies`. **Same-year openings remain
+    visible here** — they are not auto-resolved this early, so the player
+    can see and apply to a vacancy opened this same year.
+16. Stage-transition check.
+17. `resolvePlan()` — executes the player's queued actions (`lookwork`,
+    `presspromo`, `favor`, `quitjob`, `earlyret`, and others from
+    `DEC_MAP`/`PUR_MAP`), which may submit or resolve an application,
+    request a promotion, resign, or retire against a specific vacancy/
+    contract the player selected.
+18. `resolvePendingVacancies()` — `VacancySystem.resolvePending(World,
+    {year, subject: S})`, which resolves only **prior-year** openings
+    (`openedYear < World.year`); this is the automatic-pending-resolution
+    pass, deliberately excluding the current year's brand-new openings so
+    they stay visible through step 15/16 above before being auto-decided.
+19. Post-resolution synchronization: `EmploymentSystem.reconcilePlayer`,
+    `EmploymentSystem.reconcileNpcs`, `EmploymentSystem.syncAllBusinessEmployees`,
+    then `VacancySystem.syncAllBusinessVacancyIds(World)`.
+20. `syncPlayerVacancyPortal()` again — second refresh of `S.vacancies`
+    reflecting the post-resolution state (e.g. a vacancy the player just
+    filled no longer shows as open).
+21. `runPersonalYearTick()` — player's own annual medical progression.
+22. `NpcSystem.applyHouseholdHealthTick(...)` — household illness
+    transmission and caregiving, run **after both** the NPC medical
+    progression in step 5 and the player's own medical progression in step
+    21, so transmission reflects everyone's post-progression state.
+23. `runAffairs(); runReverseAffairs(); tickSkills(); guardianTeachTick();
+    guardianAmbientTick(); guardianIncidentTick(); schoolYearTick();
+    runRandomEvents()` — remaining legacy player-facing annual systems.
+24. `if (S.alive) checkMortality()` — player mortality roll.
+25. End-of-year bookkeeping (`fileRecentYearReport()`, render calls,
     achievement checks) and `if (!S.alive) handleDeath()`.
+
+Notes on invariants this ordering is meant to preserve:
+
+- **Business payroll is accounting only** — `BusinessSystem`'s payroll
+  tracking in step 11 does not independently add to `S.assets`; the
+  player's salary has exactly **one** cash-payment path, `runEconomy()` in
+  step 7.
+- **Same-year vs. prior-year vacancy resolution is deliberate**, not an
+  oversight: a vacancy opened this year stays visible (steps 13/15) so the
+  player can act on it via `resolvePlan()` (step 17) before the automatic
+  pending-resolution pass (step 18) only sweeps up openings from *previous*
+  years that nobody explicitly resolved yet.
+- **`checkCareerProgress()` (step 14) is legacy**, not the persistent hiring
+  path — real hiring/promotion/dismissal/retirement go through
+  `EmploymentSystem`/`VacancySystem` directly (steps 12, 13, 17); step 14
+  remains only for whatever passive career-ladder behavior in `js/data.js`
+  has not yet been fully replaced, and its effects still get reconciled
+  into a contract by the surrounding steps.
 
 `fastForward()` simply calls `advance()` (which calls `advanceYear()`) in a
 loop up to 15 times, quietly — it does not run a separate code path, so
@@ -79,7 +129,7 @@ assume any step below already runs in this position.
 6.  Progress persistent NPC lifecycle and employment.
 7.  Reconcile player and NPC employment contracts.
 8.  Synchronize businesses and employees.
-9.  Tick business finances, payroll, hiring, and layoffs.    [4C-3 exists; hiring/layoffs planned in 4C-5]
+9.  Tick business finances, payroll, hiring, and layoffs.    [4C-3/4C-5 exist; not yet consolidated into this target order]
 10. Tick player medical conditions.
 11. Tick NPC medical conditions.
 12. Run household transmission after player and NPC
@@ -120,7 +170,8 @@ not have this API yet):
 
 ```js
 // PLANNED — not implemented. YearEngine.configure() currently takes one
-// single callback, not phase registration, as of 98c14b6.
+// single callback, not phase registration; re-check js/core/year-engine.js
+// on the live branch head before assuming this is still true.
 YearEngine.registerPhase('calendar', advanceCalendar);
 YearEngine.registerPhase('settlement-tick', tickSettlements);
 YearEngine.registerPhase('npc-lifecycle', tickNpcLifecycle);
