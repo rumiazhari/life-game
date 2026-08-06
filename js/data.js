@@ -8,6 +8,19 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const money=n=>(n<0?'−$':'$')+Math.abs(Math.round(n)).toLocaleString('en-US');
 const P=p=>Math.round(clamp(p,0,1)*100)+'%';
 
+function terminateSubjectEmployment(reason,year){
+  if(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof EmploymentSystem.activeForPerson==='function'&&typeof EmploymentSystem.dismiss==='function'&&typeof World!=='undefined'&&World){
+    const contract=EmploymentSystem.activeForPerson(World,'subject')[0]||null;
+    if(contract){
+      EmploymentSystem.dismiss(World,contract.id,reason,year==null?World.year:year,{subject:S});
+      return contract;
+    }
+  }
+  // Legacy fallback for states without a persistent contract/system.
+  S.employmentContractId=null;S.jobTier=0;S.jobName='Unemployed';S.career=null;S.careerYears=0;
+  return null;
+}
+
 const MALE=['Arthur','Elias','Hugo','Stanislaw','Dmitri','Tobias','Viktor','Oskar','Bruno','Milan','Anton','Felix','Rudolf','Janek','Caspar','Emil','Leopold','Otis','Pavel','Roman','Wilhelm','Karel','Boris','Anders','Gustav','Konrad','Tomas','Erik','Henrik','Ludwig','Adrian','Marek','Zoltan','Miklos','Ferenc','Aleksander','Nikolai','Ivo','Rasmus','Jozef','Vaclav','Matthias','Bernard','Lukas','Frantisek','Gunnar','Sten','Ingmar','Alois','Radek'];
 const FEMALE=['Marta','Vera','Ingrid','Rosa','Alma','Leni','Greta','Nadia','Elsa','Thea','Petra','Dana','Sylvia','Olga','Beata','Wanda','Magda','Freya','Ida','June','Helene','Zofia','Anya','Sigrid','Klara','Milena','Renata','Ivana','Astrid','Liesl','Ottilie','Hanna','Ruth','Edith','Grazyna','Danuta','Bozena','Irenka','Katarina','Lotte','Signe','Ester','Marika','Yolanda','Berta','Agnes','Rozalia','Vesna','Zora','Alena'];
 const LAST=['Kovacs','Lindqvist','Baran','Stein','Novak','Weiss','Petrov','Hale','Marek','Vogel','Sokol','Brandt','Orlov','Fischer','Zeman','Keller','Polak','Richter','Urban','Slezak','Meyer','Dvorak','Lang','Nemec','Hoffman','Kral','Bauer','Witkowski','Engel','Molnar'];
@@ -766,7 +779,7 @@ const PURSUITS=[
        const signingBonus=baseBonus+(stageIdx===0?(advantage.signingBonus||0):0);
        const result=VacancySystem.applyAndResolve(World,item.vacancyId,'subject',{subject:S,year:World.year});
        const application=result.application;
-       if(application&&application.status==='accepted'){
+       if(application&&application.status==='accepted'&&result.reason!=='duplicate_application'){
          const business=BusinessSystem&&typeof BusinessSystem.get==='function'?BusinessSystem.get(World,vacancy.businessId):null;
          return{fx:{happiness:4,assets:signingBonus-100},text:'Subject applied through the portal and was taken on as '+vacancy.occupationName+(track?', '+track.name:'')+' at '+(business?business.name:'a new employer')+'. '+money(vacancy.annualSalary)+' a year.'+(signingBonus?' A signing bonus of '+money(signingBonus)+' reflected the subject’s credentials.':'')};
        }
@@ -776,7 +789,13 @@ const PURSUITS=[
        if(reason==='vacancy_unavailable') return{fx:{happiness:-2},text:'Subject went back to the portal, but that opening had already closed.',reason};
        if(reason==='better_candidate') return{fx:{happiness:-4},text:'Subject applied through the portal, but the position went to a stronger candidate.',reason};
        if(reason==='qualification') return{fx:{happiness:-2},text:'Subject applied through the portal, but did not meet what the position required.',reason};
-       if(reason==='duplicate_application') return{fx:{happiness:-1},text:'Subject already had an application on file for that opening — it remains pending.',reason};
+       if(reason==='duplicate_application'){
+         const dupStatus=application&&application.status;
+         if(dupStatus==='accepted') return{fx:{happiness:-1},text:'Subject already had an application on file for that opening — it has already been accepted.',reason};
+         if(dupStatus==='rejected') return{fx:{happiness:-1},text:'Subject already had an application on file for that opening — the earlier application was already rejected.',reason};
+         if(dupStatus==='withdrawn') return{fx:{happiness:-1},text:'Subject already had an application on file for that opening — the application is no longer active.',reason};
+         return{fx:{happiness:-1},text:'Subject already had an application on file for that opening — it remains pending.',reason};
+       }
        return{fx:{happiness:-2},text:'Subject applied through the portal. Nothing came of it this year.',reason:'unfilled'};
      }
      // Legacy fallback: only reached when VacancySystem/World are unavailable.
@@ -831,7 +850,24 @@ const PURSUITS=[
    apply:()=>{S.father.mood=clamp(S.father.mood+14,0,100);return{fx:{relations:2,happiness:1},text:pick(['Subject wrote to {father}. Gruff replies, always answered anyway.','Subject visited home. {father} pretended not to be pleased. He was.'])}}},
  {id:'favor',cat:'rel',icon:'🤝',cost:1,avail:s=>!s.eduStage&&s.relations>=70&&s.age>=16&&s.age>=s.favorCool&&s.jailUntil<=s.age,note:()=>S.jobTier===0?`call in a favor · a friend knows a job`:`call in a favor · a friend knows a way`,
    apply:()=>{S.favorCool=S.age+4;
-     if(S.jobTier===0){const tier=Math.max(1,highestQualifyingTier(3)); const job=bestJobForTier(tier)||bestJobForTier(1); S.jobTier=tier;S.jobName=job.name;
+     if(S.jobTier===0){
+       if(typeof VacancySystem==='object'&&VacancySystem&&typeof VacancySystem.playerPortalVacancies==='function'&&typeof VacancySystem.applyAndResolve==='function'&&typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof World!=='undefined'&&World){
+         const openings=VacancySystem.playerPortalVacancies(World,S)
+           .filter(entry=>entry&&entry.qualifies===true&&entry.applicationStatus!=='pending'&&entry.applicationStatus!=='accepted')
+           .sort((a,b)=>b.jobTier-a.jobTier||b.annualSalary-a.annualSalary||a.vacancyId.localeCompare(b.vacancyId));
+         if(!openings.length) return{fx:{happiness:1},text:'Subject called in a favor. The friend asked around, but nobody had a real opening this year.',reason:'no_opening'};
+         const opening=openings[0];
+         const result=VacancySystem.applyAndResolve(World,opening.vacancyId,'subject',{subject:S,year:World.year,kind:'new_hire'});
+         const application=result.application;
+         if(application&&application.status==='accepted'){
+           const business=BusinessSystem&&typeof BusinessSystem.get==='function'?BusinessSystem.get(World,opening.businessId):null;
+           return{fx:{happiness:3},text:'Subject called in a favor. A friend of a friend needed someone reliable — subject started as '+opening.occupationName+' at '+(business?business.name:opening.businessName||'a new employer')+' the following Monday.'};
+         }
+         const reason=result.reason||(application?application.reason:'unfilled');
+         return{fx:{happiness:-1},text:'Subject called in a favor, but it did not come to anything this year.',reason};
+       }
+       // Legacy fallback only when no persistent vacancy/employment system exists.
+       const tier=Math.max(1,highestQualifyingTier(3)); const job=bestJobForTier(tier)||bestJobForTier(1); S.jobTier=tier;S.jobName=job.name;
        return{fx:{happiness:3},text:'Subject called in a favor. A friend of a friend needed someone reliable — subject started as '+job.name+' the following Monday.'};}
      return{fx:{assets:350,happiness:2},text:'Subject called in a favor. It was repaid, discreetly and in full, no questions asked on either side.'};}},
  {id:'doctor',cat:'health',icon:'⚕',cost:1,avail:s=>s.age>=10,note:()=>`exam · treatment if needed · −$90`,
@@ -1100,14 +1136,25 @@ const DECISIONS=[
  {id:'usefavor',cost:1,cat:'personal',avail:s=>s.bureauFavor>0&&(s.scrutiny>0||s.record),note:()=>`spend 1 Bureau Favor · lower scrutiny`,
    apply:()=>{S.bureauFavor--; S.scrutiny=Math.max(0,S.scrutiny-30); if(S.record&&chance(.35)) S.record=false; updatePersonalStanding(); return {fx:{happiness:2},text:'Subject spent a Bureau Favor on an administrative correction. The red ink lightened, though the paper remembers.'};}},
  {id:'earlyret',cost:1,cat:'work',avail:s=>s.age>=55&&s.age<=64&&s.jobTier>0,note:()=>`retire early · +HAPPINESS, pension`,
-   apply:()=>{S.pensionBase=300+S.jobTier*300;S.jobTier=0;S.jobName='Pensioner (early)';S.career=null;return{fx:{happiness:6},text:'Subject retired early, at noon on a Tuesday, and never went back. The pension paperwork arrived eventually.'}}},
+   apply:()=>{
+     const activeContract=(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof EmploymentSystem.activeForPerson==='function'&&typeof World!=='undefined'&&World)
+       ?(EmploymentSystem.activeForPerson(World,'subject')[0]||null):null;
+     const pensionTier=activeContract?activeContract.jobTier:S.jobTier;
+     S.pensionBase=300+pensionTier*300;
+     if(activeContract&&typeof EmploymentSystem.retire==='function'){
+       EmploymentSystem.retire(World,activeContract.id,World.year,{subject:S,reason:'early_retirement',terminalJobName:'Pensioner (early)'});
+     } else {
+       // Legacy fallback only when no persistent contract/system exists.
+       S.employmentContractId=null;S.jobTier=0;S.jobName='Pensioner (early)';S.career=null;S.careerYears=0;
+     }
+     return{fx:{happiness:6},text:'Subject retired early, at noon on a Tuesday, and never went back. The pension paperwork arrived eventually.'}}},
  {id:'namechange',cost:1,cat:'personal',avail:s=>s.age>=18,note:()=>`a new name · +HAPPINESS`,
    apply:()=>{S.first=pickName(S.sex==='M'?MALE:FEMALE);renderIdentity();return{fx:{happiness:4},text:'Subject changed their name, citing “a new era.” The Bureau updated its records under protest. The subject seemed lighter.'}}},
  {id:'crime',cost:1,cat:'vice',avail:s=>s.age>=14&&s.crime<=3&&s.jailUntil<=s.age,
    note:()=>{const L=['lift a wallet','run the numbers','fence the goods','the big score'];return `${L[S.crime]} · caught ${P(catchP(S.crime))}`;},dark:1,
    apply:()=>{const tier=S.crime, cp=catchP(tier), reward=[120,400,900,4000][tier];
      if(chance(cp)){S.record=true;S.vice=Math.min(10,S.vice+1);
-       if(tier>=2){const ju=S.age+2;pushFollow({at:S.age+1,t:'Subject was caught and put away. The file was moved to a different shelf.',fx:{happiness:-8,health:-5,relations:-8},side:s2=>{s2.jobTier=0;s2.jobName='Unemployed';s2.career=null;s2.jailUntil=ju;}});}
+       if(tier>=2){const ju=S.age+2;pushFollow({at:S.age+1,t:'Subject was caught and put away. The file was moved to a different shelf.',fx:{happiness:-8,health:-5,relations:-8},side:s2=>{terminateSubjectEmployment('incarceration',typeof World!=='undefined'&&World?World.year:undefined);s2.jailUntil=ju;}});}
        return{fx:{happiness:-6,health:-3},text:pick(['Subject was caught mid-act. The magistrate was not in a “youthful” mood this time.','Subject’s luck, such as it was, ran out behind the market. The cuffs were cold.'])};}
      S.crime++;S.vice=Math.min(10,S.vice+1);return{fx:{assets:reward,happiness:3},text:pick(['Subject pulled it off clean. The coin was good; the sleep afterward was not.','The job went smooth as a filed form. Subject pocketed the take and checked the exits twice.'])}}},
  {id:'breakup',cost:1,cat:'rel',avail:s=>s.partner&&!s.married,note:()=>`end it with {partner} · relief or regret, depending`,

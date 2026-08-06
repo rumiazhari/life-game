@@ -896,3 +896,260 @@ test('selecting employer A vs employer B shows only that employer\'s salary, req
   assert.equal(result.aHasOwnVacancyId,true);
   assert.equal(result.bHasOwnVacancyId,true);
 });
+
+/* ===== Correctness hardening: normal-runtime paths routed through EmploymentSystem (section 10) ===== */
+
+test('earlyret retires the active contract through EmploymentSystem instead of leaving it dangling',()=>{
+  const context=uiContext('earlyret-basic');
+  configureAdult(context,'S.age=60;');
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const contract=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:3,annualSalary:2600,hiredYear:World.year-5});
+    S.employmentContractId=contract.id; S.jobTier=3; S.jobName='Clerk'; S.career=null;
+    const r=DEC_MAP['earlyret'].apply(S,{});
+    return JSON.stringify({
+      text:r.text,
+      contractStatus:contract.status,
+      terminationReason:contract.terminationReason,
+      activeCount:EmploymentSystem.activeForPerson(World,'subject').length,
+      contractPtr:S.employmentContractId,
+      jobTier:S.jobTier,
+      career:S.career,
+      careerYears:S.careerYears,
+      jobName:S.jobName,
+      pensionBase:S.pensionBase
+    });
+  })()`));
+  assert.equal(result.contractStatus,'retired');
+  assert.equal(result.terminationReason,'early_retirement');
+  assert.equal(result.activeCount,0);
+  assert.equal(result.contractPtr,null);
+  assert.equal(result.jobTier,0);
+  assert.equal(result.career,null);
+  assert.equal(result.careerYears,0);
+  assert.equal(result.jobName,'Pensioner (early)');
+  assert.equal(result.pensionBase,300+3*300);
+});
+
+test('earlyret is not reclassified as resigned by reconcilePlayer, including on repeat reconciliation',()=>{
+  const context=uiContext('earlyret-reconcile');
+  configureAdult(context,'S.age=58;');
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const contract=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:2,annualSalary:1650,hiredYear:World.year-5});
+    S.employmentContractId=contract.id; S.jobTier=2; S.jobName='Clerk'; S.career=null;
+    DEC_MAP['earlyret'].apply(S,{});
+    EmploymentSystem.reconcilePlayer(World,S);
+    const afterFirst=JSON.stringify({status:contract.status,reason:contract.terminationReason,active:EmploymentSystem.activeForPerson(World,'subject').length,jobName:S.jobName});
+    EmploymentSystem.reconcilePlayer(World,S);
+    const afterSecond=JSON.stringify({status:contract.status,reason:contract.terminationReason,active:EmploymentSystem.activeForPerson(World,'subject').length,jobName:S.jobName});
+    return JSON.stringify({afterFirst,afterSecond,stable:afterFirst===afterSecond});
+  })()`));
+  const first=JSON.parse(result.afterFirst);
+  assert.equal(first.status,'retired');
+  assert.equal(first.reason,'early_retirement');
+  assert.equal(first.active,0);
+  assert.equal(first.jobName,'Pensioner (early)');
+  assert.equal(result.stable,true);
+});
+
+test('favor hires the subject through a real vacancy and real employer when a qualifying opening exists',()=>{
+  const context=uiContext('favor-real-vacancy');
+  configureAdult(context,'S.relations=80;');
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:2,annualSalary:1650,requirements:{minAge:16}});
+    const r=PUR_MAP['favor'].apply(S,{});
+    const active=EmploymentSystem.activeForPerson(World,'subject');
+    return JSON.stringify({
+      text:r.text,
+      jobTier:S.jobTier,
+      contractId:S.employmentContractId,
+      activeCount:active.length,
+      contractBusiness:active[0]?active[0].businessId:null,
+      contractOrigin:active[0]?active[0].origin:null,
+      vacancyStatus:World.vacancies[v.id].status,
+      vacancyFilledBy:World.vacancies[v.id].filledByPersonId
+    });
+  })()`));
+  assert.equal(result.activeCount,1);
+  assert.equal(result.contractBusiness,b.id);
+  assert.equal(result.contractOrigin,'vacancy');
+  assert.equal(result.vacancyStatus,'filled');
+  assert.equal(result.vacancyFilledBy,'subject');
+  assert.equal(result.jobTier,2);
+  assert.ok(result.text.includes('Clerk'));
+});
+
+test('favor hiring leaves no synthetic second contract after reconcilePlayer, repeatedly',()=>{
+  const context=uiContext('favor-reconcile-stable');
+  configureAdult(context,'S.relations=80;');
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:950,requirements:{minAge:16}});
+    PUR_MAP['favor'].apply(S,{});
+    EmploymentSystem.reconcilePlayer(World,S);
+    const afterFirst=EmploymentSystem.activeForPerson(World,'subject').length;
+    EmploymentSystem.reconcilePlayer(World,S);
+    const afterSecond=EmploymentSystem.activeForPerson(World,'subject').length;
+    return JSON.stringify({afterFirst,afterSecond});
+  })()`));
+  assert.equal(result.afterFirst,1);
+  assert.equal(result.afterSecond,1);
+});
+
+test('favor reports no_opening and leaves the subject unemployed when no qualifying vacancy exists',()=>{
+  const context=uiContext('favor-no-opening');
+  configureAdult(context,'S.relations=80;');
+  const result=JSON.parse(expose(context,`(function(){
+    const r=PUR_MAP['favor'].apply(S,{});
+    return JSON.stringify({reason:r.reason,jobTier:S.jobTier,jobName:S.jobName,contractId:S.employmentContractId});
+  })()`));
+  assert.equal(result.reason,'no_opening');
+  assert.equal(result.jobTier,0);
+  assert.equal(result.jobName,'Unemployed');
+  assert.ok(!result.contractId);
+});
+
+test('a rejected favor application (vacancy_full) leaves employment unchanged',()=>{
+  const context=uiContext('favor-vacancy-full');
+  configureAdult(context,'S.relations=80;');
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:950,requirements:{minAge:16}});
+    for(let i=0;i<VacancySystem.MAX_APPLICATIONS_PER_VACANCY;i++){
+      const id='npc:full'+i;
+      World.npcs=World.npcs||{};
+      World.npcs[id]={id,alive:true,birthYear:World.year-30,locationId:'branec',education:{level:'none'},employment:{}};
+      VacancySystem.submitApplication(World,v.id,id,{year:World.year});
+    }
+    const jobTierBefore=S.jobTier;
+    const r=PUR_MAP['favor'].apply(S,{});
+    return JSON.stringify({reason:r.reason,jobTierBefore,jobTierAfter:S.jobTier,contractId:S.employmentContractId,vacancyStatus:VacancySystem.get(World,v.id).status});
+  })()`));
+  assert.equal(result.reason,'vacancy_full');
+  assert.equal(result.jobTierAfter,result.jobTierBefore);
+  assert.ok(!result.contractId);
+  assert.equal(result.vacancyStatus,'open');
+});
+
+test('applyOperationFailure(1) terminates the active contract with reason bureau_detention',()=>{
+  const context=uiContext('operation-failure-detention');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const contract=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:950,hiredYear:World.year});
+    S.employmentContractId=contract.id; S.jobTier=1; S.jobName='Clerk'; S.career=null;
+    const r=applyOperationFailure(1);
+    EmploymentSystem.reconcilePlayer(World,S);
+    return JSON.stringify({
+      text:r.text,
+      contractStatus:contract.status,
+      terminationReason:contract.terminationReason,
+      jobTier:S.jobTier,
+      jobName:S.jobName,
+      activeAfterReconcile:EmploymentSystem.activeForPerson(World,'subject').length
+    });
+  })()`));
+  assert.equal(result.contractStatus,'terminated');
+  assert.equal(result.terminationReason,'bureau_detention');
+  assert.equal(result.jobTier,0);
+  assert.equal(result.jobName,'Unemployed');
+  assert.equal(result.activeAfterReconcile,0);
+});
+
+test('the serious-crime imprisonment follow-up terminates the active contract with reason incarceration',()=>{
+  const context=uiContext('crime-incarceration');
+  configureAdult(context,'S.age=30;S.crime=2;');
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const contract=EmploymentSystem.hire(World,{personId:'subject',businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:950,hiredYear:World.year});
+    S.employmentContractId=contract.id; S.jobTier=1; S.jobName='Clerk'; S.career=null;
+    Random.chance=()=>true;
+    DEC_MAP['crime'].apply(S,{});
+    // The queued imprisonment side effect is delayed via pushFollow/followups;
+    // invoke the queued side callback directly (as runFollowups eventually
+    // would) to exercise the incarceration termination it schedules.
+    const queued=followups[followups.length-1];
+    if(queued&&queued.side) queued.side(S);
+    return JSON.stringify({
+      contractStatus:contract.status,
+      terminationReason:contract.terminationReason,
+      jobTier:S.jobTier,
+      jailUntil:S.jailUntil,
+      employeeIds:BusinessSystem.get(World,'${b.id}').employeeIds
+    });
+  })()`));
+  assert.equal(result.contractStatus,'terminated');
+  assert.equal(result.terminationReason,'incarceration');
+  assert.equal(result.jobTier,0);
+  assert.ok(result.jailUntil>30);
+  assert.ok(!result.employeeIds.includes('subject'));
+});
+
+test('duplicate-application feedback matches a pending existing application',()=>{
+  const context=uiContext('dup-app-pending');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    // A still-pending application always gets resolved by applyAndResolve, so it
+    // can never reach the duplicate_application branch in normal play -- this
+    // stubs the resolver to exercise the defensive pending-status text directly.
+    const originalApplyAndResolve=VacancySystem.applyAndResolve;
+    VacancySystem.applyAndResolve=function(){ return {applied:false,reason:'duplicate_application',application:{personId:'subject',status:'pending',reason:null}}; };
+    const r=PUR_MAP['lookwork'].apply(S,{vacancyId:v.id});
+    VacancySystem.applyAndResolve=originalApplyAndResolve;
+    return JSON.stringify({reason:r.reason,text:r.text});
+  })()`));
+  assert.equal(result.reason,'duplicate_application');
+  assert.ok(result.text.includes('remains pending'));
+});
+
+test('duplicate-application feedback matches an accepted existing application',()=>{
+  const context=uiContext('dup-app-accepted');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    VacancySystem.submitApplication(World,v.id,'subject',{year:World.year});
+    const app=v.applications.find(a=>a.personId==='subject');
+    app.status='accepted';app.reason=null;
+    const r=PUR_MAP['lookwork'].apply(S,{vacancyId:v.id});
+    return JSON.stringify({reason:r.reason,text:r.text});
+  })()`));
+  assert.equal(result.reason,'duplicate_application');
+  assert.ok(result.text.includes('already been accepted'));
+});
+
+test('duplicate-application feedback matches a rejected existing application',()=>{
+  const context=uiContext('dup-app-rejected');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    VacancySystem.submitApplication(World,v.id,'subject',{year:World.year});
+    const app=v.applications.find(a=>a.personId==='subject');
+    app.status='rejected';app.reason='better_candidate';
+    const r=PUR_MAP['lookwork'].apply(S,{vacancyId:v.id});
+    return JSON.stringify({reason:r.reason,text:r.text});
+  })()`));
+  assert.equal(result.reason,'duplicate_application');
+  assert.ok(result.text.includes('was already rejected'));
+});
+
+test('duplicate-application feedback matches a withdrawn existing application',()=>{
+  const context=uiContext('dup-app-withdrawn');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    VacancySystem.submitApplication(World,v.id,'subject',{year:World.year});
+    const app=v.applications.find(a=>a.personId==='subject');
+    app.status='withdrawn';app.reason='withdrawn_by_applicant';
+    const r=PUR_MAP['lookwork'].apply(S,{vacancyId:v.id});
+    return JSON.stringify({reason:r.reason,text:r.text});
+  })()`));
+  assert.equal(result.reason,'duplicate_application');
+  assert.ok(result.text.includes('no longer active'));
+});

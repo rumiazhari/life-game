@@ -1512,3 +1512,129 @@ test('checkInvariants stays clean for a valid filled vacancy with exactly one ac
   const parsed=JSON.parse(result);
   assert.deepEqual(parsed.invariants,[]);
 });
+
+/* ===== Correctness hardening: unconditional embedded ownership contradiction check ===== */
+
+test('an embedded object under its own true owner explicitly contradicting that ownership is preserved as a withdrawn cross-business placeholder',()=>{
+  const context=freshWorld();
+  const b1=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const b2=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'finance'}));
+  const result=expose(context,`(function(){
+    const business1=BusinessSystem.get(World,'${b1.id}');
+    const business2=BusinessSystem.get(World,'${b2.id}');
+    const v=VacancySystem.open(World,{businessId:business1.id,occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000});
+    // Embedded inside business1 (the true top-level owner) but the object itself
+    // explicitly claims business2 -- the ownership contradiction must not be
+    // silently accepted just because topLevelBusinessOf[recordId]===business1.id.
+    business1.vacancies=[Object.assign({},v,{businessId:business2.id})];
+    VacancySystem.migrate(World);
+    const all=Object.values(World.vacancies);
+    const topLevel=World.vacancies[v.id];
+    const crossPlaceholder=all.find(r=>r.closedReason==='migration_cross_business_reference');
+    return JSON.stringify({
+      total:all.length,
+      topLevelStatus:topLevel.status,
+      topLevelBusiness:topLevel.businessId,
+      crossFound:!!crossPlaceholder,
+      crossBusiness:crossPlaceholder?crossPlaceholder.businessId:null,
+      preservedValue:crossPlaceholder?crossPlaceholder.history[0].legacyValue:null
+    });
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.total,2);
+  assert.equal(parsed.topLevelStatus,'open');
+  assert.equal(parsed.topLevelBusiness,b1.id);
+  assert.equal(parsed.crossFound,true);
+  assert.equal(parsed.crossBusiness,b1.id);
+  assert.ok(parsed.preservedValue.includes('"businessId":"'+b2.id+'"'));
+});
+
+test('an ownerless top-level vacancy referenced by an embedded object is not silently treated as legitimate',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.get(World,'${business.id}');
+    World.vacancies['vacancy:00050']={id:'vacancy:00050',settlementId:'branec',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',careerStage:null,jobTier:1,annualSalary:1000,requirements:{minAge:0,educationStage:null,majorIds:[],skills:{},minCareerYears:0},openedYear:World.year,expiresYear:World.year+2,status:'open',filledByPersonId:null,filledContractId:null,filledYear:null,closedReason:null,applications:[],history:[]};
+    b.vacancies=[{id:'vacancy:00050',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000,status:'open'}];
+    VacancySystem.migrate(World);
+    const all=Object.values(World.vacancies);
+    const crossPlaceholder=all.find(r=>r.closedReason==='migration_cross_business_reference');
+    return JSON.stringify({total:all.length,ownerlessBusiness:World.vacancies['vacancy:00050'].businessId,crossFound:!!crossPlaceholder});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.total,2);
+  assert.equal(parsed.crossFound,true);
+});
+
+test('an ownerless top-level vacancy referenced by an embedded string is not silently treated as legitimate',()=>{
+  const context=freshWorld();
+  const business=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const result=expose(context,`(function(){
+    const b=BusinessSystem.get(World,'${business.id}');
+    World.vacancies['vacancy:00051']={id:'vacancy:00051',settlementId:'branec',occupationType:'job',occupationId:'clerk',occupationName:'Clerk',careerStage:null,jobTier:1,annualSalary:1000,requirements:{minAge:0,educationStage:null,majorIds:[],skills:{},minCareerYears:0},openedYear:World.year,expiresYear:World.year+2,status:'open',filledByPersonId:null,filledContractId:null,filledYear:null,closedReason:null,applications:[],history:[]};
+    b.vacancies=['vacancy:00051'];
+    VacancySystem.migrate(World);
+    const all=Object.values(World.vacancies);
+    const crossPlaceholder=all.find(r=>r.closedReason==='migration_cross_business_reference');
+    return JSON.stringify({total:all.length,crossFound:!!crossPlaceholder,legacyType:crossPlaceholder?crossPlaceholder.history[0].legacyType:null,legacyValue:crossPlaceholder?crossPlaceholder.history[0].legacyValue:null});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.total,2);
+  assert.equal(parsed.crossFound,true);
+  assert.equal(parsed.legacyType,'string');
+  assert.equal(parsed.legacyValue,'vacancy:00051');
+});
+
+test('string and object embedded ownership contradictions behave consistently and no embedded input disappears',()=>{
+  const context=freshWorld();
+  const b1=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const b2=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'finance'}));
+  const result=expose(context,`(function(){
+    const business1=BusinessSystem.get(World,'${b1.id}');
+    const business2=BusinessSystem.get(World,'${b2.id}');
+    const v1=VacancySystem.open(World,{businessId:business1.id,occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000});
+    const v2=VacancySystem.open(World,{businessId:business1.id,occupationType:'job',occupationId:'teller',occupationName:'Teller',jobTier:1,annualSalary:1100});
+    business1.vacancies=[Object.assign({},v1,{businessId:business2.id}),v2.id];
+    business2.vacancies=[v1.id];
+    VacancySystem.migrate(World);
+    const all=Object.values(World.vacancies);
+    const placeholders=all.filter(r=>r.closedReason==='migration_cross_business_reference');
+    return JSON.stringify({
+      total:all.length,
+      placeholderCount:placeholders.length,
+      v1Status:World.vacancies[v1.id].status,
+      v1Business:World.vacancies[v1.id].businessId,
+      v2Status:World.vacancies[v2.id].status
+    });
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.total,4);
+  assert.equal(parsed.placeholderCount,2);
+  assert.equal(parsed.v1Status,'open');
+  assert.equal(parsed.v1Business,b1.id);
+  assert.equal(parsed.v2Status,'open');
+});
+
+test('embedded ownership contradiction migration (objects and strings) is byte-for-byte idempotent',()=>{
+  const context=freshWorld();
+  const b1=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'retail'}));
+  const b2=JSON.parse(withBusiness(context,{settlementId:'branec',sector:'finance'}));
+  const result=expose(context,`(function(){
+    const business1=BusinessSystem.get(World,'${b1.id}');
+    const business2=BusinessSystem.get(World,'${b2.id}');
+    const v1=VacancySystem.open(World,{businessId:business1.id,occupationType:'job',occupationId:'clerk',occupationName:'Clerk',jobTier:1,annualSalary:1000});
+    const v2=VacancySystem.open(World,{businessId:business1.id,occupationType:'job',occupationId:'teller',occupationName:'Teller',jobTier:1,annualSalary:1100});
+    business1.vacancies=[Object.assign({},v1,{businessId:business2.id}),v2.id];
+    business2.vacancies=[v1.id];
+    VacancySystem.migrate(World);
+    const first=JSON.stringify(World.vacancies);
+    VacancySystem.migrate(World);
+    const second=JSON.stringify(World.vacancies);
+    VacancySystem.migrate(World);
+    const third=JSON.stringify(World.vacancies);
+    return JSON.stringify({stable12:first===second,stable23:second===third});
+  })()`);
+  const parsed=JSON.parse(result);
+  assert.equal(parsed.stable12,true);
+  assert.equal(parsed.stable23,true);
+});

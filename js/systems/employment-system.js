@@ -881,13 +881,13 @@
     subject.jobName='Unemployed';
   }
 
-  function syncRetiredPlayerLegacy(world,subject){
+  function syncRetiredPlayerLegacy(world,subject,terminalJobName){
     if(!subject) return;
     subject.employmentContractId=null;
     subject.jobTier=0;
     subject.career=null;
     subject.careerYears=0;
-    subject.jobName='Pensioner (retired)';
+    subject.jobName=terminalJobName||'Pensioner (retired)';
   }
 
   function syncNpcLegacy(world,npcId){
@@ -916,7 +916,7 @@
     if(personId==='subject'){
       const subject=opts.subject||(typeof S!=='undefined'?S:null);
       if(!subject) return;
-      if(opts.terminal==='retired') syncRetiredPlayerLegacy(world,subject);
+      if(opts.terminal==='retired') syncRetiredPlayerLegacy(world,subject,opts.terminalJobName);
       else if(opts.terminal) syncTerminatedPlayerLegacy(world,subject);
       else syncPlayerLegacy(world,subject);
     } else {
@@ -1048,7 +1048,7 @@
   }
   function retire(world,contractId,year,options){
     const opts=Object.assign({},options,{terminal:'retired'});
-    return end(world,contractId,'retired','retirement',year,opts);
+    return end(world,contractId,'retired',opts.reason||'retirement',year,opts);
   }
 
   function requestPromotion(world,contractId,options){

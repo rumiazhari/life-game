@@ -455,9 +455,15 @@
         const seenInThisBusiness=new Set();
         embedded.forEach(item=>{
           if(item&&typeof item==='object'&&!Array.isArray(item)){
+            const explicitBusinessId=typeof item.businessId==='string'&&item.businessId?item.businessId:null;
+            if(explicitBusinessId&&explicitBusinessId!==business.id){
+              const finalId=allocateId();
+              usedIds.add(finalId);
+              assignments.push({finalId,record:{__placeholder:true,legacyType:'object',legacyValue:item,businessId:business.id,closedReason:'migration_cross_business_reference'}});
+              return;
+            }
             if(isUsableEmbeddedVacancyRecord(item)){
               const recordId=item.id;
-              const crossBusinessField=typeof item.businessId==='string'&&item.businessId&&item.businessId!==business.id;
               if(isValidVacancyId(recordId)){
                 if(topLevelIds.has(recordId)){
                   if(seenInThisBusiness.has(recordId)){
@@ -467,7 +473,7 @@
                   } else {
                     seenInThisBusiness.add(recordId);
                     const ownerBusinessId=topLevelBusinessOf[recordId];
-                    if(ownerBusinessId&&ownerBusinessId!==business.id){
+                    if(ownerBusinessId!==business.id){
                       const finalId=allocateId();
                       usedIds.add(finalId);
                       assignments.push({finalId,record:{__placeholder:true,legacyType:'object',legacyValue:item,businessId:business.id,closedReason:'migration_cross_business_reference'}});
@@ -479,19 +485,11 @@
                   const finalId=allocateId();
                   usedIds.add(finalId);
                   assignments.push({finalId,record:{__placeholder:true,legacyType:'object',legacyValue:item,businessId:business.id,closedReason:'migration_duplicate_reference'}});
-                } else if(crossBusinessField){
-                  const finalId=allocateId();
-                  usedIds.add(finalId);
-                  assignments.push({finalId,record:{__placeholder:true,legacyType:'object',legacyValue:item,businessId:business.id,closedReason:'migration_cross_business_reference'}});
                 } else {
                   usedIds.add(recordId);
                   seenInThisBusiness.add(recordId);
                   assignments.push({finalId:recordId,record:Object.assign({},item,{businessId:item.businessId||business.id})});
                 }
-              } else if(crossBusinessField){
-                const finalId=allocateId();
-                usedIds.add(finalId);
-                assignments.push({finalId,record:{__placeholder:true,legacyType:'object',legacyValue:item,businessId:business.id,closedReason:'migration_cross_business_reference'}});
               } else {
                 const finalId=allocateId();
                 usedIds.add(finalId);
@@ -514,7 +512,7 @@
               } else {
                 seenInThisBusiness.add(item);
                 const ownerBusinessId=topLevelBusinessOf[item];
-                if(ownerBusinessId&&ownerBusinessId!==business.id){
+                if(ownerBusinessId!==business.id){
                   const finalId=allocateId();
                   usedIds.add(finalId);
                   assignments.push({finalId,record:{__placeholder:true,legacyType:'string',legacyValue:item,businessId:business.id,closedReason:'migration_cross_business_reference'}});

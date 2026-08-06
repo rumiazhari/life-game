@@ -25,7 +25,8 @@ function applyOperationFailure(idx){
     return {fx:{happiness:-6,relations:-2},text:'The Bureau made an example nearby — nobody arrested, nothing broken, just a very clear message. The fold felt it.'};
   }
   if(idx===1){
-    S.record=true; S.jailUntil=S.age+RI(2,6); S.jobTier=0; S.jobName='Unemployed'; S.career=null;
+    S.record=true; S.jailUntil=S.age+RI(2,6);
+    terminateSubjectEmployment('bureau_detention',typeof World!=='undefined'&&World?World.year:undefined);
     return {fx:{happiness:-10,health:-5},text:'Subject was taken in for questioning and did not come home for a long while.'};
   }
   if(idx===2){
