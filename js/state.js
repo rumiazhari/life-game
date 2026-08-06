@@ -415,7 +415,7 @@ function newSubject(){
     base:null,
     photoSeed:RI(0,99),photoTint:pick(TINTS),
     usedV:{},cool:{},desk:{subsidy:0,checkup:0,censure:0},warned:{},queue:[],usedNames:[],skills:{},practicedSkill:null,petDone:{},garnishUntil:0,bankrupt:false,autoTrain:false,marked:false,markedNote:'',healthCap:100,looksCap:100,
-    streak:0,bestStreak:0,yearAccum:{},stage:'infancy',career:null,vacancies:[],careerYears:0,
+    streak:0,bestStreak:0,yearAccum:{},stage:'infancy',career:null,vacancies:[],careerYears:0,employmentContractId:null,
     eduStage:null,eduYearsIn:0,eduDropped:false,eduCompleted:{},pendingSchoolStage:null,
     familyTier:fam.id,lifestyle:{housing:fam.housing,food:fam.food,childcare:fam.childcare},liabilities:[],livingAtHome:true,
     freedom:70,bureauFavor:0,scrutiny:0,housingSecurity:60,financialSecurity:55,medicalRecord:false,conditions:[],lastFavorYear:currentYear(),

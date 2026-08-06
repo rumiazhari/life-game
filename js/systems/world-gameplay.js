@@ -62,12 +62,20 @@
     if(typeof originals.rollJobVacancies==='function') root.rollJobVacancies=function(){
       originals.rollJobVacancies.apply(this,arguments);
       const subject=typeof S!=='undefined'?S:null;
-      if(!subject||!world()||!Array.isArray(subject.vacancies)) return;
+      if(!subject||!world()||!Array.isArray(subject.vacancies)) return subject?subject.vacancies:undefined;
+      const persistent=typeof root.VacancySystem==='object'&&root.VacancySystem&&subject.vacancies.some(v=>v&&v.vacancyId);
+      if(persistent){
+        // Persistent vacancy records are authoritative openings — do not run
+        // a second random filter over them.
+        subject.vacancies=subject.vacancies.map(vacancy=>Object.assign({},vacancy,{employmentIndex:localCost('employmentIndex',.5)}));
+        return subject.vacancies;
+      }
       subject.vacancies=subject.vacancies.map((vacancy,index)=>{
         if(!vacancy||vacancy.stage<0) return vacancy;
         const trackId=vacancy.track||String(index);
         return Object.assign({},vacancy,{stage:localVacancyScore(trackId,index)?vacancy.stage:-1,employmentIndex:localCost('employmentIndex',.5)});
       });
+      return subject.vacancies;
     };
     if(typeof originals.travelCost==='function') root.travelCost=function(from,to){
       const base=originals.travelCost.apply(this,arguments);
