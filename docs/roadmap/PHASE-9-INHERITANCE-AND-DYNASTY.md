@@ -60,8 +60,8 @@ a second record.
 
 **Planned identity refactor:** the player's identity is currently the
 literal string `'subject'` used throughout `js/state.js`, `js/ui.js`,
-`js/data.js`, and (on the `agent/phase-4c1-business-foundation` branch)
-`EmploymentSystem` (`workerTypeForPerson(personId){ return personId===
+`js/data.js`, and `EmploymentSystem` (merged to `origin/master` via
+Phase 4C; `workerTypeForPerson(personId){ return personId===
 'subject' ? 'player' : 'npc'; }`). Before deep multi-generation play, this
 should migrate to a `World`-level pointer:
 
