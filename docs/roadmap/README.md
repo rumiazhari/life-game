@@ -28,21 +28,19 @@ See [`CURRENT-STATUS.md`](CURRENT-STATUS.md) for the live, Git-verified
 status. Do not treat the summary below as authoritative — it is a snapshot
 and will go stale.
 
-As of the implementation baseline `c1d28f8` on branch
-`agent/phase-4c1-business-foundation` (not yet merged to `master`; open as
-[PR #9](https://github.com/rumiazhari/life-game/pull/9)):
+As of implementation merge commit `122a258` on `origin/master` (merged via
+[PR #9](https://github.com/rumiazhari/life-game/pull/9), squash-merged
+2026-08-06; the branch may have advanced further since — query Git for the
+live head):
 
-- Merged on `master` (`2d5b89d`): Phases 1–4B — core stability, dynamic
-  settlements, persistent NPCs/households, the reusable medical core, and
-  household health.
-- Implemented on the `agent/phase-4c1-business-foundation` branch, not yet
-  merged: Phase 4C slices 4C-1 through 4C-5 — persistent business registry,
-  persistent employment contracts, deterministic annual business finances,
-  persistent employer-generated vacancies, and the full hiring/application/
-  promotion/dismissal/retirement career lifecycle.
+- Merged on `master`: Phases 1–4B — core stability, dynamic settlements,
+  persistent NPCs/households, the reusable medical core, and household
+  health; and Phase 4C slices 4C-1 through 4C-5 — persistent business
+  registry, persistent employment contracts, deterministic annual business
+  finances, persistent employer-generated vacancies, and the full
+  hiring/application/promotion/dismissal/retirement career lifecycle.
 - Not yet started: Phase 4C slices 4C-6 onward (workplace life, ownership,
-  employer UI) — planned to begin only after PR #9 is merged — and
-  Phases 5–12.
+  employer UI) — no implementation branch exists yet — and Phases 5–12.
 
 ## Roadmap overview
 
@@ -53,7 +51,7 @@ As of the implementation baseline `c1d28f8` on branch
 | 3 | Persistent NPCs and households | MERGED | [Completed Foundation](COMPLETED-FOUNDATION.md) |
 | 4A | Reusable medical core | MERGED | [Completed Foundation](COMPLETED-FOUNDATION.md) |
 | 4B | Household health | MERGED | [Completed Foundation](COMPLETED-FOUNDATION.md) |
-| 4C | Businesses and employment | IN PROGRESS (4C-1..5 branch-only, PR #9 open) | [Phase 4C](PHASE-4C-BUSINESSES-AND-EMPLOYMENT.md) |
+| 4C | Businesses and employment | IN PROGRESS (4C-1..5 MERGED; 4C-6..8 PLANNED) | [Phase 4C](PHASE-4C-BUSINESSES-AND-EMPLOYMENT.md) |
 | 5 | Government, law, surveillance, politics | PLANNED | [Phase 5](PHASE-5-GOVERNMENT-LAW-AND-POLITICS.md) |
 | 6 | Advanced medicine, disability, reproduction | PLANNED | [Phase 6](PHASE-6-ADVANCED-HEALTH-AND-REPRODUCTION.md) |
 | 7 | Multi-year narrative event chains | PLANNED | [Phase 7](PHASE-7-NARRATIVE-EVENT-CHAINS.md) |

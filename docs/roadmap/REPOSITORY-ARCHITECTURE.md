@@ -1,12 +1,12 @@
 # Repository Architecture
 
-Verified against `agent/phase-4c1-business-foundation` at implementation
-baseline `c1d28f83fdea036b4caacfcaab1f1010da5e3922` (which is `origin/master`
-@ `2d5b89d` plus the branch's business/employment/vacancy commits, open as
+Verified against `origin/master`, at Phase 4C implementation merge commit
+`122a2587460810be1714b5a1bef3ddd3aef77f12` ("Add persistent business and
+employment systems (#9)", merged via
 [PR #9](https://github.com/rumiazhari/life-game/pull/9)). Run
-`git rev-parse origin/agent/phase-4c1-business-foundation` for the live head
-before trusting this baseline. Re-read the source before trusting API
-lists — this page can go stale.
+`git rev-parse origin/master` for the live head, which may already be ahead
+of this commit. Re-read the source before trusting API lists — this page
+can go stale.
 
 The game is plain browser JavaScript: no build step, no bundler, no
 framework, no npm dependencies. `life-game.html` loads every file directly
@@ -56,12 +56,10 @@ the VM sandbox's context object in tests).
 | `vacancy-system.js` | Persistent employer-generated job vacancies: deterministic per-business generation against a target-workforce calculation, expiry/withdrawal, qualification/ranking, application seeding and resolution, and the player job-portal compatibility projection. | `World.vacancies`, `World.vacancyCounter`, `World.vacancySchemaVersion`, `World.vacancyLastTickYear` | `VacancySystem.migrate` runs inside `WorldSimulation.migrate` (third, after `BusinessSystem.migrate`/`EmploymentSystem.migrate`); `VacancySystem.tickWorld` (via `runVacancyYearTick()`) runs in `advanceYear()` after the employment lifecycle tick, seeding NPC applications the same year it applies; `VacancySystem.resolvePending` resolves prior-year openings after `resolvePlan()`. | `VacancySystem.migrate` | `tests/vacancy-system.test.js`, `tests/vacancy-ui-integration.test.js` |
 | `world-gameplay.js` | Installs adapters that route certain legacy player-facing calculations (local cost of living, health pressure, paid income) through `WorldSimulation`/`PublicHealth` instead of static constants. | None (adapter layer) | Installed once at boot (`install()`), not itself an annual step. | N/A | Exercised via `tests/world-gameplay.test.js` |
 
-**Present on the `agent/phase-4c1-business-foundation` branch only, not yet
-on `origin/master`:** `business-system.js`, `employment-system.js`,
-`vacancy-system.js`, and their wiring into `world-simulation.js`, `ui.js`,
-`data.js`, and `life-game.html` — open as
-[PR #9](https://github.com/rumiazhari/life-game/pull/9), pending review and
-merge.
+`business-system.js`, `employment-system.js`, `vacancy-system.js`, and
+their wiring into `world-simulation.js`, `ui.js`, `data.js`, and
+`life-game.html` are on `origin/master`, merged via
+[PR #9](https://github.com/rumiazhari/life-game/pull/9).
 
 ## Tests, tools, assets
 
@@ -90,9 +88,9 @@ js/data.js
 js/state.js
 js/systems/settlement-economy.js
 js/systems/public-health.js
-js/systems/business-system.js        (branch only, PR #9)
-js/systems/employment-system.js      (branch only, PR #9)
-js/systems/vacancy-system.js         (branch only, PR #9)
+js/systems/business-system.js
+js/systems/employment-system.js
+js/systems/vacancy-system.js
 js/systems/world-simulation.js
 js/systems/relationship-memory.js
 js/systems/condition-registry.js
@@ -115,11 +113,12 @@ both `life-game.html` and `vm-loader.js`'s `worldFiles`.
 ## Authoritative state
 
 - **`World`** — owns every persistent world entity: settlements, NPCs,
-  households, and (branch-only, not yet merged — [PR #9](https://github.com/rumiazhari/life-game/pull/9))
-  businesses, employment contracts, and vacancies. This is the object every
-  system's `ensure`/`migrate`/`tick` functions read and write. Future
-  systems (property, loans, legal cases, event chains, estates, government)
-  belong here too — see
+  households, businesses, employment contracts, and vacancies (the latter
+  three merged into `origin/master` via
+  [PR #9](https://github.com/rumiazhari/life-game/pull/9)). This is the
+  object every system's `ensure`/`migrate`/`tick` functions read and write.
+  Future systems (property, loans, legal cases, event chains, estates,
+  government) belong here too — see
   [Engineering Rules](ENGINEERING-RULES.md#persistent-authority).
 - **`S`** — the legacy/player-facing compatibility state (age, stats, job
   fields, skills, relationships-as-seen-by-the-player, etc.). It is not a

@@ -6,20 +6,18 @@
   flat-income/random-vacancy model — so that later phases (property,
   inheritance, national history) have real employers and workplaces to hang
   off of.
-- **Live status:** IN PROGRESS. Slices 4C-1 through 4C-5 are IMPLEMENTED
-  ON BRANCH. Slices 4C-6 through 4C-8 are PLANNED.
-- **Verified branch:** `agent/phase-4c1-business-foundation`
-- **Verified implementation baseline:** `c1d28f83fdea036b4caacfcaab1f1010da5e3922`
-  ("Finish persistent employment transition coverage") — the commit reviewed
-  when this page was last written, not necessarily the branch's current
-  head. Run `git rev-parse origin/agent/phase-4c1-business-foundation` for
-  the live head.
-- **Current pull request:** [PR #9](https://github.com/rumiazhari/life-game/pull/9),
-  base `master`, head `agent/phase-4c1-business-foundation`, open and under
-  review.
-- **Merged vs. branch-only:** none of Phase 4C is on `origin/master`
-  (`2d5b89d`) yet. Everything described as "implemented" below is
-  IMPLEMENTED ON BRANCH only, pending review and merge of PR #9.
+- **Live status:** IN PROGRESS. Slices 4C-1 through 4C-5 are MERGED into
+  `origin/master`. Slices 4C-6 through 4C-8 are PLANNED.
+- **Implementation merge commit:** `122a2587460810be1714b5a1bef3ddd3aef77f12`
+  ("Add persistent business and employment systems (#9)") — the stable
+  historical commit that brought 4C-1 through 4C-5 into `master`. Run
+  `git rev-parse origin/master` for the live head, which may already be
+  ahead of this commit.
+- **Merge history:** merged via
+  [PR #9](https://github.com/rumiazhari/life-game/pull/9) (base `master`,
+  head `agent/phase-4c1-business-foundation`), squash-merged
+  2026-08-06T05:18:23Z. That branch is now historical — it has not been
+  deleted, but it is not the branch to build 4C-6 on top of.
 - **Dependencies:** Phase 3 (`World.npcs`, `World.households` — employment
   contracts reference `personId`s from this registry); Phase 2
   (`WorldSimulation.streamFor`, `WorldSimulation.getSettlementState` —
@@ -30,7 +28,7 @@
 
 ## 4C-1 — Persistent business registry
 
-**Status: IMPLEMENTED ON BRANCH**, verified in `js/systems/business-system.js`.
+**Status: MERGED**, verified in `js/systems/business-system.js`.
 
 State, as implemented:
 
@@ -86,7 +84,7 @@ closed-business employee/vacancy emptiness. Tests: `tests/business-system.test.j
 
 ## 4C-2 — Persistent employment contracts
 
-**Status: IMPLEMENTED ON BRANCH**, verified in
+**Status: MERGED**, verified in
 `js/systems/employment-system.js`. This slice's original scope (contract
 CRUD, employer selection, legacy reconciliation) is unchanged; 4C-5 below
 substantially expanded `EmploymentSystem`'s API with the vacancy-backed
@@ -203,7 +201,7 @@ Confirmed behavior:
 
 ## 4C-3 — Annual business finance
 
-**Status: IMPLEMENTED ON BRANCH**, verified in
+**Status: MERGED**, verified in
 `js/systems/business-system.js` (`financeInputs`, `calculateAnnualResult`,
 `tickBusiness`, `tickSettlement`, `tickWorld`, `close`) and the
 `runBusinessYearTick()` wrapper wired into `advanceYear()` in `js/ui.js`.
@@ -232,7 +230,7 @@ employees. Tests: `tests/business-finance.test.js`.
 
 ## 4C-4 — Real employer-generated vacancies
 
-**Status: IMPLEMENTED ON BRANCH**, verified in `js/systems/vacancy-system.js`.
+**Status: MERGED**, verified in `js/systems/vacancy-system.js`.
 
 State, as implemented (a dedicated top-level collection with its own stable
 ID space, not embedded objects — see below):
@@ -350,7 +348,7 @@ Tests: `tests/vacancy-system.test.js`, `tests/vacancy-ui-integration.test.js`.
 
 ## 4C-5 — Hiring and career lifecycle
 
-**Status: IMPLEMENTED ON BRANCH**, verified in `js/systems/employment-system.js`
+**Status: MERGED**, verified in `js/systems/employment-system.js`
 and `js/systems/vacancy-system.js`, wired into the player-facing actions in
 `js/data.js`/`js/ui.js`.
 

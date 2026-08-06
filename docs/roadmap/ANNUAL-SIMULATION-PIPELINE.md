@@ -2,10 +2,12 @@
 
 ## Current actual order
 
-Verified by reading `advanceYear()` in `js/ui.js` on
-`agent/phase-4c1-business-foundation` at implementation baseline `c1d28f8`.
-This is the real order today, not an aspiration — re-verify against the
-live branch head before trusting the step numbers below.
+Verified by reading `advanceYear()` in `js/ui.js` on `origin/master`, at
+Phase 4C implementation merge commit
+`122a2587460810be1714b5a1bef3ddd3aef77f12` ("Add persistent business and
+employment systems (#9)"). This is the real order today, not an aspiration
+— re-verify against the live `origin/master` head before trusting the step
+numbers below.
 
 1. `S.age++; World.year++` — advance the calendar.
 2. `WorldSimulation.tick(World, {random, year})` — settlement economy,
