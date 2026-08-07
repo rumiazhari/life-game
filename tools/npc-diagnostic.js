@@ -89,6 +89,10 @@ function runScenario(scenario){
       });
       const check=Invariants.check(S,World);
       if(!check.ok) invariantFailures.push(...check.violations.map(v=>'year '+World.year+': '+v));
+      if(typeof WorkplaceSystem==='object'&&WorkplaceSystem&&typeof WorkplaceSystem.checkInvariants==='function'){
+        const workplaceIssues=WorkplaceSystem.checkInvariants(World);
+        if(workplaceIssues.length) invariantFailures.push(...workplaceIssues.map(v=>'year '+World.year+': workplace: '+v));
+      }
     }
     const medicalInvariantFailures=invariantFailures.filter(v=>v.indexOf(' medical: ')!==-1).length;
     const stableBefore=JSON.stringify({npcs:World.npcs,households:World.households,memories:World.relationshipMemories});

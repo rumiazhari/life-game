@@ -2439,6 +2439,10 @@ function resolvePendingVacancies(){
 function syncPlayerVacancyPortal(){
   if(S.age>=16&&S.age<65&&S.jailUntil<=S.age) rollJobVacancies();
 }
+function runWorkplaceYearTick(){
+  if(typeof WorkplaceSystem!=='object'||!WorkplaceSystem||typeof WorkplaceSystem.tickWorld!=='function') return null;
+  return WorkplaceSystem.tickWorld(World,{year:World.year,subject:S});
+}
 function advanceYear(suppressBurst,quiet){
   if(!S||!S.alive||slipOpen) return;
   if(S.age>0) evaluateYearStreak(quiet);
@@ -2532,6 +2536,10 @@ function advanceYear(suppressBurst,quiet){
   }
   if(typeof VacancySystem==='object'&&VacancySystem&&typeof VacancySystem.syncAllBusinessVacancyIds==='function') VacancySystem.syncAllBusinessVacancyIds(World);
   syncPlayerVacancyPortal();
+  // Workplace topology (coworkers/supervisor) and deterministic workplace
+  // stress run after all of this year's hiring, promotion, resignation,
+  // dismissal, retirement, and vacancy resolution above have completed.
+  runWorkplaceYearTick();
   runPersonalYearTick();
   // Household transmission + caregiving run last, after both the NPC medical
   // progression above and the player's own annual medical tick just above,

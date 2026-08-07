@@ -1,7 +1,7 @@
 'use strict';
 
 (function(root){
-  const SCHEMA_VERSION=2;
+  const SCHEMA_VERSION=3;
   const HISTORY_LIMIT=64;
   const CONTRACT_STATUSES=['active','on_leave','terminated','resigned','retired'];
   const WORKER_TYPES=['player','npc'];
@@ -42,6 +42,11 @@
     return Math.max(MIN_YEAR,Math.min(MAX_YEAR,Math.round(Number(value))));
   };
   const boundedYearOrNull=value=>value==null||!Number.isFinite(Number(value))?null:boundedYear(value,0);
+  const normalizeSupervisorPersonId=(value,ownPersonId)=>{
+    if(typeof value!=='string'||!value) return null;
+    if(value===ownPersonId) return null;
+    return value;
+  };
   const isValidCounter=value=>typeof value==='number'&&Number.isFinite(value)&&Number.isInteger(value)&&value>=0;
   const cloneEntry=entry=>entry&&typeof entry==='object'&&!Array.isArray(entry)?Object.assign({},entry):entry;
   const trimHistory=history=>Array.isArray(history)?history.slice(-HISTORY_LIMIT).map(cloneEntry):[];
@@ -206,7 +211,10 @@
       lastReviewYear:boundedYearOrNull(spec.lastReviewYear),
       lastLifecycleYear:boundedYearOrNull(spec.lastLifecycleYear),
       lastPromotionAttemptYear:boundedYearOrNull(spec.lastPromotionAttemptYear),
-      vacancyAssignments:normalizeVacancyAssignments(spec.vacancyAssignments)
+      vacancyAssignments:normalizeVacancyAssignments(spec.vacancyAssignments),
+      supervisorPersonId:normalizeSupervisorPersonId(spec.supervisorPersonId,personId),
+      workplaceStress:clampUnit(spec.workplaceStress,0.35),
+      workplaceLastTickYear:boundedYearOrNull(spec.workplaceLastTickYear)
     };
   }
 
@@ -289,10 +297,14 @@
     const contract=world.employmentContracts[contractId];
     if(!contract) throw new Error('EmploymentSystem.end requires an existing contractId, got: '+contractId);
     const wasActive=ACTIVE_STATUSES.has(contract.status);
+    const businessId=contract.businessId;
     const result=endInternal(world,contract,status,reason,year);
     if(wasActive){
       const terminalMode=result.status==='retired'?'retired':(END_STATUSES.has(result.status)?true:null);
       syncPersonLegacy(world,contract.personId,Object.assign({},options,{terminal:terminalMode}));
+      if(root.WorkplaceSystem&&typeof root.WorkplaceSystem.syncBusiness==='function'){
+        root.WorkplaceSystem.syncBusiness(world,businessId,{year:boundedYear(year,boundedYear(world.year,0)),recordMemories:true});
+      }
     }
     return result;
   }
@@ -451,7 +463,10 @@
         lastReviewYear:boundedYearOrNull(source.lastReviewYear),
         lastLifecycleYear:boundedYearOrNull(source.lastLifecycleYear),
         lastPromotionAttemptYear:boundedYearOrNull(source.lastPromotionAttemptYear),
-        vacancyAssignments:normalizeVacancyAssignments(source.vacancyAssignments)
+        vacancyAssignments:normalizeVacancyAssignments(source.vacancyAssignments),
+        supervisorPersonId:ACTIVE_STATUSES.has(status)?normalizeSupervisorPersonId(source.supervisorPersonId,personId):null,
+        workplaceStress:clampUnit(source.workplaceStress,0.35),
+        workplaceLastTickYear:boundedYearOrNull(source.workplaceLastTickYear)
       };
     });
     world.employmentContracts=normalized;
@@ -555,6 +570,9 @@
           }
         });
       }
+      if(c.supervisorPersonId!=null&&(typeof c.supervisorPersonId!=='string'||!c.supervisorPersonId||c.supervisorPersonId===c.personId)) issues.push('employment contract '+key+' has an invalid supervisorPersonId');
+      if(typeof c.workplaceStress!=='number'||!Number.isFinite(c.workplaceStress)||c.workplaceStress<0||c.workplaceStress>1) issues.push('employment contract '+key+' has invalid or out-of-bound workplaceStress');
+      if(c.workplaceLastTickYear!=null&&(typeof c.workplaceLastTickYear!=='number'||!Number.isFinite(c.workplaceLastTickYear)||!Number.isInteger(c.workplaceLastTickYear)||c.workplaceLastTickYear<MIN_YEAR||c.workplaceLastTickYear>MAX_YEAR)) issues.push('employment contract '+key+' has invalid or out-of-bound workplaceLastTickYear');
       if(ACTIVE_STATUSES.has(c.status)){
         (activeByPerson[c.personId]=activeByPerson[c.personId]||[]).push(c.id);
         if(business){ (businessEmployeeExpectation[business.id]=businessEmployeeExpectation[business.id]||new Set()).add(c.personId); }
@@ -983,6 +1001,12 @@
     syncPersonLegacy(world,personId,opts);
     syncBusinessEmployees(world,business.id);
     if(previousContract&&previousContract.businessId!==business.id) syncBusinessEmployees(world,previousContract.businessId);
+    if(root.WorkplaceSystem&&typeof root.WorkplaceSystem.syncBusiness==='function'){
+      root.WorkplaceSystem.syncBusiness(world,business.id,{year,recordMemories:true});
+      if(previousContract&&previousContract.businessId!==business.id){
+        root.WorkplaceSystem.syncBusiness(world,previousContract.businessId,{year,recordMemories:true});
+      }
+    }
     return {accepted:true,contract,previousContract,reason:null};
   }
 
@@ -1021,6 +1045,9 @@
     contract.history=trimHistory(contract.history);
     recordVacancyAssignment(world,contract.id,vacancy,y);
     syncPersonLegacy(world,contract.personId,opts);
+    if(root.WorkplaceSystem&&typeof root.WorkplaceSystem.syncBusiness==='function'){
+      root.WorkplaceSystem.syncBusiness(world,contract.businessId,{year:y,recordMemories:true});
+    }
     return {accepted:true,contract,previousContract:null,reason:null};
   }
 
