@@ -335,6 +335,8 @@ function fxSummary(fx){
 const HOUSING=[
  {id:'none',name:'No Fixed Address',icon:'🏚',rent:0,fx:{happiness:-14,health:-12},
    risk:'severe — a real, ongoing chance of dying unhoused, far worse for the very young and very old',desc:'a shelter bunk, a doorway, whatever holds'},
+ {id:'shelter',name:'Public Shelter',icon:'⛺',rent:0,fx:{happiness:-6,health:-4},
+   risk:'harsh but survivable — a floor under death, nothing more; the file notes the address',desc:'a church-hall cot, lights out at nine'},
  {id:'room',name:'Rented Room',icon:'🛏',rent:350,fx:{happiness:-3,health:-2},
    risk:'a hard life, but a roof — survivable, rarely comfortable',desc:'one room, a shared bath down the hall'},
  {id:'flat',name:'Small Flat',icon:'🏠',rent:750,fx:{happiness:3,health:2},
@@ -873,10 +875,17 @@ const PURSUITS=[
        const tier=Math.max(1,highestQualifyingTier(3)); const job=bestJobForTier(tier)||bestJobForTier(1); S.jobTier=tier;S.jobName=job.name;
        return{fx:{happiness:3},text:'Subject called in a favor. A friend of a friend needed someone reliable — subject started as '+job.name+' the following Monday.'};}
      return{fx:{assets:350,happiness:2},text:'Subject called in a favor. It was repaid, discreetly and in full, no questions asked on either side.'};}},
- {id:'doctor',cat:'health',icon:'⚕',cost:1,avail:s=>s.age>=10,note:()=>`exam · treatment if needed · −$90`,
-   apply:()=>{const exam=medicalExamination('doctor'); return {fx:{health:exam.found?3:7,assets:-90},text:'Subject saw the doctor. '+exam.text};}},
+ {id:'doctor',cat:'health',icon:'⚕',cost:1,avail:s=>s.age>=10,note:()=>`exam · treatment if needed · −$90 (dispensary bills the poor less)`,
+   apply:()=>{const exam=medicalExamination('doctor');
+     const desperate=(typeof SurvivalSystem==='object'&&SurvivalSystem&&typeof World!=='undefined'&&World)?SurvivalSystem.desperationOf(World,S)>=.55:false;
+     const bill=desperate?Math.min(90,Math.max(15,Math.round(Math.max(0,S.assets)*.25))):90;
+     return {fx:{health:exam.found?3:7,assets:-bill},text:'Subject saw the doctor. '+exam.text+(bill<90?' The parish dispensary billed what the subject could pay.':'')};}},
  {id:'walk',cat:'health',icon:'🚶',cost:1,avail:s=>s.age>=25,note:()=>`+HEALTH/HAPPINESS (slow, free)`,
    apply:()=>({fx:{health:3,happiness:2},text:pick(['Subject walked it off. The road had opinions, mostly kind.','Subject took the long way home on purpose. It helped, the way it always does.'])})},
+ {id:'soupkitchen',cat:'health',icon:'🥣',cost:1,avail:s=>s.age>=10&&(s.lifestyle.food==='meager'||s.assets<50),dark:0,
+   note:()=>`a meal at the mission line · free · the ladle comes with eyes`,
+   apply:(S2)=>{const year=(typeof currentYear==='function')?currentYear():((typeof S.dob==='number'?S.dob:0)+S.age); S.soupKitchenYear=year;
+     return{fx:{happiness:2},text:pick(['Subject queued at the mission kitchen and ate what was given. It was hot. That counted for something.','Subject held out the tin bowl and answered the ladle questions with a nod. The food helped; the eyes did not.'])};}},
  {id:'rest',cat:'health',icon:'💤',cost:0,avail:s=>s.age>=6&&!S.queue.some(q=>q.id==='rest'),note:()=>`do nothing · recover a little`,
    apply:()=>({fx:{health:1,happiness:2},text:pick(['Subject did nothing, on purpose, for a day. The Bureau has no form for this, which is why it worked.','Subject rested. The ceiling beams were counted. The subject was, briefly, not tired.'])})},
  {id:'bottle',cat:'vice',icon:'🍺',cost:1,avail:s=>s.age>=16,dark:1,note:()=>`+HAPPINESS now · −HEALTH · +VICE`,
@@ -892,6 +901,19 @@ const PURSUITS=[
      return{fx:{relations:2,happiness:2},text:'Subject spent the year looking after '+m.first+' '+m.last+' — small kindnesses, steady attention. It was noticed.'};}},
  {id:'gig',cat:'work',icon:'🕶',cost:1,avail:s=>!s.eduStage&&s.age>=10&&GIGS.some(g=>g.req(s)),note:()=>'off the books — nasty, unlicensed, no guarantee of pay',
    apply:(S2,item)=>{const g=GIGS.find(x=>x.id===(item&&item.gig)); if(!g||!g.req(S)) return{fx:{},text:'Subject went looking for off-book work and found nothing worth the risk this year.'};
+     // Survival economy: when this settlement lists street work this year,
+     // the attempt must go through an open listing — scarcity is the point.
+     if(typeof SurvivalSystem==='object'&&SurvivalSystem&&typeof World!=='undefined'&&World){
+       const sid=(S.location&&S.location.settlementId)||World.activeSettlementId;
+       const listings=SurvivalSystem.openingsFor(World,sid,{status:'open',kind:'gig'});
+       if(listings.length){
+         const wanted=(item&&item.openingId?listings.find(l=>l.id===item.openingId&&l.gigId===g.id):null)
+           ||listings.find(l=>l.gigId===g.id);
+         const taken=wanted?SurvivalSystem.takeOpening(World,wanted.id,'subject',{year:World.year,subject:S,settlementId:sid}):{taken:false,reason:'no_listing'};
+         if(!taken.taken) return{fx:{happiness:-1},text:'Subject asked around for '+g.name.toLowerCase()+' work, but the street had nothing going this year.'};
+       }
+       // No listings at all: established informal networks still find odd cash.
+     }
      return resolveGigOutcome(g);}},
 ];
 
@@ -1160,6 +1182,64 @@ const DECISIONS=[
        if(tier>=2){const ju=S.age+2;pushFollow({at:S.age+1,t:'Subject was caught and put away. The file was moved to a different shelf.',fx:{happiness:-8,health:-5,relations:-8},side:s2=>{terminateSubjectEmployment('incarceration',typeof World!=='undefined'&&World?World.year:undefined);s2.jailUntil=ju;}});}
        return{fx:{happiness:-6,health:-3},text:pick(['Subject was caught mid-act. The magistrate was not in a “youthful” mood this time.','Subject’s luck, such as it was, ran out behind the market. The cuffs were cold.'])};}
      S.crime++;S.vice=Math.min(10,S.vice+1);return{fx:{assets:reward,happiness:3},text:pick(['Subject pulled it off clean. The coin was good; the sleep afterward was not.','The job went smooth as a filed form. Subject pocketed the take and checked the exits twice.'])}}},
+ {id:'seekfixer',cost:1,cat:'vice',dark:1,
+  avail:s=>{
+    if(s.holdMember||s.age<16||s.jailUntil>s.age) return false;
+    if(typeof SurvivalSystem!=='object'||!SurvivalSystem||typeof World==='undefined'||!World) return false;
+    return SurvivalSystem.desperationOf(World,s)>=0.6
+      &&SurvivalSystem.localFixers(World,(s.location&&s.location.settlementId)||World.activeSettlementId).length>0;
+  },
+  note:()=>`a fixer owns odd work on these streets · enters the fold · the Bureau must never learn how`,
+  apply:(S2)=>{
+    const sid=(S.location&&S.location.settlementId)||World.activeSettlementId;
+    const fixers=SurvivalSystem.localFixers(World,sid);
+    const fixer=fixers[0];
+    if(!fixer) return{fx:{},text:'Subject asked the wrong corners. Nobody owning work came around.'};
+    S.holdMember=true;
+    if(typeof Hold==='object'&&Hold) Hold.trust=clamp(Hold.trust+6,0,100);
+    S.vice=Math.min(10,S.vice+1);
+    if(typeof RelationshipMemory==='object'&&RelationshipMemory&&typeof RelationshipMemory.add==='function'){
+      RelationshipMemory.add(World,{year:World.year,type:'underworld_introduction',participants:['subject',fixer.id],intensity:.5,valence:.35,
+        summary:S.first+' was introduced to '+fixer.name+', who owns odd work on the streets of '+(WorldSimulation.getSettlementState(World,sid)?sid:'town')+'.',tags:['underworld','street']});
+    }
+    return{fx:{happiness:-2},text:'A friend of a friend walked '+S.first+' past a doorway where '+fixer.name+' waited, patient as weather. Names were not exchanged so much as traded. The fold has a door; it opened.'};}},
+ {id:'fixerjob',cost:1,cat:'vice',dark:1,
+  avail:s=>{
+    if(!s.holdMember||s.jailUntil>s.age) return false;
+    if(typeof SurvivalSystem!=='object'||!SurvivalSystem||typeof World==='undefined'||!World) return false;
+    const sid=(s.location&&s.location.settlementId)||World.activeSettlementId;
+    return SurvivalSystem.openingsFor(World,sid,{status:'open',kind:'fixerwork'}).length>0;
+  },
+  note:s=>{const tier=(()=>{ if(typeof SurvivalSystem==='object'&&SurvivalSystem&&typeof World!=='undefined'&&World){const o=SurvivalSystem.openingsFor(World,(s.location&&s.location.settlementId)||World.activeSettlementId,{status:'open',kind:'fixerwork'}).sort((a,b)=>(b.jobTier||0)-(a.jobTier||0))[0]; if(o)return o.jobTier;} return 0;})();
+    return ['run an errand','move a package','fence the goods','the big score'][tier]+' · organized pay · organized risk';},
+  apply:(S2,item)=>{
+    const sid=(S.location&&S.location.settlementId)||World.activeSettlementId;
+    let chosen=item&&item.openingId?SurvivalSystem.get(World,item.openingId):null;
+    if(!chosen||chosen.status!=='open'||chosen.kind!=='fixerwork'||chosen.settlementId!==sid){
+      chosen=SurvivalSystem.openingsFor(World,sid,{status:'open',kind:'fixerwork'}).sort((a,b)=>(b.jobTier||0)-(a.jobTier||0)||a.id.localeCompare(b.id))[0]||null;
+    }
+    if(!chosen) return{fx:{},text:'The fixer had nothing going this year. The silence cost nothing but pride.'};
+    const take=SurvivalSystem.takeOpening(World,chosen.id,'subject',{year:World.year,settlementId:sid});
+    if(!take.taken) return{fx:{},text:'Someone else got to the job first. The fixer shrugged like it was arithmetic.'};
+    const tier=chosen.jobTier||0;
+    const fixer=SurvivalSystem.getFixer(World,chosen.fixerId);
+    const corruption=SurvivalSystem.settlementProfile(World,sid).corruption;
+    const pay=Math.round(([120,400,900,4000][tier])*(0.8+corruption*0.4));
+    if(typeof Hold==='object'&&Hold) Hold.heat=clamp(Hold.heat+3,0,100);
+    if(chance(catchP(tier)*0.7)){
+      S.record=true; S.vice=Math.min(10,S.vice+1);
+      if(typeof Hold==='object'&&Hold) Hold.heat=clamp(Hold.heat+4,0,100);
+      const cap=SurvivalSystem.reportCapture(World,chosen.fixerId,tier,World.year);
+      const name=(fixer&&fixer.name)||'the fixer';
+      if(tier>=2){
+        const ju=S.age+2;
+        pushFollow({at:S.age+1,t:'The job went wrong in a way files get written about.',fx:{happiness:-8,health:-5,relations:-8},
+          side:s2=>{terminateSubjectEmployment('incarceration',typeof World!=='undefined'&&World?World.year:undefined); s2.jailUntil=ju;}});
+      }
+      return{fx:{happiness:-6,health:-3},text:'Subject was taken coming out of '+name+"'s errand. The cuffs were cold."
+        +(cap.burned?' Under the heat, '+name+' folded — the whole operation is gone from the streets.':(cap.heat>=40?' '+name+' took the heat personally and said there would be talk.':''))};
+    }
+    return{fx:{assets:pay,happiness:2},text:'Subject ran '+((fixer&&fixer.name)||'the fixer')+"'s errand clean — no names, no receipts, "+money(pay)+' waiting in an envelope. The fold pays better than the yard ever did.'};}},
  {id:'breakup',cost:1,cat:'rel',avail:s=>s.partner&&!s.married,note:()=>`end it with {partner} · relief or regret, depending`,
    apply:()=>{const wasGood=S.partnerMood>55, p=S.partner; endMarriageSide(S,'Single');
      return wasGood
