@@ -152,8 +152,12 @@ $('#recentRecord').addEventListener('click',e=>{
   if(reportEntries.length&&reportIdx<reportEntries.length)skipReportReveal();
 });
 let ffHideTimer=null,rpgTierBefore=0,rpgGradeShown=0;
+let ffActionLog=[];
 function clipText(t,n){t=String(t==null?'':t);return t.length>n?t.slice(0,n-1)+'…':t;}
-/* ---- Fast-forward autopilot (auto-plan each fast-forwarded year) ---- */
+function ffRecordAction(label){
+  ffActionLog.push({age:S.age,label:String(label||'').slice(0,180)});
+}
+/* ---- Fast-forward autopilot (full autonomy while years pass) ---- */
 // Best qualifying opening for the player right now: qualified, not already
 // pending/accepted, highest tier then salary, stable tiebreak. Mirrors the
 // 'favor' action's opening selection.
@@ -165,28 +169,124 @@ function autoBestJobOpening(){
     .sort((a,b)=>b.jobTier-a.jobTier||b.annualSalary-a.annualSalary||a.vacancyId.localeCompare(b.vacancyId));
   return openings[0]||null;
 }
-// Ordered "best next actions" for a fast-forwarded year, closest in spirit
-// to recommendedActions(): survival/finance first, then health, mood,
-// relationships, and study as the universal filler.
+function autoIncomeEstimate(){
+  let salary=0;
+  try{
+    const c=(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof World!=='undefined'&&World&&typeof EmploymentSystem.activeForPerson==='function')?EmploymentSystem.activeForPerson(World,'subject')[0]:null;
+    if(c)salary=c.annualSalary||0;
+  }catch(e){}
+  if(!salary)salary=(typeof INC!=='undefined'&&INC)?(INC[S.jobTier]||0):0;
+  return salary;
+}
+function autoIndependent(){return S.age>=16&&!S.livingAtHome;}
+function autoLadderStep(list,current,dir){
+  const idx=list.findIndex(x=>x.id===current);
+  const next=idx+dir;
+  return (idx>=0&&next>=0&&next<list.length)?list[next]:null;
+}
+function autoAnnualOutlay(housingId,foodId,childcareId){
+  const h=HOUSING.find(x=>x.id===housingId)||HOUSING[0];
+  const f=FOOD.find(x=>x.id===foodId)||FOOD[0];
+  const care=S.kids>0?((CHILDCARE.find(x=>x.id===childcareId)||CHILDCARE[0]).costPerKid*S.kids):0;
+  const debts=(S.liabilities||[]).reduce((n,l)=>n+(l.annualPayment||0),0);
+  return h.rent+f.cost+care+debts;
+}
+// Direct standing choices (housing / food / childcare), applied immediately
+// exactly as the household sheet does -- no hours. Tighten first when broke,
+// upgrade only when income clearly carries the higher rung.
+function autoApplyLifestyleChoices(){
+  if(!S||!S.alive||slipOpen)return;
+  if(!autoIndependent())return;
+  if(S.assets<-600){
+    const down=autoLadderStep(HOUSING,S.lifestyle.housing,-1);
+    if(down){setLifestyle('housing',down.id);ffRecordAction('Moved down to '+down.name+' ('+money(down.rent)+'/yr)');}
+  }
+  if(S.assets<-400){
+    const downFood=autoLadderStep(FOOD,S.lifestyle.food,-1);
+    if(downFood){setLifestyle('food',downFood.id);ffRecordAction('Cut the table back to '+downFood.name);}
+    if(S.kids>0&&S.lifestyle.childcare&&S.lifestyle.childcare!==CHILDCARE[0].id){
+      setLifestyle('childcare',CHILDCARE[0].id);ffRecordAction('Scaled the children\'s upbringing back to '+CHILDCARE[0].name);
+    }
+  }
+  const income=autoIncomeEstimate();
+  if(income>0){
+    const upHousing=autoLadderStep(HOUSING,S.lifestyle.housing,1);
+    if(upHousing&&S.assets>upHousing.rent*6&&income>=autoAnnualOutlay(upHousing.id,S.lifestyle.food,S.lifestyle.childcare)*1.4){
+      setLifestyle('housing',upHousing.id);ffRecordAction('Moved up to '+upHousing.name+' ('+money(upHousing.rent)+'/yr)');
+    }
+    const upFood=autoLadderStep(FOOD,S.lifestyle.food,1);
+    if(upFood&&S.assets>3000&&income>=autoAnnualOutlay(S.lifestyle.housing,upFood.id,S.lifestyle.childcare)*1.4){
+      setLifestyle('food',upFood.id);ffRecordAction('Raised the table to '+upFood.name);
+    }
+    if(S.kids>0){
+      const upCare=autoLadderStep(CHILDCARE,S.lifestyle.childcare,1);
+      if(upCare&&S.assets>4000&&income>=autoAnnualOutlay(S.lifestyle.housing,S.lifestyle.food,upCare.id)*1.4){
+        setLifestyle('childcare',upCare.id);ffRecordAction('Upgraded the children\'s upbringing to '+upCare.name);
+      }
+    }
+  }
+}
+// Ordered "best next actions" for a fast-forwarded year: survival and money
+// first, then health, mood, relationships (including marriage, children,
+// affairs, breakups), advancement, desperation measures, and study as the
+// universal filler.
 function autoPlanCandidates(){
   const out=[];
   const push=(type,id,extra)=>out.push({type,id,extra:extra||{}});
   if(S.jailUntil<=S.age){
+    const partnerContact=(typeof activePartnerContact==='function')?activePartnerContact():null;
+    const hasPartner=S.married||!!partnerContact;
+    // Work and money.
     if(S.age>=16&&S.age<65&&!S.eduStage){
       if(S.jobTier<1){
         const opening=autoBestJobOpening();
         if(opening)push('p','lookwork',{vacancyId:opening.vacancyId});
-      }else if(S.assets<-500){
-        push('p','overtime');
+        else if(S.assets<-1200)push('d','crime');
+      }else{
+        if(S.assets<-500)push('p','overtime');
+        else if(S.happiness<35&&S.health>=45&&S.age<60){
+          // A better opening elsewhere is worth an application.
+          const contract=(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof World!=='undefined'&&World&&typeof EmploymentSystem.activeForPerson==='function')?EmploymentSystem.activeForPerson(World,'subject')[0]:null;
+          const currentSalary=contract?contract.annualSalary:(INC[S.jobTier]||0);
+          const opening=autoBestJobOpening();
+          if(opening&&opening.annualSalary>=currentSalary*1.25)push('p','lookwork',{vacancyId:opening.vacancyId});
+        }
       }
     }
+    // Health.
     if(S.health<45)push('p','doctor');
+    if(typeof activeConditions==='function'&&activeConditions().some(c=>c.known))push('d','treatment');
+    // Mood.
     if(S.happiness<32&&S.kids>0)push('p','family');
     else if(S.happiness<32)push('p','walk');
+    // Marriage and partnerships.
     if(S.married)push('p','tendspouse');
     else if(S.status==='Attached')push('p','court');
+    if(!S.married&&S.status==='Attached'&&partnerContact&&partnerContact.mood>=65&&S.relations>=50&&S.age>=20)push('d','propose');
+    if(S.married&&(S.partnerMood!=null&&S.partnerMood<25)&&S.happiness<45)push('d','divorce');
+    if(!S.married&&S.status==='Attached'&&(S.partnerMood!=null&&S.partnerMood<20)&&S.happiness<40)push('d','breakup');
+    if(S.married&&S.kids<2&&S.age>=22&&S.age<=38&&S.assets>1500&&S.happiness>=40)push('d','trychild');
+    // Meeting people and affairs.
+    if(!hasPartner&&S.age>=18&&S.contacts.length<MAX_CONTACTS){
+      const venue=(typeof MEETING_VENUES!=='undefined'?MEETING_VENUES.find(v=>v.req(S)):null);
+      if(venue)push('p','meetsomeone',{venue:venue.id});
+    }
+    if(!hasPartner&&S.age>=14&&S.contacts.length){
+      const bestFriend=S.contacts.filter(c=>c.role==='friend').sort((a,b)=>(b.mood||0)-(a.mood||0))[0];
+      if(bestFriend)push('p','flirt',{cid:bestFriend.cid});
+    }
+    if(hasPartner&&S.married&&S.happiness<45&&S.contacts.length){
+      const friend=S.contacts.filter(c=>c.role==='friend').sort((a,b)=>(b.mood||0)-(a.mood||0))[0];
+      if(friend)push('p','flirtsecret',{cid:friend.cid});
+    }
+    // Family letters.
     if(S.mother&&S.mother.alive&&!S.mother.estranged&&(S.mother.mood==null||S.mother.mood<50))push('p','writemother');
     if(S.father&&S.father.alive&&!S.father.estranged&&(S.father.mood==null||S.father.mood<50))push('p','writefather');
+    // Advancement and paperwork.
+    if(S.jobTier>=1&&S.jobTier<5&&S.age<60&&S.happiness>=40&&(S.careerYears==null||S.careerYears>=2))push('d','presspromo');
+    if(S.jobTier>0&&S.age>=62&&S.age<=64&&(S.health<50||S.assets>8000))push('d','earlyret');
+    if(S.bureauFavor>0&&(S.scrutiny>0||S.record))push('d','usefavor');
+    if(S.record&&S.assets>1000)push('d','expunge');
     push('p','study');
   }
   return out;
@@ -206,7 +306,11 @@ function autoQueueBestActions(){
     const def=c.type==='p'?PUR_MAP[c.id]:DEC_MAP[c.id];
     if(!def)return;
     if(actionReservedThisYear(c.id))return;
-    if(typeof def.avail==='function'&&!def.avail(S))return;
+    if(typeof def.avail==='function'){
+      let ok=false;
+      try{ok=!!(c.extra&&c.extra.cid?def.avail(S,c.extra.cid):def.avail(S));}catch(e){ok=false;}
+      if(!ok)return;
+    }
     if(whyNotFor(c.id))return;
     const cost=def.cost||0;
     if(cost>total-used)return;
@@ -220,12 +324,30 @@ function autoQueueBestActions(){
     used+=cost;
   });
 }
+// Popup report listing every action taken during the fast-forwarded years,
+// using the standard notice template ("Acknowledge ▸" closes it).
+function presentFastForwardReport(yearsPassed){
+  if(!S||!S.alive||!ffActionLog.length)return;
+  const byAge={};
+  ffActionLog.forEach(e=>{(byAge[e.age]=byAge[e.age]||[]).push(e.label);});
+  const rows=Object.keys(byAge).map(Number).sort((a,b)=>a-b).map(age=>(
+    '<div class="ffrpt-year"><b>Y'+age+'</b><div class="ffrpt-acts">'+
+    byAge[age].map(label=>'<span class="ffrpt-act">'+label+'</span>').join('')+
+    '</div></div>'
+  )).join('');
+  const body='<div class="ffrpt-intro">The subject steered '+yearsPassed+' year'+(yearsPassed===1?'':'s')+' alone. The file records these choices:</div>'+
+    '<div class="ffrpt-body">'+rows+'</div>';
+  if(slipOpen){S.__pendingFFReport={title:'THE YEARS ON FILE',body:body};return;}
+  openNotice({title:'THE YEARS ON FILE',body:body});
+}
 function fastForward(){
   if(!S||!S.alive||slipOpen)return;
   cancelReportReveal();
+  ffActionLog=[];
   const beats=[];
   quietMode=true;
   while(S.alive&&!slipOpen&&beats.length<15){
+    autoApplyLifestyleChoices();
     autoQueueBestActions();
     advance(true,true);
     if(!S.alive)break;
@@ -234,6 +356,7 @@ function fastForward(){
   }
   quietMode=false;
   renderFastForwardRecap(beats);
+  presentFastForwardReport(beats.length);
 }
 function renderFastForwardRecap(beats){
   if(ffHideTimer){clearTimeout(ffHideTimer);ffHideTimer=null;}
@@ -1901,8 +2024,13 @@ function resolveNotice(n){
   logEv(fill(n.body),{},'crisis','NOTICE · YEAR '+S.age);
   renderStats(window.C); updateBar();
   checkAchievements('live');
-  if(!S.alive) handleDeath();
+  if(!S.alive){ handleDeath(); return; }
   drainNextSlip();
+  // A fast-forward report that had to wait behind an open slip shows now.
+  if(!slipOpen&&S.__pendingFFReport){
+    const rpt=S.__pendingFFReport; S.__pendingFFReport=null;
+    openNotice(rpt);
+  }
 }
 
 /* ================= YEAR RESOLUTION ================= */
@@ -2213,6 +2341,7 @@ function resolvePlan(){
   if(S.autoTrain&&computeHours()>=1){
     const skillId=autoPickSkill();
     if(skillId){ autoTrained=true; window.C={}; const r=PUR_MAP['practice'].apply(S,{skill:skillId}); const chips=r.fx?applyFx(r.fx):[];
+      if(quietMode)ffRecordAction(fillLabel(labelOf({id:'practice',type:'p',skill:skillId}))+' (auto)');
       logChips(fill(r.text)+' (auto-trained)',chips,'plan','PURSUIT · YEAR '+S.age);
       renderStats(window.C); }
   }
@@ -2227,6 +2356,7 @@ function resolvePlan(){
       const result=educationCompleteProgram(item.program);
       r=result.ok?{fx:{happiness:2},text:'Subject completed '+result.program.name+'. '+result.program.desc+(result.shortfall?' The unpaid '+money(result.shortfall)+' was entered as education debt.':' The certificate was paid from assets.') }:{fx:{happiness:-1},text:'Subject reached for vocational training, but the course was not available on the current record.'};
     }else r=def.apply(S,item);
+    if(quietMode)ffRecordAction(fillLabel(labelOf(item)));
     const chips=r.fx?applyFx(r.fx):[];
     if(r.follow) pushFollow(r.follow);
     logChips(fill(r.text),chips,item.type==='p'?'plan':'decision',(item.type==='p'?'PURSUIT':'DECISION')+' · YEAR '+S.age);

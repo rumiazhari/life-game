@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const test=require('node:test');
 const assert=require('node:assert/strict');
@@ -120,3 +120,94 @@ test('fast-forward auto-plans every advanced year',()=>{
   assert.ok(result.acts>0,'fast-forwarded years executed auto-planned actions');
   assert.equal(result.quietRestored,true);
 });
+
+test('autonomy tightens the household when broke and independent',()=>{
+  const context=uiContext('auto-tighten');
+  configureAdult(context,"S.assets=-900; S.jobTier=2; S.jobName='Clerk'; S.kids=1; S.lifestyle=Object.assign({},S.lifestyle,{housing:'flat',food:'basic',childcare:'comfortable'});");
+  const result=JSON.parse(expose(context,`(function(){
+    autoApplyLifestyleChoices();
+    return JSON.stringify({housing:S.lifestyle.housing,food:S.lifestyle.food,childcare:S.lifestyle.childcare,log:ffActionLog.map(e=>e.label)});
+  })()`));
+  assert.equal(result.housing,'room','housing downgrades one rung when deeply broke');
+  assert.equal(result.food,'meager','food downgrades one rung when broke');
+  assert.equal(result.childcare,'basic','childcare falls back to basic');
+  assert.ok(result.log.length>=3,'each tightening choice is recorded: '+JSON.stringify(result.log));
+});
+
+test('autonomy upgrades housing and food only when income clearly carries it',()=>{
+  const context=uiContext('auto-upgrade');
+  configureAdult(context,"S.assets=20000; S.jobTier=5; S.jobName='Magistrate'; S.lifestyle=Object.assign({},S.lifestyle,{housing:'flat',food:'basic'});");
+  const result=JSON.parse(expose(context,`(function(){
+    autoApplyLifestyleChoices();
+    return JSON.stringify({housing:S.lifestyle.housing,food:S.lifestyle.food,log:ffActionLog.map(e=>e.label)});
+  })()`));
+  assert.equal(result.housing,'house','flat upgrades to house under INC[5]=7200 income');
+  assert.equal(result.food,'decent','basic food upgrades to decent');
+  assert.ok(result.log.length>=2);
+});
+
+test('autonomy proposes to a happy partner and never starts affairs while merely attached',()=>{
+  const context=uiContext('auto-propose');
+  configureAdult(context,"S.jobTier=2; S.jobName='Clerk'; S.status='Attached'; S.partner='Pat'; S.relations=60; S.happiness=60; S.contacts=[{cid:'c1',role:'partner',mood:85,name:'Pat',sex:'F'}]; S.mother=null; S.father=null;");
+  const result=JSON.parse(expose(context,`(function(){
+    autoQueueBestActions();
+    return JSON.stringify({ids:S.queue.map(q=>q.id),used:S.queue.reduce((a,q)=>a+(PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0)),0),budget:planHours()});
+  })()`));
+  assert.ok(result.ids.includes('court'),'courting an attached partner is queued');
+  assert.ok(result.ids.includes('propose'),'proposal queued for a happy attached partner');
+  assert.ok(!result.ids.includes('flirtsecret'),'no affair while unmarried/attached');
+  assert.equal(result.used,result.budget,'hours filled to budget');
+});
+
+test('desperate unemployed subject turns to crime; miserable marriage may end in divorce',()=>{
+  const crimeContext=uiContext('auto-crime');
+  configureAdult(crimeContext,"S.assets=-1500; S.health=70; S.happiness=50;");
+  const crimeIds=JSON.parse(expose(crimeContext,`(function(){ autoQueueBestActions(); return JSON.stringify(S.queue.map(q=>q.id)); })()`));
+  assert.ok(crimeIds.includes('crime'),'crime queued out of desperation');
+
+  const divorceContext=uiContext('auto-divorce');
+  configureAdult(divorceContext,"S.married=true; S.partner='Sam'; S.partnerMood=15; S.happiness=30; S.jobTier=1; S.jobName='Porter'; S.contacts=[{cid:'c2',role:'spouse',mood:15,name:'Sam',sex:'M'}]; S.mother=null; S.father=null;");
+  const divorceIds=JSON.parse(expose(divorceContext,`(function(){ autoQueueBestActions(); return JSON.stringify(S.queue.map(q=>q.id)); })()`));
+  assert.ok(divorceIds.includes('divorce'),'divorce queued for a dead marriage');
+});
+
+test('fast-forward ends with a report popup listing every action taken',()=>{
+  const context=uiContext('ff-report');
+  configureAdult(context,"S.health=75; S.happiness=55; S.assets=4000;");
+  seedOpening(context);
+  // Keep random crisis/petition slips from piling up behind the report.
+  expose(context,'maybeSlip=function(){};');
+  expose(context,`(function(){
+    fastForward();
+    // An event window may have interrupted the run (the loop stops while any
+    // window is open and the report waits behind it). Close it and surface
+    // the deferred report exactly as resolving a notice would.
+    $('#slipWrap').classList.add('hidden');
+    slipOpen=false;
+    document.body.classList.remove('slip-open');
+    pendingSlips=[];
+    if(S.__pendingFFReport){const rpt=S.__pendingFFReport;S.__pendingFFReport=null;openNotice(rpt);}
+    return null;
+  })()`);
+  const result=JSON.parse(expose(context,`(function(){
+    const card=document.querySelector('#slipCard');
+    return JSON.stringify({
+      loggedActions:ffActionLog.length,
+      slipOpen:slipOpen,
+      head:card.innerHTML.includes('THE YEARS ON FILE'),
+      ack:card.innerHTML.includes('Acknowledge'),
+      hasEntries:card.innerHTML.indexOf('ffrpt-act')!==-1
+    });
+  })()`));
+  assert.ok(result.loggedActions>0,'actions were recorded during fast-forward');
+  assert.equal(result.slipOpen,true,'report popup is open after fast-forward');
+  assert.equal(result.head,true,'report uses the notice template title');
+  assert.equal(result.ack,true,'report closes via the Acknowledge button');
+  assert.equal(result.hasEntries,true,'report lists captured actions');
+  // Acknowledging closes the report window itself.
+  expose(context,`$('#slipCard').onclick({target:{closest:function(sel){return sel==='[data-ack]'?{}:null;}}});`);
+  const after=JSON.parse(expose(context,`JSON.stringify({slipOpen:slipOpen,pending:!S.__pendingFFReport})`));
+  assert.equal(after.slipOpen,false,'acknowledge closes the report window');
+  assert.equal(after.pending,true);
+});
+
