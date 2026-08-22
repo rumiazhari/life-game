@@ -20,6 +20,7 @@ function revealDossier(){
 function newFile(){
   queue=[]; typing=false; clearInterval(typeTimer); currentType=null;
   followups=[]; petitionNo=0; slipOpen=false;
+  pendingSlips=[]; clearSlipQueue(); resetYearReport();
   introRerolls=3;
   recentYearReports=[]; renderRecentRecord();
   document.body.classList.remove('slip-open','petition-open');
@@ -41,14 +42,25 @@ $('#btn-fastforward').addEventListener('click',fastForward);
 $('#btn-plan').addEventListener('click',openPlan);
 $('#planWrap').addEventListener('click',e=>{ if(e.target.id==='planWrap') closePlan(); });
 $('#medicalWrap').addEventListener('click',e=>{ if(e.target.id==='medicalWrap') $('#medicalWrap').classList.add('hidden'); });
-$('#btn-sound').addEventListener('click',e=>{ soundOn=!soundOn; e.target.textContent='SOUND: '+(soundOn?'ON':'OFF'); if(soundOn) snd('paper'); });
+$('#btn-sound').addEventListener('click',e=>{
+  soundOn=!soundOn;
+  try{localStorage.setItem('lf_sound',soundOn?'on':'off');}catch(_){}
+  e.target.textContent='SOUND: '+(soundOn?'ON':'OFF'); if(soundOn) snd('paper');
+});
+(function(){ const b=$('#btn-sound'); if(b) b.textContent='SOUND: '+(soundOn?'ON':'OFF'); })();
 $('#btn-hold').addEventListener('click',()=>{ snd('paper'); openHold(); });
 $('#btn-caselog').addEventListener('click',()=>{ snd('paper'); openCaseLog(); });
 $('#recentRecordOpen').addEventListener('click',()=>{ snd('paper'); openCaseLog(); });
 $('#inventory').addEventListener('click',e=>{ if(e.target.closest('#invOpenHousehold')){ snd('paper'); openHousehold(); return; } if(e.target.closest('#invOpenMedical')){ snd('paper'); openMedicalFile(); return; } if(e.target.closest('#invOpenFamilyHealth')){ snd('paper'); openFamilyHealth(); } });
 $('#logClose').addEventListener('click',()=>{ $('#logWrap').classList.add('hidden'); });
 document.addEventListener('keydown',e=>{
-  if(e.code==='Space'&&!$('#dossier').classList.contains('hidden')&&$('#planWrap').classList.contains('hidden')&&$('#slipWrap').classList.contains('hidden')&&$('#closedWrap').classList.contains('hidden')&&$('#intentWrap').classList.contains('hidden')&&$('#mapWrap').classList.contains('hidden')&&$('#medicalWrap').classList.contains('hidden')&&$('#familyMedicalWrap').classList.contains('hidden')){ e.preventDefault(); advance(); }
+  const blocked=['#planWrap','#slipWrap','#closedWrap','#intentWrap','#mapWrap','#medicalWrap','#familyMedicalWrap','#householdWrap','#jobWrap','#jobDetailWrap','#skillWrap','#educationWrap','#logWrap','#holdWrap','#archiveWrap','#achieveListWrap']
+    .some(s=>{const el=$(s);return el&&!el.classList.contains('hidden');});
+  if(e.code==='Escape'){ if(closeTopOverlay())e.preventDefault(); return; }
+  if(!$('#dossier')||$('#dossier').classList.contains('hidden')||blocked) return;
+  if(e.code==='Space'){ e.preventDefault(); advance(); }
+  else if(e.code==='KeyP'){ e.preventDefault(); openPlan(); }
+  else if(e.code==='KeyF'){ e.preventDefault(); fastForward(); }
 });
 
 (function(){

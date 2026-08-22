@@ -607,7 +607,8 @@ const TINTS=[
  {bg:'#bcae90',bgd:'#74644a',skin:'#d2bd96',sh:'#ad9870',hair:'#2c2418',cloth:'#5a4b34',collar:'#cfc19a',ink:'#3a2c1a'},
  {bg:'#a4957a',bgd:'#574b34',skin:'#bfa880',sh:'#97825b',hair:'#3d3020',cloth:'#8a7a5c',collar:'#d8cba6',ink:'#2f2417'},
 ];
-function portraitSVG(sex,seed,t){
+function portraitSVG(sex,seed,t,age){
+  const a=age==null?0:age;
   const gid='p'+seed+(sex==='M'?'m':'f');let hair='';
   if(sex==='M'){const h=seed%4;
     if(h===0)hair=`<path d="M30 46 Q30 24 50 22 Q70 24 70 46 Q70 36 50 34 Q30 36 30 46Z" fill="${t.hair}"/>`;
@@ -633,6 +634,8 @@ function portraitSVG(sex,seed,t){
    ${hair}
    <g opacity="0.34"><ellipse cx="42" cy="50" rx="2.4" ry="1.6" fill="${t.ink}"/><ellipse cx="58" cy="50" rx="2.4" ry="1.6" fill="${t.ink}"/><path d="M50 52 L48 60 L52 60 Z" fill="${t.ink}" opacity="0.5"/><path d="M44 66 Q50 69 56 66" stroke="${t.ink}" stroke-width="1.4" fill="none"/></g>
    ${moust}
+   ${a>=40?`<g stroke="${t.ink}" stroke-width="0.8" fill="none" opacity="${Math.min(0.35,(a-30)/100).toFixed(2)}"><path d="M38 62 q4 2 8 0"/><path d="M54 62 q4 2 8 0"/><path d="M44 72 q6 2 12 0"/></g>`:''}
+   ${a>=50?`<rect width="100" height="120" fill="#cfc9ba" opacity="${a>=70?'0.5':a>=60?'0.34':'0.2'}"/>`:''}
    <rect width="100" height="120" filter="url(#${gid}n)" opacity="0.10"/>
    <g stroke="#efe6cd" stroke-width="0.5" opacity="0.22"><line x1="14" y1="6" x2="20" y2="40"/><line x1="82" y1="80" x2="88" y2="112"/></g>
    <rect width="100" height="120" fill="none" stroke="#efe6cd" stroke-width="6" opacity="0.32"/></svg>`;

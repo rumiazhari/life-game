@@ -80,7 +80,7 @@ function checkAchievements(trigger,ctx){
 }
 
 /* ================= STATE ================= */
-let S=null, soundOn=true, slipOpen=false, petitionNo=0, followups=[], quietMode=false;
+let S=null, soundOn=(function(){try{return (typeof localStorage==='undefined')||localStorage.getItem('lf_sound')!=='off';}catch(e){return true;}})(), slipOpen=false, petitionNo=0, followups=[], quietMode=false;
 let typing=false, queue=[], typeTimer=null, currentType=null;
 window.C={};
 const PUR_MAP={}, DEC_MAP={};

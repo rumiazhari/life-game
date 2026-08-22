@@ -82,6 +82,252 @@ function fileRecentYearReport(){
   recentYearReports=recentYearReports.slice(0,8);
   renderRecentRecord();
 }
+const MAX_REPORT_ENTRIES=6;
+let reportTimer=null,reportEntries=[],reportIdx=0,reportExtra=0,reportAge=0,reportSnap=null;
+function captureYearSnapshot(){
+  if(!S){reportSnap=null;return;}
+  reportSnap={health:S.health,happiness:S.happiness,smarts:S.smarts,looks:S.looks,relations:S.relations,money:S.assets};
+}
+function cancelReportReveal(){ if(reportTimer){clearTimeout(reportTimer);reportTimer=null;} }
+function resetYearReport(){ cancelReportReveal(); reportEntries=[]; reportIdx=0; reportExtra=0; reportAge=0; }
+function yearReceiptChips(){
+  const out=[];
+  if(!reportSnap) return out;
+  ['health','happiness','smarts','looks','relations'].forEach(k=>{const d=Math.round(S[k]-reportSnap[k]);if(d)out.push({txt:(d>0?'+':'−')+Math.abs(d)+' '+STATKEYS[k],plus:d>0});});
+  const md=Math.round(S.assets-reportSnap.money);
+  if(md)out.push({txt:(md>0?'+':'−')+'$'+Math.abs(md).toLocaleString('en-US'),plus:md>0});
+  return out;
+}
+function buildYearReportHtml(){
+  const done=reportIdx>=reportEntries.length;
+  const chips=done?yearReceiptChips():[];
+  let h='<div class="rr-yearstamp"><b>ANNUAL REPORT · YEAR '+reportAge+'</b><i class="rr-filed'+(done?' show':'')+'">FILED</i></div>';
+  if(chips.length)h+='<div class="rr-receipt">'+chips.map(c=>'<span class="fx '+(c.plus?'plus':'minus')+'">'+c.txt+'</span>').join('')+'</div>';
+  reportEntries.forEach((e,i)=>{
+    h+='<div class="yr-entry'+(i<reportIdx?'':' yr-pending')+'"><span class="yr-head">'+e.head+'</span><div class="etext">'+e.text+'</div>'+
+      (e.chips&&e.chips.length?'<div class="yr-chips">'+e.chips.map(c=>'<span class="fx '+(c.plus?'plus':'minus')+'">'+c.txt+'</span>').join('')+'</div>':'')+'</div>';
+  });
+  if(reportExtra>0&&done)h+='<div class="yr-more">+'+reportExtra+' more filed in CASE LOG</div>';
+  return h;
+}
+function renderReportFrame(){
+  const body=$('#recentRecordBody'); if(!body)return;
+  body.innerHTML=buildYearReportHtml();
+}
+function completeReportFrame(silent){
+  cancelReportReveal();
+  if(!reportEntries.length)return;
+  reportIdx=reportEntries.length;
+  renderReportFrame();
+  coachSet('report');
+  snd(silent?'streaksoft':'stamp');
+  if(navigator.vibrate)navigator.vibrate(20);
+}
+function skipReportReveal(){
+  if(!reportEntries.length||reportIdx>=reportEntries.length)return;
+  completeReportFrame(false);
+}
+function revealStep(){
+  reportTimer=null;
+  if(!reportEntries.length||reportIdx>=reportEntries.length)return;
+  reportIdx++;
+  renderReportFrame();
+  if(reportIdx>=reportEntries.length){snd('stamp');if(navigator.vibrate)navigator.vibrate([18,26,14]);return;}
+  snd('tick');
+  reportTimer=setTimeout(revealStep,420);
+}
+function presentYearReport(suppressed,quiet){
+  const body=$('#recentRecordBody'); if(!body)return;
+  cancelReportReveal();
+  if(quiet||suppressed||quietMode||!yearLog.length||!S.alive){resetYearReport();renderRecentRecord();return;}
+  reportEntries=yearLog.slice(0,MAX_REPORT_ENTRIES);
+  reportExtra=Math.max(0,yearLog.length-MAX_REPORT_ENTRIES);
+  reportIdx=0;
+  reportAge=S.age;
+  renderReportFrame();
+  reportTimer=setTimeout(revealStep,430);
+}
+$('#recentRecord').addEventListener('click',e=>{
+  if(e.target&&e.target.closest&&e.target.closest('#recentRecordOpen'))return;
+  if(reportEntries.length&&reportIdx<reportEntries.length)skipReportReveal();
+});
+let ffHideTimer=null,rpgTierBefore=0,rpgGradeShown=0;
+function clipText(t,n){t=String(t==null?'':t);return t.length>n?t.slice(0,n-1)+'…':t;}
+function fastForward(){
+  if(!S||!S.alive||slipOpen)return;
+  cancelReportReveal();
+  const beats=[];
+  quietMode=true;
+  while(S.alive&&!slipOpen&&beats.length<15){
+    advance(true,true);
+    if(!S.alive)break;
+    const r=recentYearReports[0];
+    beats.push({age:S.age,text:r?r.text:'',stage:S.stage});
+  }
+  quietMode=false;
+  renderFastForwardRecap(beats);
+}
+function renderFastForwardRecap(beats){
+  if(ffHideTimer){clearTimeout(ffHideTimer);ffHideTimer=null;}
+  const el=$('#ffRecap');if(!el)return;
+  if(!beats.length){el.classList.add('hidden');return;}
+  const rows=beats.map((b,i)=>{
+    const label=b.text?clipText(b.text,72):(STAGE_INFO[b.stage]?STAGE_INFO[b.stage].name.toLowerCase():'');
+    return '<div class="ffr-row'+(b.age<6?' child':'')+'" style="animation-delay:'+(i*0.14).toFixed(2)+'s"><b>Y'+b.age+'</b><span>'+label+'</span></div>';
+  }).join('');
+  el.innerHTML='<div class="ffr-head"><span>FAST-FORWARD · '+beats.length+' YEAR'+(beats.length===1?'':'S')+'</span><button class="ps-close" id="ffrClose" aria-label="Dismiss">✕</button></div>'+
+    (beats.some(b=>b.age<6)?'<div class="ffr-band">GROWING UP</div>':'')+
+    '<div class="ffr-rows">'+rows+'</div>';
+  el.classList.remove('hidden');
+  ffHideTimer=setTimeout(()=>{el.classList.add('hidden');},Math.min(9000,1600+beats.length*420));
+}
+$('#ffRecap').addEventListener('click',()=>{
+  if(ffHideTimer){clearTimeout(ffHideTimer);ffHideTimer=null;}
+  $('#ffRecap').classList.add('hidden');
+});
+const WHY_NOT={
+  lookwork:s=>s.jailUntil>s.age?'in custody':null,
+  overtime:s=>s.jobTier<1?'no job':null,
+  nightshift:s=>s.jobTier<1?'no job':null,
+  quitjob:s=>s.jobTier<1?'no job':null,
+  presspromo:s=>s.jobTier<1?'no job':null,
+  court:s=>(!s.partner&&s.status==='Single')?'no partner yet':null,
+  tendspouse:s=>!s.married?'not married':null,
+  family:s=>s.kids<1?'no children on file':null,
+  writemother:s=>!(s.mother&&s.mother.alive&&!s.mother.estranged)?'mother unreachable':null,
+  writefather:s=>!(s.father&&s.father.alive&&!s.father.estranged)?'father unreachable':null,
+  propose:s=>s.status!=='Attached'?'not attached':null,
+  trychild:s=>!s.married?'needs marriage':null,
+  divorce:s=>!s.married?'not married':null,
+  breakup:s=>s.status!=='Attached'?'not attached':null,
+  leaveschool:s=>!s.eduStage?'not enrolled':null,
+  earlyret:s=>s.age<60?'from age 60':(s.jobTier<1?'not working':null),
+  expunge:s=>!s.record?'record already clean':null,
+  endaffair:s=>!(s.activeAffairCids||[]).length?'no affair to end':null,
+  covertracks:s=>!(s.activeAffairCids||[]).length?'nothing to cover':null,
+  recruit:s=>!s.holdMember?'not in the Hold':null,
+  tendmember:s=>typeof livingHoldMembers==='function'&&livingHoldMembers().length<1?'no members abroad':null,
+  favor:s=>currentYear()<s.favorCool?'favor still cooling':null,
+  flirt:s=>s.contacts.length<1?'meet someone first':null,
+  flirtsecret:s=>s.contacts.length<1?'meet someone first':null,
+  tendcontact:s=>s.contacts.length<1?'meet someone first':null,
+  cutcontact:s=>s.contacts.length<1?'no contacts':null,
+  meetsomeone:s=>s.contacts.length>=MAX_CONTACTS?'circle is full':null,
+  crime:s=>s.age<16?'from age 16':null,
+  bottle:s=>s.age<16?'from age 16':null,
+  track:s=>s.age<16?'from age 16':null,
+  backroom2:s=>s.age<18?'from age 18':null,
+  gig:s=>s.age<16?'from age 16':null,
+  learntrade:s=>s.age<16?'from age 16':null,
+  relocate:s=>s.age<16?'too young to move alone':null,
+  bankloan:s=>(s.liabilities||[]).length>=3?'too many open debts':null,
+  storecredit:s=>(s.liabilities||[]).length>=3?'too many open debts':null,
+  payoffdebt:s=>!(s.liabilities||[]).length?'no debts on file':null,
+  estrangemother:s=>!(s.mother&&s.mother.alive&&!s.mother.estranged)?'mother not in the picture':null,
+  estrangefather:s=>!(s.father&&s.father.alive&&!s.father.estranged)?'father not in the picture':null,
+  treatment:s=>activeConditions().filter(c=>c.known).length<1?'nothing diagnosed':null
+};
+function whyNotFor(id){
+  const f=WHY_NOT[id];
+  return f?f(S):null;
+}
+function fxPreviewChips(fx){
+  let h='';
+  for(const k in fx){const v=fx[k];if(!v||typeof v!=='number')continue;
+    if(k==='assets'){h+='<i class="'+(v>0?'plus':'minus')+'">'+(v>0?'+':'−')+'$'+Math.abs(v).toLocaleString('en-US')+'</i>';continue;}
+    h+='<i class="'+(v>0?'plus':'minus')+'">'+(v>0?'+':'−')+Math.abs(v)+' '+(STATKEYS[k]||k.toUpperCase())+'</i>';}
+  return h;
+}
+function planNoteText(def,type,id,ok,afford,dup){
+  if(dup)return actionReservedNote(id);
+  if(!afford)return 'needs '+(def.cost||1)+'h free';
+  if(!ok){const w=whyNotFor(id);return w?('— '+w):(type==='p'?'— not available this year':'— not available');}
+  return fillLabel(def.note?def.note(S):'');
+}
+function recommendedActions(rem){
+  const out=[];
+  const add=(type,id,label)=>{
+    const d=type==='p'?PUR_MAP[id]:DEC_MAP[id];
+    if(!d||actionReservedThisYear(id))return;
+    if(typeof d.avail==='function'&&!d.avail(S))return;
+    if(d.cost&&rem<d.cost)return;
+    out.push('<button class="rec-chip" data-'+type+'="'+id+'" title="'+label+'"><b>'+label+'</b><span>'+clipText(fillLabel(d.note?d.note(S):''),46)+'</span></button>');
+  };
+  if(S.jailUntil>S.age)return out;
+  if(S.age>=16&&S.jobTier<1)add('p','lookwork','Find work');
+  else if(S.assets<-500)add('p','overtime','Earn overtime');
+  if(S.health<45)add('p','doctor','See the doctor');
+  if(S.happiness<32)add('p',S.age<16?'family':'walk','Lift your mood');
+  return out.slice(0,2);
+}
+let coachMem={};
+function coachGet(k){
+  try{if(typeof localStorage!=='undefined'&&localStorage.getItem('lf_coach_'+k)==='1')return true;}catch(e){}
+  return !!coachMem[k];
+}
+function coachSet(k){
+  coachMem[k]=true;
+  try{if(typeof localStorage!=='undefined')localStorage.setItem('lf_coach_'+k,'1');}catch(e){}
+  renderCoach();
+}
+function renderCoach(){
+  const el=$('#coachBar');if(!el)return;
+  if(!S||!S.alive||slipOpen){el.classList.add('hidden');return;}
+  let step=null;
+  if(!coachGet('plan'))step=['STEP 1 · PLAN','Tap PLAN THE YEAR — queue pursuits, then seal.'];
+  else if(!coachGet('seal'))step=['STEP 2 · SEAL','Seal &amp; Advance — the Bureau stamps the year forward.'];
+  else if(!coachGet('report'))step=['STEP 3 · THE REPORT','Each year files an Annual Report above the bar. Tap it to skim.'];
+  else {el.classList.add('hidden');return;}
+  el.innerHTML='<span class="cb-txt"><b>'+step[0]+'</b>'+step[1]+'</span><button id="coachDismiss">GOT IT</button>';
+  el.classList.remove('hidden');
+}
+$('#coachBar').addEventListener('click',e=>{
+  if(!(e.target&&e.target.id==='coachDismiss'))return;
+  if(!coachGet('plan'))coachSet('plan');
+  else if(!coachGet('seal'))coachSet('seal');
+  else coachSet('report');
+});
+const OVERLAY_CLOSE_ORDER=['jobDetailWrap','skillWrap','educationWrap','familyMedicalWrap','medicalWrap','householdWrap','logWrap','achieveListWrap','archiveWrap','holdWrap','mapWrap','planWrap'];
+function closeTopOverlay(){
+  for(const id of OVERLAY_CLOSE_ORDER){
+    const el=document.getElementById(id);
+    if(el&&!el.classList.contains('hidden')){el.classList.add('hidden');return true;}
+  }
+  return false;
+}
+function pushSparkPoint(){
+  if(!S||!S.alive)return;
+  if(!Array.isArray(S.statHistory))S.statHistory=[];
+  S.statHistory.push({age:S.age,h:S.health,p:S.happiness,m:S.assets});
+  if(S.statHistory.length>120)S.statHistory=S.statHistory.slice(-120);
+}
+function sparkSvg(key,color,maxScale){
+  const hist=Array.isArray(S.statHistory)?S.statHistory:[];
+  if(hist.length<2)return '';
+  const vals=hist.map(pt=>pt[key]);
+  const min=Math.min.apply(null,vals),spread=(Math.max.apply(null,vals)-min)||1;
+  const top=maxScale||100;
+  const pts=hist.map((pt,i)=>Math.round(i/(hist.length-1)*58)+','+Math.round(13-Math.max(0,Math.min(top,pt[key]))/top*11)).join(' ');
+  return '<svg class="spark" viewBox="0 0 58 14" preserveAspectRatio="none" aria-hidden="true"><polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.4"/></svg>';
+}
+function renderSparks(){
+  const row=$('#sparkRow');if(!row||!S)return;
+  row.innerHTML='<span class="sparkcell"><em>HEALTH</em>'+sparkSvg('h','#a83a2a')+'</span>'+
+    '<span class="sparkcell"><em>HAPPINESS</em>'+sparkSvg('p','#2e6b46')+'</span>'+
+    '<span class="sparkcell"><em>ASSETS</em>'+sparkSvg('m','#9a6a1c')+'</span>';
+}
+function renderLifeRibbon(){
+  const el=$('#lifeRibbon');if(!el||!S)return;
+  const pos=a=>clamp(a/100*100,0,100);
+  const marks=(S.highlights||[]).map(h=>'<i class="rb-dot" style="left:'+pos(h.age)+'%" title="age '+h.age+' — '+clipText(h.text,70).replace(/"/g,'')+'"></i>').join('');
+  const decades=[0,20,40,60,80].map(d=>'<i class="rb-tick" style="left:'+pos(d)+'%"><span>'+(d||'0')+'</span></i>').join('')+'<i class="rb-tick end" style="left:100%"><span>100</span></i>';
+  el.innerHTML='<div class="rb-track">'+
+    '<i class="rb-band c1" style="left:0;width:'+pos(18)+'%"></i>'+
+    '<i class="rb-band c2" style="left:'+pos(18)+'%;width:'+(pos(65)-pos(18))+'%"></i>'+
+    '<i class="rb-band c3" style="left:'+pos(65)+'%;width:'+(100-pos(65))+'%"></i>'+
+    decades+marks+
+    '<i class="rb-now" style="left:'+pos(S.age)+'%"><b>'+S.age+'</b></i></div>';
+}
 const JUICY_CLS=new Set(['plan','decision','crisis','opportunity','ruling','milestone','guardian-bad','guardian-good']);
 function triggerJuice(chips,cls){
   if(quietMode||!chips||!chips.length||!JUICY_CLS.has(cls)) return;
@@ -98,15 +344,17 @@ function triggerJuice(chips,cls){
   }
 }
 function typeNext(){
-  let item; const logEl=$('#log');
+  let item,i=0; const logEl=$('#log');
   while(item=queue.shift()){
     const el=document.createElement('div');
     el.className='entry done'+(item.cls?' '+item.cls:'');
+    if(!quietMode)el.style.animationDelay=(i*0.09)+'s';
+    i++;
     el.innerHTML='<div class="ehead">'+item.head+'</div><div class="etext">'+item.text+'</div>'+
       (item.chips.length?'<div class="echips">'+item.chips.map(c=>'<span class="fx '+(c.plus?'plus':'minus')+'">'+c.txt+'</span>').join('')+'</div>':'');
     logEl.appendChild(el);
   }
-  logEl.scrollTop=logEl.scrollHeight;
+  if(i)logEl.scrollTop=logEl.scrollHeight;
 }
 
 /* ================= RENDER ================= */
@@ -116,7 +364,7 @@ function renderIdentity(){
   $('#id-file').textContent=S.sex+' · '+S.id;
   $('#id-dob').textContent=S.dob+' · '+S.place;
   $('#tab-name').textContent='FILE: '+S.last.toUpperCase()+', '+S.first.toUpperCase();
-  $('#photo-art').innerHTML=portraitSVG(S.sex,S.photoSeed,S.photoTint);
+  $('#photo-art').innerHTML=portraitSVG(S.sex,S.photoSeed,S.photoTint,S.age);
   $('#photo-cap').textContent='FILE PHOTO · '+S.dob;
 }
 function viceText(v){return v===0?'none on record':v<=2?'minor notations':v<=5?'a pattern':'the Bureau has a folder on the folder';}
@@ -161,6 +409,26 @@ function renderKin(changed){
   $('#standing').innerHTML='<div class="kinrow standingrow hotspot" data-hotspot="relations"><span class="kr-l">STANDING</span><span class="kr-n">'+standingText(S.relations)+'</span><b class="sval standing-val" id="standing-val">'+S.relations+'</b></div>';
   if(changed&&changed.relations){ const sv=$('#standing-val'); sv.classList.add(changed.relations>0?'up':'down'); }
 }
+let assetsAnimToken=0,shownAssets=null;
+function renderAssetsValue(el){
+  if(!el)return;
+  el.classList.toggle('debt',S.assets<0);
+  const target=S.assets;
+  if(shownAssets===null||quietMode||typeof requestAnimationFrame!=='function'||!isFinite(target)){shownAssets=target;el.textContent=money(target);return;}
+  const from=shownAssets;
+  if(from===target){el.textContent=money(target);return;}
+  const token=++assetsAnimToken,start=Date.now(),dur=clamp(320+Math.abs(target-from)*0.02,320,700);
+  shownAssets=target;
+  el.textContent=money(from);
+  const stepFn=t=>{
+    if(token!==assetsAnimToken)return;
+    let p=dur>0?(t-start)/dur:1;p=Math.max(0,Math.min(1,p));
+    const e=1-Math.pow(1-p,3);
+    el.textContent=money(Math.round(from+(target-from)*e));
+    if(p<1)requestAnimationFrame(stepFn);
+  };
+  requestAnimationFrame(stepFn);
+}
 function renderStats(changed){
   ensurePersonalSystems(S); updatePersonalStanding();
   for(const k of ['health','happiness','smarts','looks']){
@@ -170,7 +438,7 @@ function renderStats(changed){
       const chip=document.createElement('span'); chip.className='chip '+(changed[k]>0?'plus':'minus');
       chip.textContent=(changed[k]>0?'+':'−')+Math.abs(Math.round(changed[k])); $('#row-'+k).appendChild(chip);
       chip.addEventListener('animationend',()=>chip.remove());}}
-  const a=$('#val-assets'); a.textContent=money(S.assets); a.classList.toggle('debt',S.assets<0);
+  renderAssetsValue($('#val-assets'));
   $('#val-job').textContent=S.jailUntil>S.age?'IN CUSTODY':S.jobName;
   $('#val-status').textContent=S.status+(S.kids?' · '+S.kids+(S.kids>1?' children':' child'):'');
   $('#val-vice').textContent=viceText(S.vice);
@@ -181,7 +449,25 @@ function renderStats(changed){
   renderIntent();
   renderDisposition();
   renderInventory();
+  renderSparks();
+  renderCoach();
   syncHoldTab();
+}
+function renderServiceRecord(){
+  if(typeof RPG!=='object'||!RPG||!S||typeof World==='undefined'||!World)return '';
+  const rec=RPG.recordOf(World);if(!rec)return '';
+  const prev=rec.grade>1?RPG.GRADE_THRESHOLDS[rec.grade-1]:0;
+  const next=rec.grade<8?RPG.GRADE_THRESHOLDS[rec.grade]:rec.merit;
+  const pct=next===prev?100:Math.round((rec.merit-prev)/(next-prev)*100);
+  const perks=RPG.perksFor(World,'subject');
+  const bg=rec.background?RPG.BACKGROUNDS.find(b=>b.id===rec.background):null;
+  return '<div class="svc-record"><div class="sec-h">SERVICE RECORD <span>FORM R-7</span></div>'+
+    '<div class="svc-line"><span class="svc-grade">G-'+RPG.roman(rec.grade)+'</span>'+
+    '<div class="sbar"><div class="sfill f-smarts" style="width:'+clamp(pct,0,100)+'%"></div></div>'+
+    '<b class="sval">'+rec.merit+'</b></div>'+
+    (bg?'<div class="svc-meta"><b>BACKGROUND</b><span>'+bg.name+' — '+bg.line+'</span></div>':'')+
+    (perks.length?'<div class="svc-perks">'+perks.map(p=>'<i title="'+p.desc+'">'+p.name+'</i>').join('')+'</div>':'')+
+    '</div>';
 }
 function renderInventory(){
   const el=$('#inventory'); if(!el) return;
@@ -195,10 +481,11 @@ function renderInventory(){
     '<div><b>BUREAU FAVOR</b><span>'+S.bureauFavor+' / 3</span></div><div><b>SECURITY</b><span>'+securityLabel(Math.min(S.housingSecurity,S.financialSecurity))+'</span></div></div>'+ 
     '<div class="medical-line"><b>MEDICAL FILE</b><span>'+(conditions.length?conditions.map(c=>medicalInfo(c.id).name+(c.known?'':' · unexamined')).join(' · '):(S.medicalRecord?'no active condition':'not yet opened'))+'</span></div>'+
     '<div class="location-line"><b>LOCATION</b><span>'+location.name+' · '+(building?building.name:'address pending')+(travel?' · travelling to '+travel.name:'')+'</span></div>'+
-    (settlementConditions?'<div class="settlement-conditions"><div class="sec-h">SETTLEMENT CONDITIONS <span>SIMULATION</span></div><div class="condition-grid"><div><b>EMPLOYMENT</b><span>'+settlementConditions.employment+'</span></div><div><b>COST OF LIVING</b><span>'+settlementConditions.costOfLiving+'</span></div><div><b>HEALTHCARE PRESSURE</b><span>'+settlementConditions.healthcare+'</span></div><div><b>UNREST</b><span>'+settlementConditions.unrest+'</span></div><div><b>SURVEILLANCE</b><span>'+settlementConditions.surveillance+'</span></div></div></div>':'')+'</div>';
+    '</div>'+
+    (settlementConditions?'<div class="settlement-conditions"><div class="sec-h">SETTLEMENT CONDITIONS <span>SIMULATION</span></div><div class="condition-grid"><div><b>EMPLOYMENT</b><span>'+settlementConditions.employment+'</span></div><div><b>COST OF LIVING</b><span>'+settlementConditions.costOfLiving+'</span></div><div><b>HEALTHCARE PRESSURE</b><span>'+settlementConditions.healthcare+'</span></div><div><b>UNREST</b><span>'+settlementConditions.unrest+'</span></div><div><b>SURVEILLANCE</b><span>'+settlementConditions.surveillance+'</span></div></div></div>':'')+renderServiceRecord();
   if(S.age<16||S.livingAtHome){
     const famT=FAMILY_TIERS.find(f=>f.id===S.familyTier);
-    let hc='<div class="aempty">'+(S.age<16?'Dependent on parents — the family provides. No ledger of their own until sixteen.':'Still living at home — rent-free, fed at the family table, for as long as that lasts.')+'</div>';
+    let hc='<div class="aempty">'+(S.age<16?'Dependent on parents — the family provides.':'Still living at home — rent-free, fed at the family table.')+'</div>';
     if(S.age<16) hc+='<div class="frow"><span class="flabel">FAMILY OF ORIGIN</span><span class="fval">'+(famT?famT.label:'—')+'</span></div>';
     hc+='<div class="frow"><span class="flabel">HOUSING</span><span class="fval">'+house.icon+' '+house.name+'</span></div>';
     hc+='<div class="hh-risk">'+fxSummary(house.fx)+' · '+house.risk+'</div>';
@@ -207,9 +494,9 @@ function renderInventory(){
     const gt=guardTier(), gi=GUARD_INFO[gt];
     hc+='<div class="frow"><span class="flabel">GUARDIANSHIP</span><span class="fval">'+gi.label+'</span></div>';
     hc+='<div class="hh-risk">'+gi.line+'</div>';
-    el.innerHTML=standing+hc; return;
+    el.innerHTML=standing+'<div class="gbox"><div class="sec-h">AT THE FAMILY TABLE</div>'+hc+'</div>'; return;
   }
-  let h='';
+  let h='<div class="gbox"><div class="sec-h">HOUSEHOLD & LIFESTYLE <span>ANNUAL</span></div>';
   h+='<div class="hotspot" data-hotspot="housing"><div class="frow"><span class="flabel">HOUSING</span><span class="fval">'+house.icon+' '+house.name+' · '+(house.rent?money(house.rent)+'/yr':'free')+'</span></div>'+
     '<div class="hh-risk">'+fxSummary(house.fx)+' · '+house.risk+'</div></div>';
   h+='<div class="hotspot" data-hotspot="food"><div class="frow"><span class="flabel">FOOD</span><span class="fval">'+food.icon+' '+food.name+' · '+money(food.cost)+'/yr</span></div>'+
@@ -217,21 +504,26 @@ function renderInventory(){
   if(S.kids>0){ const care=currentChildcare();
     h+='<div class="frow"><span class="flabel">DEPENDENTS</span><span class="fval">'+care.icon+' '+care.name+' · '+money(care.costPerKid)+'/yr × '+S.kids+'</span></div>';
     h+='<div class="hh-risk">'+fxSummary(care.fx)+' · '+care.risk+'</div>'; }
+  h+='</div>';
   const subjectHousehold=typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.findByMember==='function'?HouseholdSystem.findByMember(World,S.npcId):null;
   const outlay=typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.estimateOutlay==='function'?HouseholdSystem.estimateOutlay(World,subjectHousehold,S,{year:currentYear()}):{personalLifestyleOutlay:0,additionalHouseholdCosts:0,projectedTotalOutlay:0};
-  h+='<div class="sec-h">LIABILITIES <span>'+(S.liabilities.length||'NONE')+'</span></div>';
+  h+='<div class="gbox"><div class="sec-h">LIABILITIES <span>'+(S.liabilities.length||'NONE')+'</span></div>';
   if(S.liabilities.length){
     S.liabilities.forEach(l=>{ h+='<div class="arow"><div class="ar-grade">'+l.icon+'</div><div style="flex:1"><div class="ar-name">'+l.name+'</div><div class="ar-meta">'+money(l.annualPayment)+'/yr · '+l.yearsLeft+'y remaining</div></div></div>'; });
   } else {
     h+='<div class="aempty">No debts on file.</div>';
   }
+  h+='</div>';
+  h+='<div class="gbox"><div class="sec-h">ANNUAL OUTLAY <span>PROJECTED</span></div>';
   h+='<div class="frow moneyrow hotspot" data-hotspot="outlay"><span class="flabel">PERSONAL LIFESTYLE OUTLAY</span><span class="fval big">'+money(outlay.personalLifestyleOutlay)+'</span></div>';
   h+='<div class="frow moneyrow"><span class="flabel">ADDITIONAL HOUSEHOLD COSTS</span><span class="fval big">'+money(outlay.additionalHouseholdCosts)+'</span></div>';
   h+='<div class="frow moneyrow"><span class="flabel">PROJECTED TOTAL OUTLAY</span><span class="fval big">'+money(outlay.projectedTotalOutlay)+'</span></div>';
-  h+='<button class="btn small" id="invOpenMedical" style="width:100%;margin-top:8px">Open Medical File ▸</button>';
-  h+='<button class="btn small" id="invOpenHousehold" style="width:100%;margin-top:8px">Manage the Household ▸</button>';
-  const familyPendingCount=familyHealthPendingCount();
-  h+='<button class="btn small" id="invOpenFamilyHealth" style="width:100%;margin-top:8px">Family Health ▸'+(familyPendingCount?' <span class="family-health-badge">'+familyPendingCount+'</span>':'')+'</button>';
+  h+='</div>';
+  h+='<div class="inv-actions">'+
+    '<button class="btn small" id="invOpenMedical">MEDICAL FILE ▸</button>'+
+    '<button class="btn small" id="invOpenHousehold">HOUSEHOLD ▸</button>'+
+    '<button class="btn small" id="invOpenFamilyHealth">FAMILY HEALTH ▸'+(familyHealthPendingCount()?' <span class="family-health-badge">'+familyHealthPendingCount()+'</span>':'')+'</button>'+
+  '</div>';
   el.innerHTML=standing+h;
 }
 function openMedicalTreatmentPicker(conditionId){
@@ -256,11 +548,11 @@ function openMedicalFile(){
   const rows=conditions.length?conditions.map(c=>{
     const treatment=c.known?'<button class="btn small" data-medical-treat="'+c.instanceId+'">File treatment · 1h ▸</button>':'<span class="ar-meta">Diagnosis required before treatment.</span>';
     return '<div class="medical-card"><div class="arow"><div class="ar-grade">'+c.severity+'</div><div style="flex:1"><div class="ar-name">'+medicalInfo(c.id).name+'</div><div class="ar-meta">'+medicalSeverityLabel(c.severity)+' · '+medicalStateLabel(c)+' · since age '+c.onsetAge+'</div><div class="ar-meta">'+(c.source||'unclassified')+(c.treatment?' · last care: '+(MEDICAL_TREATMENTS[c.treatment]||{}).name:'')+'</div></div></div>'+treatment+'</div>';
-  }).join(''):'<div class="aempty">No active condition is recorded. A healthy-looking file is still only a file; use a doctor visit when something feels wrong.</div>';
+  }).join(''):'<div class="aempty">No active condition on file.</div>';
   $('#medicalSheet').innerHTML='<div class="ps-head"><span>MEDICAL FILE</span><span>FORM M-2</span></div>'+
     '<div class="medical-overview"><b>WELLNESS '+S.health+'/'+(S.healthCap||100)+'</b><span>resilience '+Math.round(summary.resilience)+' · '+access.facility+' · care quality '+Math.round(access.quality*100)+'%</span></div>'+
-    '<div class="ps-sub"><span>ACTIVE CONDITIONS</span><span>'+conditions.length+'</span></div>'+rows+
-    '<div class="ps-sub"><span>RECENT RECORD</span></div><div class="medical-history">'+(S.medical.history.slice(-4).reverse().map(h=>'AGE '+h.age+' · '+h.kind.toUpperCase()+(h.note?' · '+h.note:'')).join('<br>')||'No medical entry has been filed yet.')+'</div>'+
+    '<div class="gbox"><div class="sec-h">ACTIVE CONDITIONS <span>'+conditions.length+'</span></div>'+rows+'</div>'+
+    '<div class="gbox"><div class="sec-h">RECENT ENTRIES <span>LAST 4</span></div><div class="medical-history">'+(S.medical.history.slice(-4).reverse().map(h=>'AGE '+h.age+' · '+h.kind.toUpperCase()+(h.note?' · '+h.note:'')).join('<br>')||'Nothing filed yet.')+'</div></div>'+
     '<div class="ps-foot"><button class="btn" id="medicalClose">Close the File ▸</button></div>';
   $('#medicalWrap').classList.remove('hidden');
 }
@@ -291,7 +583,7 @@ function openFamilyHealth(){ renderFamilyHealth(); $('#familyMedicalWrap').class
 function renderFamilyHealth(){
   const panel=typeof PersistentPeopleUI==='object'&&PersistentPeopleUI&&typeof PersistentPeopleUI.householdHealthPanel==='function'?PersistentPeopleUI.householdHealthPanel(World,S,familyMedicalQueue()):'<div class="aempty">Household health records are unavailable.</div>';
   $('#familyMedicalSheet').innerHTML='<div class="ps-head"><span>FAMILY HEALTH</span><span>FORM M-3</span></div>'+
-    '<div class="aempty" style="margin:6px 2px 12px">The family’s own medical file. A decision made here settles before that member’s own annual review, so funded care already shows on their record before the year is out.</div>'+
+    '<div class="aempty" style="margin:6px 2px 12px">The family’s own medical file. Funded care settles before each member’s annual review.</div>'+
     panel+
     '<div class="ps-foot"><button class="btn" id="familyHealthClose">Close the File ▸</button></div>';
   $('#familyMedicalWrap').classList.remove('hidden');
@@ -725,6 +1017,7 @@ function renderStreak(){
 function renderStage(){
   const el=$('#d-stage'); if(!el||!S) return;
   el.textContent=STAGE_INFO[S.stage].name;
+  renderLifeRibbon();
 }
 function computeHours(){
   if(S.age<6||S.jailUntil>S.age) return 0;
@@ -743,32 +1036,37 @@ function updateBar(){
   if(slipOpen) lab.textContent='RESOLVE SLIP FIRST';
   else if(total===0) lab.textContent=(S.jailUntil>S.age?'IN CUSTODY':'NO AGENCY YET');
   else lab.textContent='PLAN THE YEAR';
-  $('#bar-micro').textContent = h===0 ? (S.jailUntil>S.age?'the subject is in custody — stamp the years':'the subject is too young to choose — stamp the years until they can') : 'plan the year, then stamp it · the record only moves forward';
+  $('#bar-micro').textContent = h===0 ? (S.jailUntil>S.age?'in custody — stamp the years':'too young to choose — stamp the years') : 'plan the year · stamp it forward';
 }
 
 /* ================= PLAN SHEET ================= */
 function openPlan(){
   if(computeHours()===0||slipOpen||!S.alive) return;
+  coachSet('plan');
   snd('paper'); renderPlan(); $('#planWrap').classList.remove('hidden');
 }
 function closePlan(){ $('#planWrap').classList.add('hidden'); }
 function actionReservedThisYear(id){ return S.queue.some(q=>q.id===id)||(id==='practice'&&S.autoTrain); }
 function actionReservedNote(id){ return id==='practice'&&S.autoTrain?'reserved for auto-training':'already filed this year'; }
 function planActionButton(def,type,rem){
-  const isP=type==='p', id=def.id, ok=def.avail(S), afford=rem>=def.cost;
+  const isP=type==='p', id=def.id, ok=def.avail(S), afford=rem>=(def.cost||0);
   const dup=actionReservedThisYear(id);
   const cant=!ok||!afford||dup;
   const label=isP?pursuitLabel(def):decisionLabel(def);
-  const note=ok?(dup?actionReservedNote(id):fillLabel(def.note(S))):(isP?'— not available this year':'— not available');
-  return '<button class="slipbtn'+(def.dark?' dark':'')+(cant?' cant':'')+(dup?' queued':'')+'" data-'+type+'="'+id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(def.icon?'<span class="sb-icon">'+def.icon+'</span> ':'')+fillLabel(label)+'</span><span class="sb-cost">'+(def.cost?def.cost+'h':'free')+'</span></div><div class="sb-note">'+note+'</div></button>';
+  const fxLine=(ok&&!dup)?fxPreviewHtmlSafe(def):'';
+  return '<button class="slipbtn'+(def.dark?' dark':'')+(cant?' cant':'')+(dup?' queued':'')+'" data-'+type+'="'+id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(def.icon?'<span class="sb-icon">'+def.icon+'</span> ':'')+fillLabel(label)+'</span><span class="sb-cost">'+(def.cost?def.cost+'h':'free')+'</span></div><div class="sb-note">'+planNoteText(def,type,id,ok,afford,dup)+'</div>'+fxLine+'</button>';
 }
+function fxPreviewHtmlSafe(def){
+  try{const h=typeof def.fx==='object'&&def.fx?fxPreviewChips(def.fx):'';return h?'<div class="sb-fx">'+h+'</div>':'';}catch(e){return '';}
+}
+let planTab='pursuits';
 function renderPlan(){
   const h=planHours(), used=S.queue.reduce((a,q)=>a+(PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0)),0);
   const rem=Math.max(0,h-used);
   let qh='';
   if(S.queue.length){ S.queue.forEach((q,i)=>{const d=PUR_MAP[q.id]||DEC_MAP[q.id]; qh+='<div class="qitem">'+(d.icon?d.icon+' ':'')+(d.dark?'⚑ ':'')+fillLabel(labelOf(q))+'<button class="qx" data-rm="'+i+'">✕</button></div>';}); }
-  else qh='<div class="qempty">No slips filed yet. Choose pursuits &amp; decisions below, then seal the year.</div>';
-  const autoRow='<button class="autotrain-toggle'+(S.autoTrain?' on':'')+'" id="autoTrainBtn"><b>AUTO-TRAIN A SKILL</b><span>'+(S.autoTrain?'ON · 1h/year reserved, best skill auto-picked':'OFF · tap to reserve 1h/year for automatic training')+'</span></button>';
+  else qh='<div class="qempty">Nothing filed yet.</div>';
+  const autoRow='<button class="autotrain-toggle'+(S.autoTrain?' on':'')+'" id="autoTrainBtn"><b>AUTO-TRAIN A SKILL</b><span>'+(S.autoTrain?'ON · best skill trains itself':'OFF · reserve 1h each year')+'</span></button>';
   let ph='';
   PUR_CATS.forEach(cat=>{
     if(cat.id==='hold') return;
@@ -790,8 +1088,7 @@ function renderPlan(){
     if(cat.id==='hold') return;
     const items=DECISIONS.filter(d=>d.cat===cat.id); if(!items.length) return;
     let ih='';
-    items.forEach(d=>{const ok=d.avail(S); const afford=rem>=d.cost; const dup=actionReservedThisYear(d.id); const cant=!ok||!afford||dup;
-      ih+='<button class="slipbtn'+(d.dark?' dark':'')+(cant?' cant':'')+(dup?' queued':'')+'" data-d="'+d.id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+fillLabel(decisionLabel(d))+'</span><span class="sb-cost">'+(d.cost?d.cost+'h':'free')+'</span></div><div class="sb-note">'+(dup?actionReservedNote(d.id):(ok?fillLabel(d.note(S)):'— not available'))+'</div></button>';});
+    items.forEach(d=>{ih+=planActionButton(d,'d',rem);});
     dh+='<div class="ps-catlab">'+cat.label+'</div><div class="sliplist">'+ih+'</div>';
   });
   let ch='';
@@ -801,27 +1098,35 @@ function renderPlan(){
     if(S.livingAtHome){
       const guardians=guardiansOf();
       const namesList=guardians.length?guardians.map(p=>p.name).join(' & '):'the family';
-      lh='<div class="ps-sub"><span>LIVING SITUATION — a standing act, no hours spent</span></div>'+
-        '<button class="household-tile" id="askMoveOut"><b>🏠 Living With '+namesList+'</b>'+
-        '<span>Rent-free, fed at their table — for now.</span>'+
-        '<i>Tap to ask about moving out on your own.</i></button>';
+      lh='<button class="household-tile" id="askMoveOut"><b>🏠 Living With '+namesList+'</b>'+
+        '<span>Rent-free, fed at their table.</span>'+
+        '<i>Tap to ask about moving out.</i></button>';
     } else {
       const house=currentHousing(), food=currentFood();
       const kidsLine=S.kids>0?' · '+currentChildcare().icon+' '+currentChildcare().name:'';
-      lh='<div class="ps-sub"><span>HOUSEHOLD & CREDIT — a standing act, no hours spent</span></div>'+
-        '<button class="household-tile" id="openHousehold"><b>🏠 Manage the Household</b>'+
+      lh='<button class="household-tile" id="openHousehold"><b>🏠 Manage the Household</b>'+
         '<span>'+house.icon+' '+house.name+' · '+food.icon+' '+food.name+kidsLine+'</span>'+
-        '<i>'+money(house.rent+food.cost+(S.kids>0?currentChildcare().costPerKid*S.kids:0))+'/yr before debts — tap to shop</i></button>';
+        '<i>'+money(house.rent+food.cost+(S.kids>0?currentChildcare().costPerKid*S.kids:0))+'/yr · tap to shop</i></button>';
     }
+  }
+  let body='';
+  if(planTab==='decisions'){ body=dh+hh; }
+  else if(planTab==='desk'){ body=(lh?'<div class="ps-catlab">LIVING — NO HOURS</div>'+lh:'')+'<div class="ps-catlab">CLERK’S DISCRETION</div><div class="ps-clerk">'+ch+'</div>'; }
+  else {
+    const recChips=recommendedActions(rem);
+    const recStrip=recChips.length?'<div class="rec-strip"><span class="rec-lab">SUGGESTED NOW</span>'+recChips.join('')+'</div>':'';
+    body=recStrip+autoRow+ph;
   }
   $('#planSheet').innerHTML=
     '<div class="ps-head"><span>SCHEDULE OF PURSUITS · FORM 7</span><span style="display:flex;align-items:center;gap:10px"><span class="hrs">'+rem+'/'+h+' HOURS '+pipsHTML(rem,h)+'</span><button class="ps-close" id="planClose" aria-label="Close">✕</button></span></div>'+
-    '<div class="ps-sub"><span>THIS YEAR’S PLAN</span>'+(S.queue.length?'<button class="voidbtn" id="voidLast">VOID LAST SLIP</button>':'')+'</div>'+qh+
-    lh+
-    '<div class="ps-sub"><span>PURSUITS — spend the hours</span></div>'+autoRow+ph+hh+
-    '<div class="ps-sub"><span>DECISIONS — the big verbs</span></div>'+dh+
-    '<div class="ps-sub"><span>CLERK’S DISCRETION — your stamps, outside the subject’s year</span></div><div class="ps-clerk">'+ch+'</div>'+
-    '<div class="ps-foot"><button class="btn" id="sealAdvance">Seal &amp; Advance the Year ▸</button></div>';
+    '<div class="ps-sub"><span>FILED THIS YEAR</span>'+(S.queue.length?'<button class="voidbtn" id="voidLast">VOID LAST</button>':'')+'</div>'+qh+
+    '<div class="plan-tabs">'+
+      '<button class="ptab'+(planTab==='pursuits'?' on':'')+'" data-plan-tab="pursuits">PURSUITS</button>'+
+      '<button class="ptab'+(planTab==='decisions'?' on':'')+'" data-plan-tab="decisions">DECISIONS</button>'+
+      '<button class="ptab'+(planTab==='desk'?' on':'')+'" data-plan-tab="desk">BUREAU DESK</button>'+
+    '</div>'+
+    body+
+    '<div class="ps-foot sticky"><button class="btn" id="sealAdvance">Seal &amp; Advance the Year ▸</button></div>';
 }
 function pipsHTML(rem,h){let s='';for(let i=0;i<h;i++)s+='<i class="'+(i<rem?'on':'')+'"></i>';return s;}
 function lifeToggle(items,current,dataAttr,priceFn){
@@ -850,6 +1155,8 @@ $('#planSheet').addEventListener('pointercancel',()=>{ endPress(); });
 $('#planSheet').addEventListener('click',e=>{
   if(longPressActive){ longPressActive=false; return; }
   if(e.target.closest('#planClose')){ closePlan(); return; }
+  const tb=e.target.closest('[data-plan-tab]');
+  if(tb){ const t=tb.dataset.planTab; if(t!==planTab){ planTab=t; renderPlan(); snd('paper'); } return; }
   if(e.target.closest('#autoTrainBtn')){
     if(!S.autoTrain&&S.queue.some(q=>q.id==='practice')){ shake(); return; }
     S.autoTrain=!S.autoTrain; snd('stamp'); renderPlan(); updateBar(); return;
@@ -861,7 +1168,7 @@ $('#planSheet').addEventListener('click',e=>{
   if(e.target.closest('#openHousehold')){ snd('paper'); openHousehold(); return; }
   if(e.target.closest('#askMoveOut')){ snd('paper'); closePlan(); openLivingDilemma('leave-request'); return; }
   if(e.target.id==='voidLast'){S.queue.pop();snd('paper');renderPlan();updateBar();return;}
-  if(e.target.id==='sealAdvance'){closePlan();advance();return;}
+  if(e.target.id==='sealAdvance'){coachSet('seal');closePlan();advance();return;}
 });
 function queueAdd(type,id,extra){
   const d=type==='p'?PUR_MAP[id]:DEC_MAP[id]; if(!d) return;
@@ -1127,10 +1434,10 @@ function openJobPortal(){
     }
   });
   $('#jobSheet').innerHTML='<div class="ps-head"><span>THIS YEAR’S OPENINGS</span><span>FORM W-2</span></div>'+
-    '<div class="aempty" style="margin:6px 2px 10px">Tap a career for the full ladder — stages, skills needed, and pay at each rung. Top rungs call for several skills at once, and years served below them.</div>'+
+    '<div class="aempty" style="margin:6px 2px 10px">Tap a career for the ladder — stages, skills, pay.</div>'+
     '<div style="margin:10px 2px">'+rows+'</div>'+
-    '<div class="ps-sub"><span>OR — SKIP THE LADDER ENTIRELY</span></div>'+
-    '<button class="household-tile" id="openGigs"><b>🕶 Off the Books</b><span>Nasty, unlicensed, paid in cash — maybe</span><i>No résumé required. Just nerve.</i></button>'+
+    '<div class="ps-sub"><span>UNLICENSED WORK</span></div>'+
+    '<button class="household-tile" id="openGigs"><b>🕶 Off the Books</b><span>Paid in cash — maybe</span><i>No résumé required.</i></button>'+
     '<div class="ps-foot"><button class="btn" id="jobCancel">Keep Looking ▸</button></div>';
   $('#jobSheet').onclick=e=>{
     const b=e.target.closest('[data-apply]'); if(b){ queueAdd('p','lookwork',{track:b.dataset.track,stage:+b.dataset.stage}); $('#jobWrap').classList.add('hidden'); return; }
@@ -1175,11 +1482,11 @@ function openJobPortalPersistent(){
       (v.qualifies?'<button class="btn small" data-apply data-vacancy="'+v.vacancyId+'">Apply ▸</button>':'')+'</div>';
   });
   $('#jobSheet').innerHTML='<div class="ps-head"><span>THIS YEAR’S OPENINGS</span><span>FORM W-2</span></div>'+
-    '<div class="aempty" style="margin:6px 2px 10px">Real openings at real employers this year. Tap a career row for the full ladder.</div>'+
+    '<div class="aempty" style="margin:6px 2px 10px">Real openings this year. Tap a career row for the ladder.</div>'+
     '<div style="margin:10px 2px">'+(rows||'<div class="aempty">No career openings this year.</div>')+'</div>'+
     (jobEntries.length?'<div class="ps-sub"><span>GENERAL OPENINGS</span></div><div style="margin:10px 2px">'+jobRows+'</div>':'')+
-    '<div class="ps-sub"><span>OR — SKIP THE LADDER ENTIRELY</span></div>'+
-    '<button class="household-tile" id="openGigs"><b>🕶 Off the Books</b><span>Nasty, unlicensed, paid in cash — maybe</span><i>No résumé required. Just nerve.</i></button>'+
+    '<div class="ps-sub"><span>UNLICENSED WORK</span></div>'+
+    '<button class="household-tile" id="openGigs"><b>🕶 Off the Books</b><span>Paid in cash — maybe</span><i>No résumé required.</i></button>'+
     '<div class="ps-foot"><button class="btn" id="jobCancel">Keep Looking ▸</button></div>';
   $('#jobSheet').onclick=e=>{
     const b=e.target.closest('[data-apply]'); if(b){ queueAdd('p','lookwork',{vacancyId:b.dataset.vacancy}); $('#jobWrap').classList.add('hidden'); return; }
@@ -1207,7 +1514,7 @@ function openGigPicker(){
     ch+='<div class="ps-catlab">'+cat.label+'</div><div class="chips">'+ih+'</div>';
   });
   $('#skillSheet').innerHTML='<div class="ps-head"><span>OFF THE BOOKS — NO QUESTIONS ASKED</span></div>'+
-    '<div class="aempty" style="margin:6px 2px 10px">No license, no ledger, no guarantee of payment. The Bureau does not recognize any of this as employment — and will not help if it goes wrong.</div>'+
+    '<div class="aempty" style="margin:6px 2px 10px">No license, no ledger. The Bureau will not help if it goes wrong.</div>'+
     ch+
     '<div class="ps-foot"><button class="btn" id="skillCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
@@ -1226,7 +1533,7 @@ function openMeetPicker(){
     ch+='<button class="chipbtn'+(dis?' locked':'')+'" '+(dis?'disabled':'data-venue="'+v.id+'"')+'><b>'+v.icon+' '+v.name+'</b><span>'+sub+'</span></button>';
   });
   $('#skillSheet').innerHTML='<div class="ps-head"><span>MEET SOMEONE NEW — CHOOSE HOW</span></div>'+
-    '<div class="aempty" style="margin:6px 2px 10px">Different rooms, different people. Some cost a little, or a lot; some pay, if you don’t mind who’s buying.</div>'+
+    '<div class="aempty" style="margin:6px 2px 10px">Different rooms, different people.</div>'+
     '<div class="chips">'+ch+'</div>'+
     '<div class="ps-foot"><button class="btn" id="skillCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
@@ -1407,6 +1714,7 @@ function resolvePetition(p,approved){
     logEv('Petition № '+String(petitionNo).padStart(3,'0')+' '+(approved?'APPROVED':'DENIED')+'. '+fill(br.t(S)),br.fx,'ruling','CLERK RULING · YEAR '+S.age);
     renderStats(window.C); updateBar();
     checkAchievements('live');
+    drainNextSlip();
   },760);
 }
 function openCrisis(c){
@@ -1432,6 +1740,7 @@ function resolveCrisis(c,i){
   renderStats(window.C); updateBar();
   checkAchievements('live');
   if(!S.alive) handleDeath();
+  drainNextSlip();
 }
 function openOpportunity(o){
   slipOpen=true; document.body.classList.add('slip-open');
@@ -1457,6 +1766,7 @@ function resolveOpportunity(o,i){
   renderStats(window.C); updateBar();
   checkAchievements('live');
   if(!S.alive) handleDeath();
+  drainNextSlip();
 }
 function openNotice(n){
   slipOpen=true; document.body.classList.add('slip-open');
@@ -1479,6 +1789,7 @@ function resolveNotice(n){
   renderStats(window.C); updateBar();
   checkAchievements('live');
   if(!S.alive) handleDeath();
+  drainNextSlip();
 }
 
 /* ================= YEAR RESOLUTION ================= */
@@ -1861,19 +2172,34 @@ function checkMortality(){
   if(!dead&&S.age>=104){dead=true;cause='the extreme and improbable age of '+S.age;}
   if(dead){S.alive=false;S.cause=cause; logEv('ENTRY TERMINATED. Subject deceased — '+cause+'. The record ends mid-sentence, as these things do.',{},'final','FINAL ENTRY · YEAR '+S.age);}
 }
+let pendingSlips=[];
+function drainNextSlip(){
+  if(slipOpen||!S||!S.alive||!pendingSlips.length)return;
+  const next=pendingSlips.shift();
+  if(next.kind==='crisis')openCrisis(next.def);
+  else if(next.kind==='petition')openPetition(next.def);
+  else if(next.kind==='opportunity')openOpportunity(next.def);
+}
+function clearSlipQueue(){ pendingSlips=[]; }
 function maybeSlip(){
+  pendingSlips=[];
   const bk=CRISES.find(c=>c.id==='bankruptcy');
-  if(bk&&bk.avail(S)){ openCrisis(bk); return; }
-  const raid=CRISES.find(c=>c.id==='regimeraid');
-  if(raid&&raid.avail(S)&&chance(clamp((Hold.heat-55)/130,0,0.35))){ openCrisis(raid); return; }
-  const holdExposure=S.holdMember?Hold.heat*0.0035:0;
-  const hardship = (S.assets<0?0.12+clamp(Math.abs(S.assets)/2000,0,0.4):0)+(S.health<30?0.1:0)+(S.married&&S.partnerMood<25?0.12:0)+(S.kids>0?0.04:0)+holdExposure;
-  const cpool=CRISES.filter(c=>c.avail(S)&&c.id!=='regimeraid');
-  if(cpool.length && chance(0.10+hardship)){ openCrisis(pick(cpool)); return; }
+  if(bk&&bk.avail(S))pendingSlips.push({kind:'crisis',def:bk});
+  else{
+    const raid=CRISES.find(c=>c.id==='regimeraid');
+    if(raid&&raid.avail(S)&&chance(clamp((Hold.heat-55)/130,0,0.35)))pendingSlips.push({kind:'crisis',def:raid});
+    else{
+      const holdExposure=S.holdMember?Hold.heat*0.0035:0;
+      const hardship = (S.assets<0?0.12+clamp(Math.abs(S.assets)/2000,0,0.4):0)+(S.health<30?0.1:0)+(S.married&&S.partnerMood<25?0.12:0)+(S.kids>0?0.04:0)+holdExposure;
+      const cpool=CRISES.filter(c=>c.avail(S)&&c.id!=='bankruptcy'&&c.id!=='regimeraid');
+      if(cpool.length && chance(0.10+hardship))pendingSlips.push({kind:'crisis',def:pick(cpool)});
+    }
+  }
   const ppool=PETITIONS.filter(p=>p.avail(S)&&!(p.once&&S.petDone[p.id]));
-  if(ppool.length && chance(0.12)){ openPetition(pick(ppool)); return; }
+  if(ppool.length && chance(0.12))pendingSlips.push({kind:'petition',def:pick(ppool)});
   const opool=OPPORTUNITIES.filter(o=>o.avail(S));
-  if(opool.length && chance(0.16)){ openOpportunity(pick(opool)); }
+  if(opool.length && chance(0.16))pendingSlips.push({kind:'opportunity',def:pick(opool)});
+  drainNextSlip();
 }
 function autoPickSkill(){
   const cap=typeof skillCapFor==='function'?skillCapFor():10;
@@ -2441,6 +2767,8 @@ function syncPlayerVacancyPortal(){
 }
 function advanceYear(suppressBurst,quiet){
   if(!S||!S.alive||slipOpen) return;
+  captureYearSnapshot();
+  rpgTierBefore=S.jobTier||0;
   if(S.age>0) evaluateYearStreak(quiet);
   yearLog=[]; collectingYear=true;
   S.age++; World.year++;
@@ -2516,6 +2844,23 @@ function advanceYear(suppressBurst,quiet){
   runEmploymentLifecycleYearTick();
   runVacancyYearTick();
   checkCareerProgress();
+  if(typeof RPG==='object'&&RPG&&S.alive&&typeof World!=='undefined'&&World){
+    if(S.jobTier>rpgTierBefore)RPG.addMerit(World,'subject',(S.jobTier-rpgTierBefore)*120,'promotion',World.year);
+    const crisesSurvived=(yearLog||[]).filter(e=>e.cls==='crisis').length;
+    if(crisesSurvived)RPG.addMerit(World,'subject',25*crisesSurvived,'crisis-survived',World.year);
+    let familyIds=[];
+    try{
+      if(typeof HouseholdSystem==='object'&&HouseholdSystem&&S.npcId){
+        const hh=HouseholdSystem.findByMember(World,S.npcId);
+        const members=hh&&(hh.members||hh.memberIds)||[];
+        familyIds=(Array.isArray(members)?members:[]).map(m=>typeof m==='string'?m:(m&&(m.npcId||m.id))).filter(x=>x&&x!==(S.npcId||'subject')).slice(0,10);
+      }
+    }catch(e){}
+    RPG.tickWorld(World,{year:World.year,familyIds});
+    const g=RPG.gradeOf(World,'subject');
+    if(!rpgGradeShown)rpgGradeShown=g;
+    else if(g>rpgGradeShown){rpgGradeShown=g;toastQueue.push({type:'grade',data:{g}});if(!toastTimer)showNextToast();}
+  }
   syncPlayerVacancyPortal();
   const __newStage=stageForAge(S.age);
   if(__newStage!==S.stage){ S.stage=__newStage; queueChapterCard(__newStage); renderStage(); }
@@ -2554,9 +2899,11 @@ function advanceYear(suppressBurst,quiet){
   runRandomEvents();
   if(S.alive) checkMortality();
   if(S.alive){ S.hapSum+=S.happiness; S.hapYears++; S.peakHap=Math.max(S.peakHap,S.happiness); }
+  pushSparkPoint();
   collectingYear=false;
   fileRecentYearReport();
   renderStats(window.C); renderYear(); updateBar();
+  presentYearReport(suppressBurst,quiet);
   checkAchievements('live');
   if(S.alive){
     if(checkSchoolTransition()){}
@@ -2570,12 +2917,6 @@ function advanceYear(suppressBurst,quiet){
 }
 YearEngine.configure((suppressBurst,quiet)=>advanceYear(suppressBurst,quiet));
 function advance(suppressBurst,quiet){ return YearEngine.advance({suppressBurst,quiet}); }
-function fastForward(){
-  if(!S||!S.alive||slipOpen) return;
-  let years=0; quietMode=true;
-  while(S.alive && !slipOpen && years<15){ advance(true,true); years++; }
-  quietMode=false;
-}
 function queueGuardianNotice(kind,text,chips){ S.__pendingGuardianNotice={kind,text,chips}; }
 function openGuardianNotice(gp){
   openNotice({title: gp.kind==='bad'?'It Happened Again':'A Good Moment At Home', body: gp.text, chips: gp.chips});
@@ -2622,6 +2963,13 @@ function showNextToast(){
     wrap.classList.remove('hidden');
     snd('fanfare'); spawnParticles('large',true,true);
     if(navigator.vibrate) navigator.vibrate([30,40,30,40,70]);
+  } else if(item.type==='grade'){
+    const gr=item.data.g;
+    card.innerHTML='<div class="achieve-kicker">Service Grade</div>'+
+      '<div class="achieve-name">GRADE '+romanGrade(gr)+'</div><div class="achieve-desc">The Bureau revises the file upward. New discretions may be claimed.</div><div class="achieve-ribbon"></div>';
+    wrap.classList.remove('hidden');
+    snd('chapter'); spawnParticles('medium',true,true);
+    if(navigator.vibrate) navigator.vibrate([24,30,24,30,50]);
   } else {
     const a=item.data;
     card.innerHTML='<div class="achieve-kicker">Commendation Issued</div>'+
@@ -2742,7 +3090,7 @@ function openIntro(){
   const famGood=famT&&!/hard|neglect|poor/i.test(famT.label+' '+(famT.line||''));
   const disabled=introRerolls<=0;
   slip.innerHTML='<div class="is-head">SUBJECT FILE · FORM 0</div>'+
-    '<div class="intro-identity-row"><div class="photo intro-photo"><div class="photo-art">'+portraitSVG(S.sex,S.photoSeed,S.photoTint)+'</div><em class="photo-cap">FILE PHOTO · '+S.dob+'</em></div><div class="subject-identity"><div class="subject-name">'+S.first+' '+S.last+'</div><div class="subject-meta"><span><b>SEX</b> '+sexSym(S.sex)+'</span><span><b>BORN</b> '+S.dob+'</span><span><b>PLACE</b> '+S.place+'</span></div></div></div>'+ 
+    '<div class="intro-identity-row"><div class="photo intro-photo"><div class="photo-art">'+portraitSVG(S.sex,S.photoSeed,S.photoTint,S.age)+'</div><em class="photo-cap">FILE PHOTO · '+S.dob+'</em></div><div class="subject-identity"><div class="subject-name">'+S.first+' '+S.last+'</div><div class="subject-meta"><span><b>SEX</b> '+sexSym(S.sex)+'</span><span><b>BORN</b> '+S.dob+'</span><span><b>PLACE</b> '+S.place+'</span></div></div></div>'+ 
     '<div class="subject-grid">'+
       '<div class="subject-chip origin '+(famGood?'good':'bad')+'"><b><span class="subject-icon">&#8962;</span> ORIGIN</b><span>'+(famT?famT.label:'Unknown household')+'</span></div>'+ 
       '<div class="subject-chip outlook '+(guardGood?'good':'bad')+'"><b><span class="subject-icon">&#9881;</span> OUTLOOK</b><span>'+gi.label+'</span></div>'+ 
@@ -2836,7 +3184,8 @@ function snd(kind,intensity){ if(!soundOn) return; const c=ac(); if(!c) return; 
   else if(kind==='streaksoft') chime(c,t,[300],0.08);
   else if(kind==='chapter') chime(c,t,[440,554,659,880],0.26);
   else if(kind==='bubblehover') bubbleTick(c,t);
-  else if(kind==='bubblepop') bubblePop(c,t); }
+  else if(kind==='bubblepop') bubblePop(c,t);
+  else if(kind==='tick') bubbleTick(c,t); }
 function shake(){ const d=$('#dossier'); d.classList.remove('shake'); void d.offsetWidth; d.classList.add('shake'); }
 
 /* ================= ARCHIVE UI ================= */

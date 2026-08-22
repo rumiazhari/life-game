@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=Special+Elite&family=Stardos+Stencil:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=20260804-phase4b5">
+<link rel="stylesheet" href="css/style.css?v=20260822-tier2345">
 </head>
 <body>
 <div class="desk">
@@ -55,6 +55,7 @@
         </div>
         <div class="stamp mini">Confidential</div>
       </div>
+      <div id="lifeRibbon" class="life-ribbon" aria-hidden="true"></div>
     </header>
     <div class="spread">
       <div class="page page-left">
@@ -85,6 +86,7 @@
         <div class="stat hotspot" id="row-happiness" data-hotspot="happiness"><span class="slabel">HAPPINESS</span><div class="sbar"><div class="sfill f-happiness" id="fill-happiness"></div></div><b class="sval" id="val-happiness">0</b></div>
         <div class="stat hotspot" id="row-smarts" data-hotspot="smarts"><span class="slabel">SMARTS</span><div class="sbar"><div class="sfill f-smarts" id="fill-smarts"></div></div><b class="sval" id="val-smarts">0</b></div>
         <div class="stat hotspot" id="row-looks" data-hotspot="looks"><span class="slabel">LOOKS</span><div class="sbar"><div class="sfill f-looks" id="fill-looks"></div></div><b class="sval" id="val-looks">0</b></div>
+        <div class="sparkrow" id="sparkRow" aria-hidden="true"></div>
         <div class="frow moneyrow hotspot" data-hotspot="assets"><span class="flabel">ASSETS ON RECORD</span><span class="fval big" id="val-assets">$0</span></div>
         <p class="pagefoot">Earlier pages are sealed. Do not attempt to turn back.</p>
       </div>
@@ -97,6 +99,8 @@
       </div>
     </div>
   </section>
+
+  <div id="coachBar" class="coachbar hidden"></div>
 
   <div class="actionbar"><div class="barinner">
     <div class="advrow">
@@ -136,7 +140,9 @@
   <div id="mapWrap" class="overlay hidden"><div class="plansheet map-sheet" id="mapSheet"></div></div>
   <div id="intentWrap" class="overlay hidden"><div class="intentslip" id="intentSlip"></div></div>
   <div id="planWrap" class="overlay hidden"><div class="plansheet" id="planSheet"></div></div>
-  <div id="slipWrap" class="overlay hidden"><div class="slipcard" id="slipCard"></div></div>
+  <div id="slipWrap" class="overlay hidden"><div class="slipcard" id="slipCard" role="dialog" aria-modal="true"></div></div>
+
+  <div id="ffRecap" class="ffwrap hidden"><div class="ffcard" id="ffRecapCard" role="dialog" aria-label="Fast-forward recap"></div></div>
 
   <div id="fxParticles" class="fxparticles"></div>
   <div id="achieveWrap" class="achieve-wrap hidden"><div class="achievecard" id="achieveCard"></div></div>
@@ -201,13 +207,14 @@
 <script src="js/core/effects.js"></script>
 <script src="js/core/invariants.js"></script>
 <script src="js/lore.js"></script>
-<script src="js/data.js?v=20260804-phase4a2"></script>
-<script src="js/state.js?v=20260803-phase4a"></script>
+<script src="js/data.js?v=20260822-tier2345"></script>
+<script src="js/state.js?v=20260822-tier2345"></script>
 <script src="js/systems/settlement-economy.js?v=20260803-phase3"></script>
 <script src="js/systems/public-health.js?v=20260803-phase3"></script>
 <script src="js/systems/business-system.js?v=20260804-phase4c1"></script>
 <script src="js/systems/employment-system.js?v=20260805-phase4c2"></script>
 <script src="js/systems/vacancy-system.js?v=20260805-phase4c4"></script>
+<script src="js/systems/rpg-system.js?v=20260822-rpg1"></script>
 <script src="js/systems/world-simulation.js?v=20260803-phase3"></script>
 <script src="js/systems/relationship-memory.js?v=20260803-phase3"></script>
 <script src="js/systems/condition-registry.js?v=20260803-phase4a"></script>
@@ -218,8 +225,8 @@
 <script src="js/systems/persistent-people-ui.js?v=20260804-phase4b5b"></script>
 <script src="js/medical.js?v=20260804-phase4a3"></script>
 <script src="js/education.js?v=20260803-phase3"></script>
-<script src="js/ui.js?v=20260804-phase4b5b"></script>
+<script src="js/ui.js?v=20260822-tier2345"></script>
 <script src="js/systems/world-gameplay.js?v=20260804-phase4a2"></script>
-<script src="js/main.js?v=20260804-phase4b5b"></script>
+<script src="js/main.js?v=20260822-tier2345"></script>
 </body>
 </html>
