@@ -153,12 +153,80 @@ $('#recentRecord').addEventListener('click',e=>{
 });
 let ffHideTimer=null,rpgTierBefore=0,rpgGradeShown=0;
 function clipText(t,n){t=String(t==null?'':t);return t.length>n?t.slice(0,n-1)+'…':t;}
+/* ---- Fast-forward autopilot (auto-plan each fast-forwarded year) ---- */
+// Best qualifying opening for the player right now: qualified, not already
+// pending/accepted, highest tier then salary, stable tiebreak. Mirrors the
+// 'favor' action's opening selection.
+function autoBestJobOpening(){
+  if(typeof VacancySystem!=='object'||!VacancySystem||typeof World==='undefined'||!World)return null;
+  if(typeof VacancySystem.playerPortalVacancies!=='function')return null;
+  const openings=VacancySystem.playerPortalVacancies(World,S)
+    .filter(entry=>entry&&entry.qualifies===true&&entry.applicationStatus!=='pending'&&entry.applicationStatus!=='accepted')
+    .sort((a,b)=>b.jobTier-a.jobTier||b.annualSalary-a.annualSalary||a.vacancyId.localeCompare(b.vacancyId));
+  return openings[0]||null;
+}
+// Ordered "best next actions" for a fast-forwarded year, closest in spirit
+// to recommendedActions(): survival/finance first, then health, mood,
+// relationships, and study as the universal filler.
+function autoPlanCandidates(){
+  const out=[];
+  const push=(type,id,extra)=>out.push({type,id,extra:extra||{}});
+  if(S.jailUntil<=S.age){
+    if(S.age>=16&&S.age<65&&!S.eduStage){
+      if(S.jobTier<1){
+        const opening=autoBestJobOpening();
+        if(opening)push('p','lookwork',{vacancyId:opening.vacancyId});
+      }else if(S.assets<-500){
+        push('p','overtime');
+      }
+    }
+    if(S.health<45)push('p','doctor');
+    if(S.happiness<32&&S.kids>0)push('p','family');
+    else if(S.happiness<32)push('p','walk');
+    if(S.married)push('p','tendspouse');
+    else if(S.status==='Attached')push('p','court');
+    if(S.mother&&S.mother.alive&&!S.mother.estranged&&(S.mother.mood==null||S.mother.mood<50))push('p','writemother');
+    if(S.father&&S.father.alive&&!S.father.estranged&&(S.father.mood==null||S.father.mood<50))push('p','writefather');
+    push('p','study');
+  }
+  return out;
+}
+// Greedily fills S.queue with the best available candidates within this
+// year's plan-hour budget, honoring every queueAdd() guard (definition,
+// once-per-year reservation, availability, hour fit) without its per-action
+// UI side effects. Player-queued items already in S.queue are kept; only
+// remaining hours are topped up.
+function autoQueueBestActions(){
+  if(!S||!S.alive||slipOpen)return;
+  const total=planHours();
+  if(total<1)return;
+  let used=S.queue.reduce((a,q)=>{const d=PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0);return a+(d||0);},0);
+  autoPlanCandidates().forEach(c=>{
+    if(used>=total)return;
+    const def=c.type==='p'?PUR_MAP[c.id]:DEC_MAP[c.id];
+    if(!def)return;
+    if(actionReservedThisYear(c.id))return;
+    if(typeof def.avail==='function'&&!def.avail(S))return;
+    if(whyNotFor(c.id))return;
+    const cost=def.cost||0;
+    if(cost>total-used)return;
+    if(c.id==='lookwork'){
+      // Re-verify the chosen opening is still open at queue time.
+      const v=(typeof VacancySystem==='object'&&VacancySystem&&typeof World!=='undefined'&&World)?VacancySystem.get(World,c.extra.vacancyId):null;
+      if(!v||v.status!=='open')return;
+      c.extra.vacancyId=v.id;
+    }
+    S.queue.push(Object.assign({id:c.id,type:c.type},c.extra));
+    used+=cost;
+  });
+}
 function fastForward(){
   if(!S||!S.alive||slipOpen)return;
   cancelReportReveal();
   const beats=[];
   quietMode=true;
   while(S.alive&&!slipOpen&&beats.length<15){
+    autoQueueBestActions();
     advance(true,true);
     if(!S.alive)break;
     const r=recentYearReports[0];
