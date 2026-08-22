@@ -946,3 +946,7 @@ body{background:var(--olive);color:var(--ink)}
 .svc-meta b{font:700 8.5px 'Archivo';letter-spacing:.12em;color:var(--blue);margin-right:6px;text-transform:uppercase}
 .svc-perks{display:flex;flex-wrap:wrap;gap:4px}
 .svc-perks i{font-style:normal;font:700 9px 'Archivo';letter-spacing:.04em;color:#1e5c38;border:1px solid rgba(46,107,70,.4);background:rgba(46,107,70,.07);padding:2px 6px;border-radius:2px;cursor:help}
+.sb-odds{margin-left:6px;font:700 8.5px 'Archivo';color:#9a6a1c;letter-spacing:.04em}
+.proj-strip{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 10px;padding-top:8px;border-top:1px dashed rgba(74,65,50,.3)}
+.proj-strip b{margin-left:auto;font:700 8.5px 'Archivo';letter-spacing:.08em;color:#75653f}
+.proj-none{font:10px 'Special Elite';color:#8a7a55;font-style:italic}

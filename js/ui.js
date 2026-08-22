@@ -1048,13 +1048,36 @@ function openPlan(){
 function closePlan(){ $('#planWrap').classList.add('hidden'); }
 function actionReservedThisYear(id){ return S.queue.some(q=>q.id===id)||(id==='practice'&&S.autoTrain); }
 function actionReservedNote(id){ return id==='practice'&&S.autoTrain?'reserved for auto-training':'already filed this year'; }
+function oddsHint(id){
+  try{
+    if(id==='flirt'&&typeof flirtSuccessChance==='function')return Math.round(flirtSuccessChance(S)*100)+'%';
+    if(id==='flirtsecret'&&typeof flirtSecretSuccessChance==='function')return Math.round(flirtSecretSuccessChance(S)*100)+'%';
+  }catch(e){}
+  return null;
+}
+function projectionHtml(rem){
+  if(!S.queue.length)return '';
+  const net={};let cash=0,hours=0;
+  S.queue.forEach(q=>{
+    const d=PUR_MAP[q.id]||DEC_MAP[q.id];if(!d)return;
+    hours+=d.cost||0;
+    const fx=typeof d.fx==='object'&&d.fx?d.fx:null;
+    if(fx)for(const k in fx){const v=fx[k];if(!v)continue;
+      if(k==='assets')cash+=v;else net[k]=(net[k]||0)+v;}
+  });
+  let chips='';
+  for(const k in net){if(!net[k])continue;chips+='<span class="mini-fx '+(net[k]>0?'plus':'minus')+'">'+(net[k]>0?'+':'−')+Math.abs(net[k])+' '+(STATKEYS[k]||k.toUpperCase())+'</span>';}
+  if(cash)chips='<span class="mini-fx '+(cash>0?'plus':'minus')+'">'+(cash>0?'+':'−')+'$'+Math.abs(cash).toLocaleString('en-US')+'</span>'+chips;
+  return (chips||hours)?'<div class="proj-strip"><span class="rec-lab">PROJECTED</span>'+(chips||'<span class="proj-none">no guaranteed effect</span>')+'<b>'+hours+'h filed · '+rem+'h free</b></div>':'';
+}
 function planActionButton(def,type,rem){
   const isP=type==='p', id=def.id, ok=def.avail(S), afford=rem>=(def.cost||0);
   const dup=actionReservedThisYear(id);
   const cant=!ok||!afford||dup;
   const label=isP?pursuitLabel(def):decisionLabel(def);
   const fxLine=(ok&&!dup)?fxPreviewHtmlSafe(def):'';
-  return '<button class="slipbtn'+(def.dark?' dark':'')+(cant?' cant':'')+(dup?' queued':'')+'" data-'+type+'="'+id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(def.icon?'<span class="sb-icon">'+def.icon+'</span> ':'')+fillLabel(label)+'</span><span class="sb-cost">'+(def.cost?def.cost+'h':'free')+'</span></div><div class="sb-note">'+planNoteText(def,type,id,ok,afford,dup)+'</div>'+fxLine+'</button>';
+  const odds=ok&&!dup?oddsHint(id):null;
+  return '<button class="slipbtn'+(def.dark?' dark':'')+(cant?' cant':'')+(dup?' queued':'')+'" data-'+type+'="'+id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(def.icon?'<span class="sb-icon">'+def.icon+'</span> ':'')+fillLabel(label)+(odds?'<span class="sb-odds">'+odds+'</span>':'')+'</span><span class="sb-cost">'+(def.cost?def.cost+'h':'free')+'</span></div><div class="sb-note">'+planNoteText(def,type,id,ok,afford,dup)+'</div>'+fxLine+'</button>';
 }
 function fxPreviewHtmlSafe(def){
   try{const h=typeof def.fx==='object'&&def.fx?fxPreviewChips(def.fx):'';return h?'<div class="sb-fx">'+h+'</div>':'';}catch(e){return '';}
@@ -1126,6 +1149,7 @@ function renderPlan(){
       '<button class="ptab'+(planTab==='desk'?' on':'')+'" data-plan-tab="desk">BUREAU DESK</button>'+
     '</div>'+
     body+
+    projectionHtml(rem)+
     '<div class="ps-foot sticky"><button class="btn" id="sealAdvance">Seal &amp; Advance the Year ▸</button></div>';
 }
 function pipsHTML(rem,h){let s='';for(let i=0;i<h;i++)s+='<i class="'+(i<rem?'on':'')+'"></i>';return s;}
@@ -1177,6 +1201,26 @@ function queueAdd(type,id,extra){
   if(used+d.cost>h){shake();return;}
   S.queue.push(Object.assign({id,type},extra||{})); snd('stamp'); renderPlan(); updateBar();
 }
+const CONTACT_TARGET_ROLES={flirt:null,flirtsecret:'affair',tendcontact:'friend',cutcontact:null};
+function openContactTargetPicker(id){
+  const roles=CONTACT_TARGET_ROLES[id],def=PUR_MAP[id];
+  const cands=S.contacts.filter(c=>{
+    if(roles==='affair')return c.role==='friend'||c.affair;
+    if(roles==='friend')return c.role==='friend';
+    return true;
+  });
+  if(!cands.length){queueAdd('p',id,{});return;}
+  const rows=cands.map(c=>'<button class="chipbtn" data-cid="'+c.cid+'"><b>'+sexSym(c.sex)+' '+abbrevName(c.name,18)+'</b><span>'+moodPips(c.mood)+' · '+charmLabel(c.charm!=null?c.charm:50)+'</span></button>').join('');
+  $('#skillSheet').innerHTML='<div class="ps-head"><span>'+fillLabel(pursuitLabel(def)).toUpperCase()+' — CHOOSE WHO</span></div>'+
+    '<div class="chips">'+rows+'</div>'+
+    '<div class="ps-foot"><button class="btn" id="skillCancel">Never Mind ▸</button></div>';
+  $('#skillSheet').onclick=e=>{
+    const b=e.target.closest('[data-cid]');
+    if(b){queueAdd('p',id,{cid:b.dataset.cid});$('#skillWrap').classList.add('hidden');return;}
+    if(e.target.id==='skillCancel')$('#skillWrap').classList.add('hidden');
+  };
+  $('#skillWrap').classList.remove('hidden');
+}
 function triggerAction(type,id,extra){
   if(actionReservedThisYear(id)){ shake(); return; }
   if(type==='p'){
@@ -1185,6 +1229,7 @@ function triggerAction(type,id,extra){
     if(id==='lookwork'){openJobPortal();return;}
     if(id==='gig'){openGigPicker();return;}
     if(id==='meetsomeone'){openMeetPicker();return;}
+    if(Object.prototype.hasOwnProperty.call(CONTACT_TARGET_ROLES,id)){openContactTargetPicker(id);return;}
     queueAdd('p',id,extra);
   } else {
     if(id==='learntrade'){openTrainingPicker();return;}
