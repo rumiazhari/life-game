@@ -1,8 +1,11 @@
 'use strict';
 
 (function(root){
-  const SCHEMA_VERSION=2;
+  const SCHEMA_VERSION=3;
   const HISTORY_LIMIT=64;
+  const WORKPLACE_INCIDENT_LIMIT=8;
+  const WORKPLACE_LEAVE_KINDS=['burnout','medical'];
+  const MAX_MISCONDUCT_STRIKES=3;
   const CONTRACT_STATUSES=['active','on_leave','terminated','resigned','retired'];
   const WORKER_TYPES=['player','npc'];
   const ACTIVE_STATUSES=new Set(['active','on_leave']);
@@ -79,6 +82,57 @@
     return Object.values(byId)
       .sort((a,b)=>(a.year-b.year)||a.vacancyId.localeCompare(b.vacancyId))
       .slice(-MAX_VACANCY_ASSIGNMENTS);
+  }
+
+  /* ---- workplace-life sub-object (4C-6) ---- */
+
+  const clampStress=value=>Math.round(clampUnit(value,0.25)*10000)/10000;
+
+  function normalizeWorkplaceLog(source,limit){
+    if(!Array.isArray(source)) return [];
+    const seen={};
+    const out=[];
+    source.forEach(raw=>{
+      if(!raw||typeof raw!=='object'||Array.isArray(raw)) return;
+      const year=boundedYear(raw.year,0);
+      const kind=raw.kind!=null?String(raw.kind).slice(0,32):'';
+      if(!kind) return;
+      const key=year+'::'+kind;
+      if(seen[key]) return;
+      seen[key]=true;
+      out.push({year,kind});
+    });
+    out.sort((a,b)=>(a.year-b.year)||a.kind.localeCompare(b.kind));
+    return out.slice(-limit);
+  }
+
+  function normalizeWorkplace(raw){
+    const source=raw&&typeof raw==='object'&&!Array.isArray(raw)?raw:{};
+    return {
+      stress:clampStress(source.stress),
+      highStressYears:clampInt(source.highStressYears,0,9999,0),
+      lastTickYear:boundedYearOrNull(source.lastTickYear),
+      lastIncidentYear:boundedYearOrNull(source.lastIncidentYear),
+      strikes:clampInt(source.strikes,0,MAX_MISCONDUCT_STRIKES,0),
+      incidents:normalizeWorkplaceLog(source.incidents,WORKPLACE_INCIDENT_LIMIT),
+      leaveKind:WORKPLACE_LEAVE_KINDS.includes(source.leaveKind)?source.leaveKind:null,
+      leaveStartedYear:boundedYearOrNull(source.leaveStartedYear)
+    };
+  }
+
+  function reconcileWorkplaceWithStatus(workplace,status,fallbackYear){
+    if(status==='on_leave'){
+      if(!workplace.leaveKind) workplace.leaveKind='medical';
+      if(workplace.leaveStartedYear==null) workplace.leaveStartedYear=fallbackYear;
+    } else {
+      workplace.leaveKind=null;
+      workplace.leaveStartedYear=null;
+    }
+    return workplace;
+  }
+
+  function buildWorkplace(spec,status,fallbackYear){
+    return reconcileWorkplaceWithStatus(normalizeWorkplace(spec&&spec.workplace),status,fallbackYear);
   }
 
   function recordVacancyAssignment(world,contractId,vacancy,year){
@@ -206,7 +260,8 @@
       lastReviewYear:boundedYearOrNull(spec.lastReviewYear),
       lastLifecycleYear:boundedYearOrNull(spec.lastLifecycleYear),
       lastPromotionAttemptYear:boundedYearOrNull(spec.lastPromotionAttemptYear),
-      vacancyAssignments:normalizeVacancyAssignments(spec.vacancyAssignments)
+      vacancyAssignments:normalizeVacancyAssignments(spec.vacancyAssignments),
+      workplace:buildWorkplace(spec,status,hiredYear)
     };
   }
 
@@ -451,7 +506,8 @@
         lastReviewYear:boundedYearOrNull(source.lastReviewYear),
         lastLifecycleYear:boundedYearOrNull(source.lastLifecycleYear),
         lastPromotionAttemptYear:boundedYearOrNull(source.lastPromotionAttemptYear),
-        vacancyAssignments:normalizeVacancyAssignments(source.vacancyAssignments)
+        vacancyAssignments:normalizeVacancyAssignments(source.vacancyAssignments),
+        workplace:buildWorkplace(source,status,hiredYear)
       };
     });
     world.employmentContracts=normalized;
@@ -554,6 +610,35 @@
             seenVacancyIds.add(a.vacancyId);
           }
         });
+      }
+      const wp=c.workplace;
+      if(!wp||typeof wp!=='object'||Array.isArray(wp)){
+        issues.push('employment contract '+key+' is missing a workplace object');
+      } else {
+        if(typeof wp.stress!=='number'||!Number.isFinite(wp.stress)||wp.stress<0||wp.stress>1) issues.push('employment contract '+key+' has invalid workplace.stress');
+        if(typeof wp.highStressYears!=='number'||!Number.isInteger(wp.highStressYears)||wp.highStressYears<0||wp.highStressYears>9999) issues.push('employment contract '+key+' has invalid workplace.highStressYears');
+        ['lastTickYear','lastIncidentYear','leaveStartedYear'].forEach(field=>{
+          const v=wp[field];
+          if(v!=null&&(typeof v!=='number'||!Number.isFinite(v)||!Number.isInteger(v)||v<MIN_YEAR||v>MAX_YEAR)) issues.push('employment contract '+key+' has invalid or out-of-bound workplace.'+field);
+        });
+        if(typeof wp.strikes!=='number'||!Number.isInteger(wp.strikes)||wp.strikes<0||wp.strikes>MAX_MISCONDUCT_STRIKES) issues.push('employment contract '+key+' has invalid workplace.strikes');
+        if(!Array.isArray(wp.incidents)) issues.push('employment contract '+key+' workplace.incidents must be an array');
+        else {
+          if(wp.incidents.length>WORKPLACE_INCIDENT_LIMIT) issues.push('employment contract '+key+' workplace.incidents exceeds limit of '+WORKPLACE_INCIDENT_LIMIT);
+          wp.incidents.forEach(entry=>{
+            if(!entry||typeof entry!=='object'||Array.isArray(entry)) issues.push('employment contract '+key+' has an invalid workplace.incidents entry');
+            else{
+              if(typeof entry.year!=='number'||!Number.isFinite(entry.year)||!Number.isInteger(entry.year)||entry.year<MIN_YEAR||entry.year>MAX_YEAR) issues.push('employment contract '+key+' has an invalid workplace.incidents entry year');
+              if(typeof entry.kind!=='string'||!entry.kind||entry.kind.length>32) issues.push('employment contract '+key+' has an invalid workplace.incidents entry kind');
+            }
+          });
+        }
+        if(c.status==='on_leave'){
+          if(!WORKPLACE_LEAVE_KINDS.includes(wp.leaveKind)) issues.push('employment contract '+key+' is on_leave without a valid workplace.leaveKind');
+          else if(wp.leaveStartedYear==null) issues.push('employment contract '+key+' is on_leave without workplace.leaveStartedYear');
+        } else if(wp.leaveKind!=null||wp.leaveStartedYear!=null){
+          issues.push('employment contract '+key+' records leave fields while not on_leave');
+        }
       }
       if(ACTIVE_STATUSES.has(c.status)){
         (activeByPerson[c.personId]=activeByPerson[c.personId]||[]).push(c.id);
@@ -1051,6 +1136,42 @@
     return end(world,contractId,'retired',opts.reason||'retirement',year,opts);
   }
 
+  /* ---- leave transitions (4C-6): active <-> on_leave ---- */
+
+  function beginLeave(world,contractId,kind,year,options){
+    ensure(world);
+    const opts=options||{};
+    const contract=get(world,contractId);
+    if(!contract) throw new Error('EmploymentSystem.beginLeave requires an existing contractId, got: '+contractId);
+    if(contract.status==='on_leave') return {changed:false,reason:'already_on_leave',contract};
+    if(!ACTIVE_STATUSES.has(contract.status)) return {changed:false,reason:'not_active',contract};
+    const y=boundedYear(year,boundedYear(world.year,0));
+    contract.status='on_leave';
+    contract.workplace=buildWorkplace({workplace:Object.assign({},contract.workplace,{leaveKind:WORKPLACE_LEAVE_KINDS.includes(kind)?kind:'medical',leaveStartedYear:y})},'on_leave',y);
+    contract.history.push(cloneEntry({type:'leave_started',year:y,leaveKind:contract.workplace.leaveKind}));
+    contract.history=trimHistory(contract.history);
+    // on_leave is still an ACTIVE status: employeeIds and payroll are
+    // unchanged (paid medical/burnout leave), only the status flips.
+    syncPersonLegacy(world,contract.personId,opts);
+    return {changed:true,reason:null,contract};
+  }
+
+  function endLeave(world,contractId,year,options){
+    ensure(world);
+    const opts=options||{};
+    const contract=get(world,contractId);
+    if(!contract) throw new Error('EmploymentSystem.endLeave requires an existing contractId, got: '+contractId);
+    if(contract.status!=='on_leave') return {changed:false,reason:'not_on_leave',contract};
+    const y=boundedYear(year,boundedYear(world.year,0));
+    const leaveKind=contract.workplace&&contract.workplace.leaveKind||null;
+    contract.status='active';
+    contract.workplace=buildWorkplace({workplace:contract.workplace},'active',y);
+    contract.history.push(cloneEntry({type:'leave_ended',year:y,leaveKind}));
+    contract.history=trimHistory(contract.history);
+    syncPersonLegacy(world,contract.personId,opts);
+    return {changed:true,reason:null,contract};
+  }
+
   function requestPromotion(world,contractId,options){
     ensure(world);
     const opts=options||{};
@@ -1107,8 +1228,13 @@
     const business=getBusiness(world,contract.businessId);
     const profitSignal=!business?0:(business.finances.profit>0?0.02:(business.finances.profit<0?-0.03:0));
     const statusSignal=!business?0:(business.status==='active'?0.02:(business.status==='struggling'?-0.05:-0.10));
+    // Workplace-life input (4C-6): chronic workplace stress slightly drags the
+    // satisfaction drift. This stays inside the single annual-review writer --
+    // WorkplaceSystem never writes performance/satisfaction directly.
+    const workplaceStress=contract.workplace&&Number.isFinite(Number(contract.workplace.stress))?clampUnit(contract.workplace.stress,0.25):0.25;
+    const satisfactionBias=-(workplaceStress-0.25)*0.05;
     contract.performance=Math.round(clamp(contract.performance+performanceNoise+profitSignal,0,1)*10000)/10000;
-    contract.satisfaction=Math.round(clamp(contract.satisfaction+satisfactionNoise+statusSignal,0,1)*10000)/10000;
+    contract.satisfaction=Math.round(clamp(contract.satisfaction+satisfactionNoise+statusSignal+satisfactionBias,0,1)*10000)/10000;
     contract.lastReviewYear=year;
     contract.lastLifecycleYear=year;
     contract.history.push(cloneEntry({type:'annual_review',year,performance:contract.performance,satisfaction:contract.satisfaction}));
@@ -1214,6 +1340,12 @@
     considerAutomaticPromotion,
     tickWorld,
     recordVacancyAssignment,
-    contractHasVacancyAssignment
+    contractHasVacancyAssignment,
+    beginLeave,
+    endLeave,
+    normalizeWorkplace,
+    WORKPLACE_LEAVE_KINDS,
+    MAX_MISCONDUCT_STRIKES,
+    WORKPLACE_INCIDENT_LIMIT
   };
 })(typeof globalThis!=='undefined'?globalThis:this);

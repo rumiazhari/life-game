@@ -2792,6 +2792,31 @@ function runEmploymentLifecycleYearTick(){
   if(typeof EmploymentSystem!=='object'||!EmploymentSystem||typeof EmploymentSystem.tickWorld!=='function') return null;
   return EmploymentSystem.tickWorld(World,{year:World.year,subject:S});
 }
+// Workplace-life annual tick (4C-6) runs after the employment lifecycle tick
+// (so reviews/retirements/layoffs have already applied this year) and before
+// the vacancy tick. Emits year-log events for the player's own workplace
+// changes (incidents, leave transitions, dismissal).
+function runWorkplaceYearTick(){
+  if(typeof WorkplaceSystem!=='object'||!WorkplaceSystem||typeof WorkplaceSystem.tickWorld!=='function') return null;
+  const result=WorkplaceSystem.tickWorld(World,{year:World.year,subject:S});
+  if(!result||!result.applied||typeof logEv!=='function') return result;
+  const contract=S&&S.employmentContractId?EmploymentSystem.get(World,S.employmentContractId):null;
+  const wp=contract&&contract.workplace?contract.workplace:null;
+  const place=contract?(typeof BusinessSystem==='object'&&BusinessSystem&&BusinessSystem.get(World,contract.businessId)||{}).name:'the workplace';
+  if(wp&&wp.lastIncidentYear===World.year){
+    const last=wp.incidents&&wp.incidents.length?wp.incidents[wp.incidents.length-1].kind:'incident';
+    logEv('WORKPLACE INCIDENT. An accident at '+place+' ('+last.replace(/_/g,' ')+') was recorded in the file.',{health:-2,happiness:-3},'crisis','WORKPLACE FILE · YEAR '+S.age);
+  }
+  if(contract&&contract.status==='on_leave'&&wp&&wp.leaveStartedYear===World.year){
+    logEv(wp.leaveKind==='burnout'
+      ?'MEDICAL LEAVE. The strain of work at '+place+' broke something. The subject was filed as on leave — the wage continues, for now.'
+      :'MEDICAL LEAVE. Injuries from '+place+' forced the subject onto leave. The wage continues, for now.',{happiness:-4},'ruling','WORKPLACE FILE · YEAR '+S.age);
+  }
+  if(result.dismissals>0&&contract&&contract.status==='terminated'&&contract.terminationReason==='misconduct'&&contract.endedYear===World.year){
+    logEv('DISMISSED FOR MISCONDUCT. The third warning was served at '+place+', and the subject was let go.',{happiness:-8},'crisis','WORKPLACE FILE · YEAR '+S.age);
+  }
+  return result;
+}
 function runVacancyYearTick(){
   if(typeof VacancySystem!=='object'||!VacancySystem||typeof VacancySystem.tickWorld!=='function') return null;
   const result=VacancySystem.tickWorld(World,{year:World.year});
@@ -2887,6 +2912,7 @@ function advanceYear(suppressBurst,quiet){
   runEmploymentReconciliation();
   runBusinessYearTick();
   runEmploymentLifecycleYearTick();
+  runWorkplaceYearTick();
   runVacancyYearTick();
   checkCareerProgress();
   if(typeof RPG==='object'&&RPG&&S.alive&&typeof World!=='undefined'&&World){

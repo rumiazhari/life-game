@@ -16,10 +16,10 @@ function registerNpc(context,id,extra){
   expose(context,`World.npcs=World.npcs||{};World.npcs['${id}']=Object.assign({id:'${id}',alive:true,birthYear:World.year-30,locationId:World.activeSettlementId,education:{level:'none'},employment:{}},${JSON.stringify(extra||{})});`);
 }
 
-test('employment schema is version 2 after migration',()=>{
+test('employment schema is version 3 after migration',()=>{
   const context=freshWorld();
   const result=expose(context,`(function(){ EmploymentSystem.migrate(World); return World.employmentSchemaVersion; })()`);
-  assert.equal(result,2);
+  assert.equal(result,3);
 });
 
 test('existing contracts default origin to legacy on migration',()=>{
