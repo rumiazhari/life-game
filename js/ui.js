@@ -169,6 +169,9 @@ function autoBestJobOpening(){
     .sort((a,b)=>b.jobTier-a.jobTier||b.annualSalary-a.annualSalary||a.vacancyId.localeCompare(b.vacancyId));
   return openings[0]||null;
 }
+function gigCatalogEntry(id){
+  return (typeof GIGS!=='undefined'&&Array.isArray(GIGS))?GIGS.find(g=>g.id===id)||null:null;
+}
 function autoIncomeEstimate(){
   let salary=0;
   try{
@@ -226,47 +229,94 @@ function autoApplyLifestyleChoices(){
     }
   }
 }
-// Ordered "best next actions" for a fast-forwarded year: survival and money
-// first, then health, mood, relationships (including marriage, children,
-// affairs, breakups), advancement, desperation measures, and study as the
-// universal filler.
+// Ordered "best next actions" for a fast-forwarded year, following the
+// survival ladder: charity floor → health → mood → relationships →
+// work/informal economy → underworld (only when desperate) → advancement,
+// with study as the universal filler.
 function autoPlanCandidates(){
   const out=[];
   const push=(type,id,extra)=>out.push({type,id,extra:extra||{}});
   if(S.jailUntil<=S.age){
-    const partnerContact=(typeof activePartnerContact==='function')?activePartnerContact():null;
-    const hasPartner=S.married||!!partnerContact;
-    // Work and money.
-    if(S.age>=16&&S.age<65&&!S.eduStage){
+    const hasWorld=typeof World!=='undefined'&&World;
+    const D=(typeof SurvivalSystem==='object'&&SurvivalSystem&&hasWorld)?SurvivalSystem.desperationOf(World,S):0;
+    const starving=(S.lifestyle&&S.lifestyle.food==='meager')||S.assets<50;
+    // --- Charity floor ---
+    if(starving)push('p','soupkitchen');
+    // --- Health triage: care claims hours before the street does ---
+    const knownConditions=(typeof activeConditions==='function')?activeConditions().filter(c=>c.known):[];
+    const urgentCondition=knownConditions.some(c=>c.severity>=2);
+    if(S.health<45)push('p','doctor');
+    else{
+      const lastCheckup=(S.medical&&Number.isFinite(Number(S.medical.lastCheckupAge)))?Number(S.medical.lastCheckupAge):-99;
+      const canAffordCare=S.assets>250||(D>=.55&&S.health<60); // parish dispensaries screen the visibly struggling
+      if(S.age-lastCheckup>=4&&canAffordCare)push('p','doctor');
+    }
+    if(knownConditions.length)push('d','treatment');
+    // Escaping a dead relationship is distress response, not lifestyle --
+    // and being expensive (2h), it must be considered before cheap fillers.
+    if(S.married&&(S.partnerMood!=null&&S.partnerMood<25)&&S.happiness<45)push('d','divorce');
+    if(!S.married&&S.status==='Attached'&&(S.partnerMood!=null&&S.partnerMood<20)&&S.happiness<40)push('d','breakup');
+    // --- Work and money ---
+    const canWork=S.age>=16&&S.age<65&&!S.eduStage;
+    if(canWork){
       if(S.jobTier<1){
         const opening=autoBestJobOpening();
         if(opening)push('p','lookwork',{vacancyId:opening.vacancyId});
-        else if(S.assets<-1200)push('d','crime');
-      }else{
-        if(S.assets<-500)push('p','overtime');
-        else if(S.happiness<35&&S.health>=45&&S.age<60){
-          // A better opening elsewhere is worth an application.
-          const contract=(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof World!=='undefined'&&World&&typeof EmploymentSystem.activeForPerson==='function')?EmploymentSystem.activeForPerson(World,'subject')[0]:null;
-          const currentSalary=contract?contract.annualSalary:(INC[S.jobTier]||0);
-          const opening=autoBestJobOpening();
-          if(opening&&opening.annualSalary>=currentSalary*1.25)push('p','lookwork',{vacancyId:opening.vacancyId});
-        }
+      }else if(S.assets<-500){
+        push('p','overtime');
+      }else if(S.happiness<35&&S.health>=45&&S.age<60){
+        const contract=(typeof EmploymentSystem==='object'&&EmploymentSystem&&hasWorld&&typeof EmploymentSystem.activeForPerson==='function')?EmploymentSystem.activeForPerson(World,'subject')[0]:null;
+        const currentSalary=contract?contract.annualSalary:(INC[S.jobTier]||0);
+        const opening=autoBestJobOpening();
+        if(opening&&opening.annualSalary>=currentSalary*1.25)push('p','lookwork',{vacancyId:opening.vacancyId});
       }
     }
-    // Health.
-    if(S.health<45)push('p','doctor');
-    if(typeof activeConditions==='function'&&activeConditions().some(c=>c.known))push('d','treatment');
-    // Mood.
+    // --- Street economy and the underworld ---
+    if(canWork){
+      const streetLive=(typeof SurvivalSystem==='object'&&SurvivalSystem&&hasWorld);
+      const sid=streetLive?(S.location&&S.location.settlementId)||World.activeSettlementId:null;
+      let listings=streetLive?SurvivalSystem.openingsFor(World,sid,{status:'open',kind:'gig'}).filter(o=>!S.queue.some(q=>q.openingId===o.id)):[];
+      if(listings.length){
+        const best=SurvivalSystem.bestOpeningFor(World,S,{settlementId:sid,kinds:['gig','fixerwork'],year:hasWorld?World.year:null});
+        if(best&&best.kind==='fixerwork'){push('d','fixerjob',{openingId:best.id});}
+        else{
+          // Work the street, but the body sets the pace: at most two
+          // listings when healthy and jobless, one when strained or employed,
+          // and hazardous work is refused outright by the fragile.
+          const fragile=S.health<60||urgentCondition;
+          const maxGigs=Math.min((S.jobTier<1&&D>=.5)?2:1,fragile?1:2);
+          const gigs=listings
+            .map(o=>{const g=gigCatalogEntry(o.gigId);return o&&g?{o,g}:null;})
+            .filter(x=>x&&x.g.req(S))
+            .filter(x=>!(fragile&&(x.g.dangerP||0)>=.08))
+            .sort((a,b)=>((b.g.pay[1]+b.g.pay[0])-(a.g.pay[1]+a.g.pay[0])));
+          gigs.slice(0,maxGigs).forEach(x=>push('p','gig',{gig:x.o.gigId,openingId:x.o.id}));
+        }
+        if(!S.holdMember&&D>=.6)push('d','seekfixer');
+      }else{
+        // No market this year. Opportunistic odd cash work is a leftover-hours
+        // pursuit (queued near the bottom), not survival-critical when the
+        // household already has wages.
+        if(!S.holdMember&&D>=.6)push('d','seekfixer');
+        // Desperate measures come before study ever does.
+        if(canWork&&S.jobTier<1&&(starving&&S.assets<0||S.assets<-800))push('d','crime');
+      }
+    }
+    // --- Opportunistic gig (leftover hours; established informal networks) ---
+    if(canWork&&!(typeof SurvivalSystem==='object'&&SurvivalSystem&&hasWorld&&SurvivalSystem.openingsFor(World,(S.location&&S.location.settlementId)||World.activeSettlementId,{status:'open',kind:'gig'}).length)){
+      const gigs=(typeof GIGS!=='undefined'?GIGS.filter(g=>g.req(S)).sort((a,b)=>((b.pay[1]+b.pay[0])-(a.pay[1]+a.pay[0]))):[]);
+      if(gigs[0])push('p','gig',{gig:gigs[0].id});
+    }
+    // --- Mood, relationships, letters (quality-of-life hours) ---
     if(S.happiness<32&&S.kids>0)push('p','family');
     else if(S.happiness<32)push('p','walk');
-    // Marriage and partnerships.
+    // --- Marriage and partnerships ---
+    const partnerContact=(typeof activePartnerContact==='function')?activePartnerContact():null;
+    const hasPartner=S.married||!!partnerContact;
     if(S.married)push('p','tendspouse');
     else if(S.status==='Attached')push('p','court');
     if(!S.married&&S.status==='Attached'&&partnerContact&&partnerContact.mood>=65&&S.relations>=50&&S.age>=20)push('d','propose');
-    if(S.married&&(S.partnerMood!=null&&S.partnerMood<25)&&S.happiness<45)push('d','divorce');
-    if(!S.married&&S.status==='Attached'&&(S.partnerMood!=null&&S.partnerMood<20)&&S.happiness<40)push('d','breakup');
     if(S.married&&S.kids<2&&S.age>=22&&S.age<=38&&S.assets>1500&&S.happiness>=40)push('d','trychild');
-    // Meeting people and affairs.
     if(!hasPartner&&S.age>=18&&S.contacts.length<MAX_CONTACTS){
       const venue=(typeof MEETING_VENUES!=='undefined'?MEETING_VENUES.find(v=>v.req(S)):null);
       if(venue)push('p','meetsomeone',{venue:venue.id});
@@ -279,10 +329,10 @@ function autoPlanCandidates(){
       const friend=S.contacts.filter(c=>c.role==='friend').sort((a,b)=>(b.mood||0)-(a.mood||0))[0];
       if(friend)push('p','flirtsecret',{cid:friend.cid});
     }
-    // Family letters.
+    // --- Family letters ---
     if(S.mother&&S.mother.alive&&!S.mother.estranged&&(S.mother.mood==null||S.mother.mood<50))push('p','writemother');
     if(S.father&&S.father.alive&&!S.father.estranged&&(S.father.mood==null||S.father.mood<50))push('p','writefather');
-    // Advancement and paperwork.
+    // --- Advancement and paperwork ---
     if(S.jobTier>=1&&S.jobTier<5&&S.age<60&&S.happiness>=40&&(S.careerYears==null||S.careerYears>=2))push('d','presspromo');
     if(S.jobTier>0&&S.age>=62&&S.age<=64&&(S.health<50||S.assets>8000))push('d','earlyret');
     if(S.bureauFavor>0&&(S.scrutiny>0||S.record))push('d','usefavor');
@@ -416,7 +466,10 @@ const WHY_NOT={
   payoffdebt:s=>!(s.liabilities||[]).length?'no debts on file':null,
   estrangemother:s=>!(s.mother&&s.mother.alive&&!s.mother.estranged)?'mother not in the picture':null,
   estrangefather:s=>!(s.father&&s.father.alive&&!s.father.estranged)?'father not in the picture':null,
-  treatment:s=>activeConditions().filter(c=>c.known).length<1?'nothing diagnosed':null
+  treatment:s=>activeConditions().filter(c=>c.known).length<1?'nothing diagnosed':null,
+  soupkitchen:s=>(s.lifestyle&&s.lifestyle.food==='meager')||s.assets<50?null:'not hungry enough',
+  seekfixer:s=>s.holdMember?'already in the fold':(s.jailUntil>s.age?'in custody':(s.age<16?'from age 16':null)),
+  fixerjob:s=>!s.holdMember?'not in the fold':(s.jailUntil>s.age?'in custody':null)
 };
 function whyNotFor(id){
   const f=WHY_NOT[id];
@@ -1358,8 +1411,8 @@ function labelOf(q){if(q.id==='practice'&&q.skill&&SKILLS[q.skill])return 'Pract
   if(q.id==='cutcontact'&&q.cid){const c=S.contacts.find(x=>x.cid===q.cid); if(c) return 'Cut off: '+c.name;}
   if(q.id==='meetsomeone'&&q.venue){const v=MEETING_VENUES.find(x=>x.id===q.venue); if(v) return 'Meet Someone: '+v.name;}
   const d=PUR_MAP[q.id]||DEC_MAP[q.id];return (PUR_MAP[q.id]?pursuitLabel(d):decisionLabel(d));}
-function pursuitLabel(p){return {study:'Hit the books',lookwork:'Look for work',overtime:'Work overtime',court:'Court {partner}',tendspouse:'Tend the marriage',family:'Visit the children',writemother:'Write to {mother}',writefather:'Write to {father}',doctor:'See the doctor',walk:'Walk it off',bottle:'The bottle',track:'The racetrack',backroom2:'The back room',rest:'Do nothing',favor:'Call in a favor',practice:'Practice a skill',tendmember:'Look after a member',gig:'Off the books',meetsomeone:'Meet someone new',flirt:'Flirt',flirtsecret:'See them, secretly',tendcontact:'Spend time together',covertracks:'Cover your tracks'}[p.id]||p.id;}
-function decisionLabel(d){if(d.id==='crime'){return ['Lift a wallet','Run the numbers','Fence the goods','The big score','Lie low'][S.crime]||'Crime';}return {propose:'Propose to {partner}',trychild:'Try for a child',presspromo:'Press for promotion',learntrade:'Take vocational training',nightshift:'Take night shift',quitjob:'Quit the job',relocate:'Move to the coast',leave:'Take a year off',leaveschool:'Leave school now',loan:'Take the loan',gamblelic:'Open a gambling hall',expunge:'Expunge record',treatment:'File treatment',earlyret:'Retire early',namechange:'Change name',breakup:'End it with {partner}',divorce:'File for divorce',estrangemother:'Go no-contact with {mother}',estrangefather:'Go no-contact with {father}',recruit:'Bring someone into the fold',bankloan:'Take out a bank loan',storecredit:'Buy on store credit',payoffdebt:'Pay off a debt early',endaffair:'End it, quietly',cutcontact:'Cut them off'}[d.id]||d.id;}
+function pursuitLabel(p){return {study:'Hit the books',lookwork:'Look for work',overtime:'Work overtime',court:'Court {partner}',tendspouse:'Tend the marriage',family:'Visit the children',writemother:'Write to {mother}',writefather:'Write to {father}',doctor:'See the doctor',walk:'Walk it off',bottle:'The bottle',track:'The racetrack',backroom2:'The back room',rest:'Do nothing',favor:'Call in a favor',practice:'Practice a skill',tendmember:'Look after a member',gig:'Off the books',soupkitchen:'The mission line',meetsomeone:'Meet someone new',flirt:'Flirt',flirtsecret:'See them, secretly',tendcontact:'Spend time together',covertracks:'Cover your tracks'}[p.id]||p.id;}
+function decisionLabel(d){if(d.id==='crime'){return ['Lift a wallet','Run the numbers','Fence the goods','The big score','Lie low'][S.crime]||'Crime';}return {propose:'Propose to {partner}',trychild:'Try for a child',presspromo:'Press for promotion',learntrade:'Take vocational training',nightshift:'Take night shift',quitjob:'Quit the job',relocate:'Move to the coast',leave:'Take a year off',leaveschool:'Leave school now',loan:'Take the loan',gamblelic:'Open a gambling hall',expunge:'Expunge record',treatment:'File treatment',earlyret:'Retire early',namechange:'Change name',breakup:'End it with {partner}',divorce:'File for divorce',estrangemother:'Go no-contact with {mother}',estrangefather:'Go no-contact with {father}',recruit:'Bring someone into the fold',bankloan:'Take out a bank loan',storecredit:'Buy on store credit',payoffdebt:'Pay off a debt early',endaffair:'End it, quietly',cutcontact:'Cut them off',seekfixer:'Meet a fixer',fixerjob:'Work for the fixer'}[d.id]||d.id;}
 function fillLabel(t){return t.replace(/\{partner\}/g,S.partner||S.__partnerNameSnapshot||'—').replace(/\{other\}/g,S.__affairName||'—').replace(/\{mother\}/g,S.mother?S.mother.name:'—').replace(/\{father\}/g,S.father?S.father.name:'—');}
 let pressTimer=null, longPressActive=false, pressedBtn=null;
 function startPress(btn){ pressedBtn=btn; longPressActive=false; clearTimeout(pressTimer); pressTimer=setTimeout(()=>{ longPressActive=true; btn.classList.add('show-note'); },380); }
@@ -2315,9 +2368,13 @@ function applyAmbient(fx,scale){ if(!fx) return; for(const k in fx){ const v=fx[
   if(k==='assets'){ S.assets+=sv; } else { const cap=(k==='health'&&S.healthCap!=null)?S.healthCap:(k==='looks'&&S.looksCap!=null)?S.looksCap:100; if(k==='health'&&typeof medicalApplyHealthDelta==='function') medicalApplyHealthDelta(S,sv,'household'); else S[k]=clamp(S[k]+sv,0,cap); } } }
 function runBudget(WAR){
   const house=currentHousing(), food=currentFood();
+  // A mission meal genuinely feeds: on soup-kitchen years the scraps-and-
+  // rationing penalty does not touch the body. The Bureau calls it not starving.
+  const fedAtMission=S.soupKitchenYear===currentYear()&&food.id==='meager';
   const atHome=S.age<16||S.livingAtHome;
   const childScale=atHome?(GUARD_SCALE[guardTier()]||0.4):1;
-  applyAmbient(house.fx,childScale); applyAmbient(food.fx,childScale);
+  applyAmbient(house.fx,childScale);
+  applyAmbient(fedAtMission?{}:food.fx,childScale);
   if(S.kids>0){ applyAmbient(currentChildcare().fx,childScale); }
   if(atHome) return;
   const household=typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.findByMember==='function'?HouseholdSystem.findByMember(World,S.npcId):null;
@@ -2394,11 +2451,17 @@ function checkMortality(){
   let dead=false, cause='';
   if(S.jailUntil<=S.age){
     const house=currentHousing(), food=currentFood();
+    // Desperation Index scales poverty mortality: the deeper the spiral,
+    // the more lethal each year on the bottom rung becomes. A mission meal
+    // suppresses the hunger bump for the year it was eaten.
+    const desperation=(typeof SurvivalSystem==='object'&&SurvivalSystem&&typeof World!=='undefined'&&World)?SurvivalSystem.desperationOf(World,S):0;
+    const fedAtMission=S.soupKitchenYear===currentYear();
     let povRisk=0;
     if(house.id==='none') povRisk+=0.012;
-    if(food.id==='meager') povRisk+=0.003;
-    if(house.id==='none'&&food.id==='meager') povRisk+=0.01;
+    if(food.id==='meager'&&!fedAtMission) povRisk+=0.003;
+    if(house.id==='none'&&food.id==='meager'&&!fedAtMission) povRisk+=0.01;
     if(S.age>=16&&Math.min(S.housingSecurity||50,S.financialSecurity||50)<25) povRisk+=0.006;
+    povRisk*=(0.4+1.2*desperation);
     if(S.age<16||S.livingAtHome) povRisk*=1.6*(GUARD_MORT[guardTier()]||1);
     else if(S.age>65) povRisk*=1.6;
     if(povRisk>0&&chance(povRisk)){ dead=true;
@@ -3026,6 +3089,13 @@ function runVacancyYearTick(){
   }
   return result;
 }
+// Survival economy annual tick (street listings + fixers) — runs right after
+// the vacancy tick so this year's informal work is visible to the player's
+// plan and to the fast-forward autopilot.
+function runSurvivalYearTick(){
+  if(typeof SurvivalSystem!=='object'||!SurvivalSystem||typeof SurvivalSystem.tickWorld!=='function') return null;
+  return SurvivalSystem.tickWorld(World,{year:World.year});
+}
 function resolvePendingVacancies(){
   if(typeof VacancySystem!=='object'||!VacancySystem||typeof VacancySystem.resolvePending!=='function') return null;
   return VacancySystem.resolvePending(World,{year:World.year,subject:S});
@@ -3112,6 +3182,7 @@ function advanceYear(suppressBurst,quiet){
   runEmploymentLifecycleYearTick();
   runWorkplaceYearTick();
   runVacancyYearTick();
+  runSurvivalYearTick();
   checkCareerProgress();
   if(typeof RPG==='object'&&RPG&&S.alive&&typeof World!=='undefined'&&World){
     if(S.jobTier>rpgTierBefore)RPG.addMerit(World,'subject',(S.jobTier-rpgTierBefore)*120,'promotion',World.year);

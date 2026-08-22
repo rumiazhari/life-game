@@ -84,7 +84,7 @@ test('auto-plan keeps player-queued items and fills remaining hours by priority'
   })()`));
   assert.equal(result.first,'doctor','player-queued action stays first');
   assert.ok(result.ids.includes('overtime'),'overtime queued for negative assets while employed');
-  assert.ok(result.ids.includes('walk'),'walk queued for low mood');
+  assert.ok(result.ids.includes('soupkitchen'),'mission meal queued when broke');
   assert.ok(!result.ids.includes('family'),'family not queued without children');
   assert.equal(result.used,result.budget,'the yearly hour budget is filled to the brim');
 });
@@ -148,7 +148,7 @@ test('autonomy upgrades housing and food only when income clearly carries it',()
 
 test('autonomy proposes to a happy partner and never starts affairs while merely attached',()=>{
   const context=uiContext('auto-propose');
-  configureAdult(context,"S.jobTier=2; S.jobName='Clerk'; S.status='Attached'; S.partner='Pat'; S.relations=60; S.happiness=60; S.contacts=[{cid:'c1',role:'partner',mood:85,name:'Pat',sex:'F'}]; S.mother=null; S.father=null;");
+  configureAdult(context,"S.jobTier=2; S.jobName='Clerk'; S.status='Attached'; S.partner='Pat'; S.relations=60; S.happiness=60; S.health=80; if(S.lifestyle)S.lifestyle.food='basic'; S.contacts=[{cid:'c1',role:'partner',mood:85,name:'Pat',sex:'F'}]; S.mother=null; S.father=null;");
   const result=JSON.parse(expose(context,`(function(){
     autoQueueBestActions();
     return JSON.stringify({ids:S.queue.map(q=>q.id),used:S.queue.reduce((a,q)=>a+(PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0)),0),budget:planHours()});
@@ -179,14 +179,18 @@ test('fast-forward ends with a report popup listing every action taken',()=>{
   expose(context,'maybeSlip=function(){};');
   expose(context,`(function(){
     fastForward();
-    // An event window may have interrupted the run (the loop stops while any
-    // window is open and the report waits behind it). Close it and surface
-    // the deferred report exactly as resolving a notice would.
-    $('#slipWrap').classList.add('hidden');
-    slipOpen=false;
-    document.body.classList.remove('slip-open');
-    pendingSlips=[];
-    if(S.__pendingFFReport){const rpt=S.__pendingFFReport;S.__pendingFFReport=null;openNotice(rpt);}
+    const card=document.querySelector('#slipCard');
+    // If an event window interrupted the run (the loop stops while any
+    // window is open), close it and surface the deferred report exactly as
+    // resolving a notice would. If the report is already on screen -- or any
+    // window at all -- leave it alone.
+    if(!(slipOpen&&card.innerHTML.includes('THE YEARS ON FILE'))){
+      $('#slipWrap').classList.add('hidden');
+      slipOpen=false;
+      document.body.classList.remove('slip-open');
+      pendingSlips=[];
+      if(S.__pendingFFReport){const rpt=S.__pendingFFReport;S.__pendingFFReport=null;openNotice(rpt);}
+    }
     return null;
   })()`);
   const result=JSON.parse(expose(context,`(function(){

@@ -101,6 +101,7 @@
     if(root.EmploymentSystem&&typeof root.EmploymentSystem.migrate==='function') root.EmploymentSystem.migrate(world,{subject:opts.subject});
     if(root.VacancySystem&&typeof root.VacancySystem.migrate==='function') root.VacancySystem.migrate(world);
     if(root.WorkplaceSystem&&typeof root.WorkplaceSystem.migrate==='function') root.WorkplaceSystem.migrate(world);
+    if(root.SurvivalSystem&&typeof root.SurvivalSystem.migrate==='function') root.SurvivalSystem.migrate(world);
     return world;
   }
   function initialize(world){ return migrate(world).settlements; }
