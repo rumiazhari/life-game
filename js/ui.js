@@ -2275,7 +2275,15 @@ function vtext(e){
   if(!avail.length){S.usedV[e.id]=[];avail=e.v.map((_,i)=>i);}
   const i=pick(avail); S.usedV[e.id].push(i); return fill(e.v[i]);
 }
-function pushFollow(f){ if(f) followups.push({at:S.age+f.in,t:fill(f.t),fx:f.fx,side:f.side}); }
+function pushFollow(f){ if(!f) return;
+  const delta=Number(f.in), absolute=Number(f.at);
+  // Callers use two shapes: EVENTS pass a relative delay (`in:` years) while
+  // DECISIONS/CRISES pass an absolute subject age (`at:`). Honor both -- a
+  // bare f.at must never be re-based into S.age+f.in (NaN), which made the
+  // followup unfireable and leaked it in the queue forever.
+  const at=Number.isFinite(delta)?S.age+delta:(Number.isFinite(absolute)?absolute:S.age);
+  followups.push({at,t:fill(f.t),fx:f.fx,side:f.side});
+}
 function runFollowups(){ followups=followups.filter(f=>{ if(f.at<=S.age){ if(f.side)f.side(S); logEv(f.t,f.fx); return false;} return true; }); }
 
 /* ================= AFFAIRS / DISCOVERY ================= */
@@ -3508,6 +3516,17 @@ function handleDeath(){
   evaluateYearStreak(true);
   const g=grade(), ir=intentResult(), legacy=computeParentingLegacy();
   if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.markSubjectDeath==='function') NpcSystem.markSubjectDeath(World,S,Lineage);
+  // Death closes the subject's employment file. Without this, an active
+  // (or on_leave) contract survives into the successor's first year --
+  // contracts key on the literal personId 'subject', which the heir reuses
+  // -- and runEconomy() would then pay the predecessor's wage one final
+  // time to someone who never held the job.
+  if(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof World!=='undefined'&&World&&typeof EmploymentSystem.activeForPerson==='function'&&typeof EmploymentSystem.end==='function'){
+    EmploymentSystem.activeForPerson(World,'subject').slice().forEach(contract=>{
+      EmploymentSystem.end(World,contract.id,'terminated','subject_deceased',World.year,{subject:S});
+    });
+    if(typeof EmploymentSystem.syncAllBusinessEmployees==='function') EmploymentSystem.syncAllBusinessEmployees(World);
+  }
   Lineage.pastSubjects.push({name:S.first+' '+S.last,dob:S.dob,deathYear:currentYear(),age:S.age,cause:S.cause,grade:g.g,intentName:ir.lab,intentStars:ir.stars,
     parentWarmth:legacy.warmth,parentStability:legacy.stability,parentYears:legacy.years,
     education:S.education?{completed:Object.assign({},S.education.completed||{}),majorId:S.education.majorId||null,certificates:Object.keys(S.education.certificates||{})}:null});

@@ -4,7 +4,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const {createWorldContext,loadGameFiles,expose}=require('./helpers/vm-loader');
 
-function uiContext(seed){
+function uiContext(seed,extraFiles){
   const context=createWorldContext();
   const elements={};
   const makeElement=()=>({
@@ -26,7 +26,7 @@ function uiContext(seed){
   context.clearTimeout=()=>{};
   context.setInterval=()=>0;
   context.clearInterval=()=>{};
-  loadGameFiles(context,['js/systems/world-gameplay.js','js/medical.js','js/ui.js']);
+  loadGameFiles(context,['js/systems/world-gameplay.js','js/medical.js','js/ui.js'].concat(extraFiles||[]));
   context.activeConditions=()=>[];
   expose(context,`Random.setSeed(${JSON.stringify(seed)}); newWorld(); newLineage(); newHold(); newSubject();`);
   return context;
@@ -200,4 +200,37 @@ test('coach marks advance through plan, seal, and report steps',()=>{
   assert.equal(result.step2,true);
   assert.equal(result.step3,true);
   assert.equal(result.hiddenAfter,false);
+});
+
+test('followups fire for both the relative (in:) and absolute (at:) shapes',()=>{
+  const context=uiContext('followups');
+  configureAdult(context);
+  expose(context,`window.__hits={absolute:0,delta:0};
+    pushFollow({at:S.age+1,t:'absolute',side:function(){window.__hits.absolute++;}});
+    pushFollow({in:2,t:'delta',side:function(){window.__hits.delta++;}});`);
+  for(let i=0;i<4;i++){
+    expose(context,'slipOpen=false;');
+    expose(context,'advance(true,true)');
+  }
+  const result=JSON.parse(expose(context,"JSON.stringify({hits:window.__hits,stale:followups.filter(function(f){return !(f.at>S.age);}).length})"));
+  assert.equal(result.hits.absolute,1,'an absolute-age followup must fire at its scheduled age');
+  assert.equal(result.hits.delta,1,'a relative-delay followup must fire after its delay');
+  assert.equal(result.stale,0,'no due-but-unfired followup may linger in the queue');
+});
+
+test('death closes the subject employment file so the heir is not paid a ghost salary',()=>{
+  const context=uiContext('ghost-pay',['js/education.js']);
+  configureAdult(context);
+  expose(context,"S.jobTier=1; S.jobName='Clerk'; EmploymentSystem.reconcilePlayer(World,S);");
+  const contractId=expose(context,"EmploymentSystem.activeForPerson(World,'subject')[0].id");
+  expose(context,"addKin({first:'Ada',last:S.last,sex:'F',dob:currentYear()-20,relation:'child',bond:70});");
+  expose(context,"S.alive=false; S.cause='heart failure'; handleDeath();");
+  expose(context,"(function(){var m=Lineage.members.find(function(x){return x.first==='Ada';}); promoteToLeader(m);})()");
+  expose(context,'slipOpen=false;');
+  expose(context,'advance(true,true)');
+  assert.equal(expose(context,"S.__worldWagePaid||0"),0,
+    'an unemployed heir must not receive the predecessor\'s wage in their first year');
+  const ended=JSON.parse(expose(context,"(function(){var c=EmploymentSystem.get(World,"+JSON.stringify(contractId)+");return JSON.stringify({status:c.status,reason:c.terminationReason});})()"));
+  assert.equal(ended.status,'terminated','the deceased subject\'s contract must be terminated at death');
+  assert.equal(ended.reason,'subject_deceased');
 });
