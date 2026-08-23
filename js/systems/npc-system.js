@@ -594,7 +594,7 @@
   // Annual mortality base rates by age band, deliberately tuned on the rare
   // side -- routine deaths made the long middle of a life feel like a dice
   // roll rather than a story. Exported so tests can pin the dial.
-  const MORTALITY_TABLE=[.010,.0005,.0011,.0038,.012,.034,.085,.19];
+  const MORTALITY_TABLE=[.008,.0004,.0009,.003,.009,.024,.06,.14];
   const MORTALITY_COEFFICIENTS={perUnhealthyPoint:.06,perHealthPressure:.026};
   function mortalityProbability(npc,age,runtime){
     const band=age<1?0:age<16?1:age<45?2:age<60?3:age<70?4:age<80?5:age<90?6:7;

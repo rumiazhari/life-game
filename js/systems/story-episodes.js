@@ -32,6 +32,13 @@
     if(!S||!Array.isArray(S.contacts)) return null;
     return S.contacts.find(c=>c&&c.role==='friend'&&c.alive!==false)||null;
   }
+  function motherOf(S){ return S&&S.mother&&S.mother.alive&&!S.mother.estranged?S.mother:null; }
+
+  /* Small helper used by episode 9's cast binding. */
+  function rngName(){
+    const names=['Old','Young','Auntie','Widow'];
+    return names[(typeof Random!=='undefined'&&Random.hashSeed?Random.hashSeed('novak'):3)%names.length];
+  }
   function contractOf(world){
     try{ return root.EmploymentSystem&&root.EmploymentSystem.activeForPerson?root.EmploymentSystem.activeForPerson(world,'subject')[0]||null:null; }
     catch(e){ return null; }
@@ -493,8 +500,653 @@
   },
 
   /* ================================================================
-     EPISODE 4 — THE HOLD LEDGER (loyalty, suspicion, a name)
+     EPISODE 5 — MOTHER'S SILENCE (the letters stopped)
      ================================================================ */
+  {
+    id:'ep_mother_silence',
+    domain:'family',
+    cast(world,S){
+      const m=motherOf(S); if(!m) return null;
+      return [{key:'mother',label:m.name||'Mother'}];
+    },
+    eligible(world,S){ return !!motherOf(S)&&S.age>=16; },
+    weight(){ return 2.5; },
+    build(bind,rng){
+      const m=bind.mother;
+      const sum=rng?rng.int(120,260):180;
+      return {
+      title:'NO LETTER THIS MONTH',
+      bg:'office',
+      scenes:{
+        opening:{
+          lines:[
+            {sp:'narrator',t:'The envelope arrives on a Tuesday, franked with the Bureau\'s grey thumb. Not '+m.label+'\'s looping hand — the Ministry\'s. Inside, one sheet: NOTICE OF ASSESSED DEPENDENCY. Your name is in the "responsible party" column.'},
+            {sp:'you',t:'"Responsible party." Mother has been telling the Bureau I support her. Which would be touching, if she were not also — you do the sums twice — quietly short of rent for three months.'}
+          ],
+          choice:{
+            prompt:'The form wants an answer by Friday. Mother\'s telephone wants it sooner.',
+            options:[
+              {t:'Call her tonight. Ask nothing on the phone; just say "I\'m coming Sunday."',note:'Questions travel badly on wires',tone:'prudent',flag:'visited',goto:'visit',effects:[]},
+              {t:'Pay what the form demands, and let her keep her pride.',note:'Money as tact',tone:'kind',flag:'paid_quietly',goto:'ending_paidquiet',effects:[{kind:'money',delta:-sum}]},
+              {t:'Write back correcting the record. She must not lie to the Bureau.',note:'Accuracy first',tone:'cold',flag:'corrected_record',goto:'ending_correction',effects:[{kind:'scrutiny',delta:2}]}
+            ]
+          }
+        },
+
+        visit:{
+          lines:[
+            {sp:'narrator',t:'Her flat is smaller than memory keeps insisting. The good clock is gone from the mantel; there is a receipt nail where it used to hang. She makes tea like nothing is owed anywhere in the world.'},
+            {sp:'mother',t:'"The Bureau likes its forms," she says. "And I like my son un-worried. Between those two appetites, somebody was always going to tell a fib."'},
+            {sp:'mother',t:'"I sold the clock because your father\'s lungs needed proper medicine that winter, and because you were nineteen and proud and I could not—" The sentence finds somewhere else to be.'}
+          ],
+          choice:{
+            prompt:'The tea goes cold between you, which is traditional.',
+            options:[
+              {t:'"Move the worry to my table. Permanently."',note:'Room made, room kept',tone:'kind',flag:'took_her_in',goto:'ending_tookin',effects:[{kind:'money',delta:-sum/2},{kind:'parentMood',which:'mother',delta:18},{kind:'familyMood',delta:8}]},
+              {t:'Set up a standing order — hers to spend, yours to bleed.',note:'Dignity at distance',tone:'prudent',flag:'standing_order',goto:'ending_standing',effects:[{kind:'money',delta:-Math.round(sum*0.6)},{kind:'parentMood',which:'mother',delta:10}]},
+              {t:'"No more lies to clerks, Ma. Even kind ones."',note:'A boundary, lovingly',tone:'cold',flag:'boundary_set',goto:'ending_boundary',effects:[{kind:'parentMood',which:'mother',delta:4}]}
+            ]
+          }
+        },
+
+        ending_paidquiet:{
+          ending:{
+            id:'paidquiet',title:'PAID, AND UNSAID',tone:'kind',
+            epilogue:['The Bureau stamps ACCEPTED. Somewhere across town a woman burns your correction of her arithmetic and calls it filial piety.','You never speak of it. Every family is built on exactly one such silence, load-bearing.'],
+            effects:[{kind:'parentMood',which:'mother',delta:8},{kind:'memory',type:'episode_mother_paidquiet',valence:.5,intensity:.5,summary:'NO LETTER THIS MONTH ended paid and unsaid: Subject covered '+m.name+'\'s debts without a word.'}]
+          }
+        },
+
+        ending_correction:{
+          ending:{
+            id:'correction',title:'THE RECORD, SET STRAIGHT',tone:'cold',
+            epilogue:['Your letter is precise, courteous, and devastating. The dependency claim dissolves; so, for a while, does something in her weekly calls — shorter now, brighter performed.','The Bureau thanks you for your accuracy. Accuracy has never once thanked anybody back.'],
+            effects:[{kind:'parentMood',which:'mother',delta:-12},{kind:'stat',stat:'happiness',delta:-3},{kind:'memory',type:'episode_mother_correction',valence:-.35,intensity:.55,summary:'NO LETTER THIS MONTH ended in corrections: Subject chose the record over '+m.name+'\'s pride.'}]
+          }
+        },
+
+        ending_tookin:{
+          ending:{
+            id:'tookin',title:'ANOTHER CHAIR AT THE TABLE',tone:'kind',
+            epilogue:['She arrives with two suitcases and the replacement clock, which she pretends is the original, which everyone permits.','The flat learns her footsteps. The children learn her stories have second, longer editions. It costs, all of it, and the arithmetic finally works for everybody.'],
+            effects:[{kind:'memory',type:'episode_mother_tookin',valence:.75,intensity:.75,summary:'NO LETTER THIS MONTH ended under one roof: Subject took '+m.name+' in.'}]
+          }
+        },
+
+        ending_standing:{
+          ending:{
+            id:'standing',title:'THE STANDING ORDER',tone:'prudent',
+            epilogue:['First of every month, the bank moves the sum before breakfast, like weather.','She signs her letters the same as ever. Only the postscript changes, once a year, on the anniversary of the form: "Still solvent. Still proud of you. Stop worrying."'],
+            effects:[{kind:'memory',type:'episode_mother_standing',valence:.45,intensity:.5,summary:'NO LETTER THIS MONTH ended in a quiet standing order to '+m.name+'.'}]
+          }
+        },
+
+        ending_boundary:{
+          ending:{
+            id:'boundary',title:'LOVE WITH A LEDGER LINE',tone:'cold',
+            epilogue:['She agrees to honesty the way people agree to diets — sincerely, until tempted.','But the letters change too: no more fiction in either direction. What comes now is true, small, and addressed in her real hand. It turns out that was the currency you actually missed.'],
+            effects:[{kind:'parentMood',which:'mother',delta:6},{kind:'stat',stat:'happiness',delta:1},{kind:'memory',type:'episode_mother_boundary',valence:.25,intensity:.45,summary:'NO LETTER THIS MONTH ended in boundaries: truth over comfort with '+m.name+'.'}]
+          }
+        }
+      }};
+    }
+  },
+
+  /* ================================================================
+     EPISODE 6 — FATHER'S HANDS (a trade, an inheritance of skill)
+     ================================================================ */
+  {
+    id:'ep_father_hands',
+    domain:'family',
+    cast(world,S){
+      const f=fatherOf(S); if(!f) return null;
+      return [{key:'father',label:f.name||'Father'}];
+    },
+    eligible(world,S){
+      const f=fatherOf(S);
+      return !!f&&S.age>=17&&S.age<=50&&!!(S.mother===null||true);
+    },
+    weight(){ return 2.5; },
+    build(bind,rng){
+      const f=bind.father;
+      const yearsWorked=rng?rng.int(28,44):36;
+      return {
+      title:''+yearsWorked+' YEARS IN THE HANDS',
+      bg:'factory_floor',
+      scenes:{
+        opening:{
+          lines:[
+            {sp:'narrator',t:'He summons you to the shed behind the old house, where the smell of oil and iron filings has been constant since before you had words for either. On the bench: his tools, wrapped in flannel like surgery.'},
+            {sp:'father',t:'"'+yearsWorked+' years," he says, unwrapping them one by one. "Every nick on this handle is a lesson somebody paid for. My father left me these hands\u2019 worth of judgment. I intend to leave you mine \u2014 properly, before the tremor takes the option off the table."'},
+            {sp:'father',t:'One condition. A year at my bench, evenings, no excuses. The trade doesn\'t live in books, and it doesn\'t share a man with ambitions."'}
+          ],
+          choice:{
+            prompt:'The tools wait. So does he, worse than the tools.',
+            options:[
+              {t:'Take the year. The bench gets your evenings.',note:'Inheritance, earned hourly',tone:'kind',flag:'took_year',goto:'year_bench',effects:[{kind:'stat',stat:'health',delta:-2},{kind:'parentMood',which:'father',delta:15}]},
+              {t:'"Teach me the judgment, Pa — Sundays only. My ladder needs climbing too."',note:'Both ladders',tone:'prudent',flag:'sundays_only',goto:'sundays',effects:[{kind:'stat',stat:'smarts',delta:1}]},
+              {t:'"Sell the tools instead. Put the money where it feeds people."',note:'Practicality, sharpened',tone:'greedy',flag:'sell_tools',goto:'sold',effects:[{kind:'money',delta:200},{kind:'parentMood',which:'father',delta:-18}]}
+            ]
+          }
+        },
+
+        year_bench:{
+          lines:[
+            {sp:'narrator',t:'The year passes in calluses. He teaches the way rain teaches roofs: relentlessly, and mostly by falling on you. By winter your hands anticipate mistakes; by spring they correct them before he can open his mouth, and his silence then is the loudest praise he owns.'},
+            {sp:'father',t:'On the last evening he does not wrap the tools back up. "They know you now," is all he says, which in this dialect is a knighthood.'}
+          ],
+          goto:'branch_tools'
+        },
+
+        sundays:{
+          lines:[
+            {sp:'narrator',t:'Fifty-two Sundays. He grumbles about it to anyone who will hold still, but the shed light burns late every Saturday night, preparing lessons sized for one morning apiece.'},
+            {sp:'father',t:'At year\'s end: "Slow. But slow in both directions counts double, or some such arithmetic. Your mother says you get it from her."'}
+          ],
+          goto:'branch_tools'
+        },
+
+        sold:{
+          lines:[
+            {sp:'narrator',t:'The buyer pays well and leaves quickly. Your father shakes your hand at the gate like a stranger closing an account, and the shed stands empty the rest of the summer, breathing dust.'}
+          ],
+          choice:{
+            prompt:'Some purchases cannot be shelved.',
+            options:[
+              {t:'Buy the tools back, whatever the cost now.',note:'Reversal, at premium',tone:'kind',flag:'bought_back',goto:'bought_back',effects:[{kind:'money',delta:-320}]},
+              {t:'Let the sale stand. Learn the trade from books instead.',note:'Cold scholarship',tone:'cold',flag:'from_books',goto:'ending_books',effects:[{kind:'stat',stat:'smarts',delta:2}]}
+            ]
+          }
+        },
+
+        branch_tools:{
+          lines:[
+            {sp:'narrator',t:'With the year\'s learning comes a question the whole district can see coming: the guild bench at the exhibition this autumn takes one apprentice entry per family name.'}
+          ],
+          choice:{
+            prompt:'Enter under whose name?',
+            options:[
+              {t:'Under his. Let the old lion take the bow.',note:'Glory, redirected upstream',tone:'kind',flag:'entered_for_father',goto:'ending_ribbon',effects:[{kind:'parentMood',which:'father',delta:10}]},
+              {t:'Under your own. He taught you to sign honest work.',note:'A signature, at last',tone:'prudent',flag:'own_name',goto:'ending_ownname',effects:[{kind:'stat',stat:'relations',delta:3}]}
+            ]
+          }
+        },
+
+        bought_back:{
+          lines:[
+            {sp:'narrator',t:'It costs nearly double and one humiliating afternoon of gratitude toward a pawnbroker. The flannel wrapping smells of your childhood anyway. Your father says nothing when they come home — just clears half the bench, and leaves the lamp lit past midnight more than once.'}
+          ],
+          goto:'branch_tools'
+        },
+
+        ending_ribbon:{
+          ending:{
+            id:'ribbon',title:'THE RIBBON ON THE OLD WALL',tone:'kind',
+            epilogue:['Second place, exhibition class — the judges note the "unusual maturity of hand." The certificate hangs in his shed, not yours, which was the entire submission strategy.','He polishes the glass weekly. Neighbors are shown. Tea is involved. Some inheritances are paid out in afternoons like these.'],
+            effects:[{kind:'parentMood',which:'father',delta:12},{kind:'familyMood',delta:6},{kind:'skill',skill:'craft',delta:2},{kind:'memory',type:'episode_father_ribbon',valence:.8,intensity:.7,summary:""+yearsWorked+' YEARS IN THE HANDS ended on the exhibition wall: Subject entered under the old man\u2019s name.'}]
+          }
+        },
+
+        ending_ownname:{
+          ending:{
+            id:'ownname',title:'SIGNED, IN YOUR OWN HAND',tone:'prudent',
+            epilogue:['Third place — and the judge, a dry old master, asks who trained you and nods at the answer like a man balancing books. "Lineage shows," he says. "So does independence. Both are lineage."','Two certificates now exist in the family. His hangs in the shed. Yours travels in your tool roll, which tells you everything about how each of you stores pride.'],
+            effects:[{kind:'stat',stat:'happiness',delta:4},{kind:'skill',skill:'craft',delta:2},{kind:'memory',type:'episode_father_ownname',valence:.6,intensity:.65,summary:""+yearsWorked+' YEARS IN THE HANDS ended signed: Subject entered the exhibition under their own name.'}]
+          }
+        },
+
+        ending_books:{
+          ending:{
+            id:'books',title:'THE TRADE FROM BOOKS',tone:'cold',
+            epilogue:['You learn the theory beautifully. Measurements, metallurgy, the mathematics of load. But the hands keep another alphabet, the one written only by years, and yours spell it with an accent nobody in the guild can quite place.','Your father reads your published notes on joint strength — twice — and mails them back with two pencil corrections and no letter. It is the closest thing to blessing the sale will ever receive.'],
+            effects:[{kind:'stat',stat:'smarts',delta:2},{kind:'parentMood',which:'father',delta:-4},{kind:'memory',type:'episode_father_books',valence:-.2,intensity:.5,summary:""+yearsWorked+' YEARS IN THE HANDS ended in print: Subject traded the bench for the book.'}]
+          }
+        }
+      }};
+    }
+  },
+
+  /* ================================================================
+     EPISODE 7 — THE FRIEND IN WARD 9 (loyalty versus the file)
+     ================================================================ */
+  {
+    id:'ep_friend_ward',
+    domain:'friend',
+    cast(world,S){
+      const f=friendOf(S); if(!f) return null;
+      return [{key:'friend',label:f.name,bind:f.cid}];
+    },
+    eligible(world,S){ return !!friendOf(S)&&S.age>=18; },
+    weight(){ return 2.5; },
+    build(bind,rng){
+      const fr=bind.friend;
+      const bribe=rng?rng.int(150,300):220;
+      return {
+      title:'WITNESS '+String.fromCharCode(65+(rng?rng.int(0,25):7)),
+      bg:'office',
+      scenes:{
+        opening:{
+          lines:[
+            {sp:'narrator',t:'The summons names you as "character reference, secondary contact" — bureaucratic Latin for close enough to be useful. In the corridor of Ward 9, under a portrait of somebody vigilant, sits '+fr.label+', collar wrong, smile assembled from spare parts.'},
+            {sp:'friend',t:'"Before you say anything — I printed a pamphlet. One pamphlet. It quoted a law, correctly, and the law disagreed with a decree." A breath. "They want me to name the print shop\'s Thursday crowd. You\'re in that crowd."'}
+          ],
+          choice:{
+            prompt:'The clerk\'s pen is already moving. Choose your testimony.',
+            options:[
+              {t:'Testify truly, narrowly: "He printed. I read. That is all I know."',note:'Truth, trimmed to fit',tone:'prudent',flag:'narrow_truth',goto:'verdict_narrow',effects:[{kind:'contactMood',cid:fr.bind,delta:4}]},
+              {t:'Lie generously. Vouch him into a monk\'s biography.',note:'Perjury, affectionate',tone:'greedy',flag:'lied_generously',goto:'lie_risk',effects:[{kind:'contactMood',cid:fr.bind,delta:15},{kind:'scrutiny',delta:6}]},
+              {t:'Slip the clerk an envelope with your statement.',note:'Speed, papered',tone:'greedy',flag:'bribed_clerk',goto:'envelope',effects:[{kind:'money',delta:-bribe}]}
+            ]
+          }
+        },
+
+        verdict_narrow:{
+          lines:[
+            {sp:'narrator',t:'The narrow truth satisfies the form and damns the friend: six months\' administrative residence "at the Ministry\'s convenience." They take it standing. At the door, turned halfway:'},
+            {sp:'friend',t:'"You told the truth like a craftsman. Fit the wood, spare the varnish." A nod. "I\'ll write. Watch the Thursday crowd for me — somebody should know the score."'}
+          ],
+          goto:'branch_after'
+        },
+
+        lie_risk:{
+          lines:[
+            {sp:'narrator',t:'Your biography of '+fr.label+' is florid, unverifiable, and — the inspector notes, tapping one date — contradicted by a tram ticket. The room acquires walls. Then, abruptly, doors: a supervisor with better numbers to chase waves the matter onward. Sloppy mercy.'}
+          ],
+          goto:'branch_after'
+        },
+
+        envelope:{
+          lines:[
+            {sp:'narrator',t:'The statement vanishes into a folder with the envelope, and the folder into a drawer with history. The clerk\'s stamp falls twice: RECEIVED, and, softer, RESOLVED.'}
+          ],
+          goto:'branch_after'
+        },
+
+        branch_after:{
+          lines:[
+            {sp:'narrator',t:'Weeks later the ward settles, but Ward 9 keeps carbon copies of everyone, and yours has grown a page.'}
+          ],
+          choice:{
+            prompt:'What does the subject do with being noticed?',
+            options:[
+              {t:'Nothing. Live cleanly and let the page yellow.',note:'Quiet as maintenance',tone:'prudent',flag:'lived_quiet',goto:'ending_quietpage',effects:[]},
+              {t:'Visit the print shop\'s Thursday crowd, once, with bread and news.',note:'The seat he kept warm',tone:'kind',flag:'visited_crowd',goto:'ending_thursday',effects:[{kind:'stat',stat:'relations',delta:4},{kind:'scrutiny',delta:3}]}
+            ]
+          }
+        },
+
+        ending_quietpage:{
+          ending:{
+            id:'quietpage',title:'THE PAGE THAT YELLOWED',tone:'prudent',
+            epilogue:['Six months pass. The carbon page yellows exactly on schedule. When '+fr.label+' returns — thinner, reading glasses new — the first thing you do together is argue about football, at volume, in public, like free men.'],
+            effects:[{kind:'contactMood',cid:fr.bind,delta:8},{kind:'stat',stat:'happiness',delta:2},{kind:'memory',type:'episode_friend_quietpage',valence:.4,intensity:.55,summary:'WITNESS testimony ended quietly: Subject testified narrowly and kept the page clean.'}]
+          }
+        },
+
+        ending_thursday:{
+          ending:{
+            id:'thursday',title:'KEEPING THE SEAT WARM',tone:'kind',
+            epilogue:['The crowd votes you in without a vote — you simply keep being there, passing bread and news, until the pamphlets learn your handwriting too.','When '+fr.label+' walks back in early (good behavior, bribes, history — the usual recipe), the chair is warm and the argument mid-sentence. That is what loyalty sounds like afterward: continuation.'],
+            effects:[{kind:'contactMood',cid:fr.bind,delta:14},{kind:'stat',stat:'happiness',delta:4},{kind:'memory',type:'episode_friend_thursday',valence:.7,intensity:.7,summary:'WITNESS testimony ended among printers: Subject kept the Thursday crowd alive for '+fr.name+'.'}]
+          }
+        },
+
+        ending_envelope:{
+          ending:{
+            id:'envelope',title:'RESOLVED, BY PAPERWEIGHT',tone:'greedy',
+            epilogue:['Nobody serves time; nobody asks questions; the envelope buys a silence that holds, the way oiled hinges hold — quietly, with occasional looks.','You and '+fr.label+' never discuss the fee. It sits between you like furniture bought together: useful, jointly owned, impossible to mention.'],
+            effects:[{kind:'contactMood',cid:fr.bind,delta:10},{kind:'stat',stat:'happiness',delta:-1},{kind:'memory',type:'episode_friend_envelope',valence:.15,intensity:.55,summary:'WITNESS testimony was purchased: an envelope resolved '+fr.name+'\'s case.'}]
+          }
+        },
+
+        ending_perjury:{
+          ending:{
+            id:'perjury',title:'FLORID, UNVERIFIABLE, YOURS',tone:'greedy',
+            epilogue:['The tram-ticket discrepancy dies in a drawer, but not in memory. Inspectors have long memories for florid witnesses.',''+fr.label+' walks free and knows precisely what it cost. The debt makes them gentler at cards and quieter in arguments — being loved that visibly is a weight, and they carry it kindly.'],
+            effects:[{kind:'contactMood',cid:fr.bind,delta:12},{kind:'stat',stat:'happiness',delta:1},{kind:'record',value:true},{kind:'memory',type:'episode_friend_perjury',valence:.3,intensity:.65,summary:'WITNESS testimony was perjured generously for '+fr.name+', and the file remembers.'}]
+          }
+        }
+      }};
+    }
+  },
+
+  /* ================================================================
+     EPISODE 8 — THE DIRECTOR'S TABLE (power sets a place for you)
+     ================================================================ */
+  {
+    id:'ep_director_table',
+    domain:'work',
+    cast(world,S){
+      if(S.age<20||S.age>63) return null;
+      const c=contractOf(world); if(!c) return null;
+      const col=colleagueOf(world,S); if(!col) return null;
+      return [{key:'director',label:'Deputy Director Lemech'},{key:'rival',label:col.name,bind:col.id}];
+    },
+    eligible(world,S){
+      if(S.age<20||S.age>63) return false;
+      try{
+        const c=contractOf(world); if(!c) return false;
+        return c.performance>0.62;
+      }catch(e){ return false; }
+    },
+    weight(){ return 2.2; },
+    build(bind,rng){
+      const dir=bind.director, rival=bind.rival;
+      return {
+      title:'SEATS AT THE LONG TABLE',
+      bg:'office',
+      scenes:{
+        opening:{
+          lines:[
+            {sp:'narrator',t:'The invitation arrives on card stock heavy enough to stop a door: dinner, private room, the Restaurant of Three Soups. Deputy Director Lemech hosts twelve guests a year and promotes nine of them.'},
+            {sp:'director',t:'"Sit, sit. You know '+rival.label+' — splendid technician, dreadful instinct. The ministry requires a report on certain irregularities in their section. I thought: someone with clean columns should draft it." He refills your glass himself, which in this building is practically coronation.'},
+            {sp:'rival',t:'(across the soup, quietly, smiling for the room) "Whatever he\'s offered, count who pays the bill."'}
+          ],
+          choice:{
+            prompt:'Soup gets cold. Careers get decided.',
+            options:[
+              {t:'Draft the report. Factually. Whatever it lands on.',note:'The instrument, played straight',tone:'prudent',flag:'drafted_report',goto:'report',effects:[{kind:'stat',stat:'smarts',delta:1}]},
+              {t:'Refuse gently — "I audit figures, not colleagues."',note:'A spine, politely',tone:'kind',flag:'declined',goto:'refusal',effects:[{kind:'npcBond',npcId:rival.bind,delta:10}]},
+              {t:'Agree warmly — then warn '+rival.label+' tonight.',note:'Both tables fed',tone:'greedy',flag:'double_agent',goto:'doublegame',effects:[{kind:'scrutiny',delta:3}]}
+            ]
+          }
+        },
+
+        report:{
+          lines:[
+            {sp:'narrator',t:'You write it the way you total columns: exact, sourced, merciless in neither direction. Two irregularities stand; eleven rumors die on evidence. Lemech wanted a scalpel and receives a scale.'},
+            {sp:'director',t:'"Precise," he says, tasting disappointment and finding it nourishing. "Precision is its own promotion, they tell me. We shall see whose precision the ministry prefers."'}
+          ],
+          goto:'aftermath'
+        },
+
+        refusal:{
+          lines:[
+            {sp:'director',t:'Lemech hears the refusal the way stone hears rain. "Loyalty to sections is very touching at section level." The dessert arrives; your career does not. Or so the room believes.'}
+          ],
+          goto:'aftermath'
+        },
+
+        doublegame:{
+          lines:[
+            {sp:'narrator',t:'You promise Lemech diligence and deliver, within the hour, a warning dressed as gossip: "They\'re looking at your section. Fix your March tickets." '+rival.label+' listens twice, asks nothing, and shakes your hand like a man accepting rope, unsure whether it is for pulling or hanging.'}
+          ],
+          goto:'aftermath'
+        },
+
+        aftermath:{
+          lines:[
+            {sp:'narrator',t:'Spring reorganizes the ministry the way springs do. Names move. Desks swap. Somewhere a long table is reset for next year\'s twelve.'}
+          ],
+          choice:{
+            prompt:'Where does the subject sit when the music stops?',
+            options:[
+              {t:'Apply for the vacant deputy-desk. Ambition owes no apologies.',note:'Upward, openly',tone:'greedy',flag:'sought_desk',goto:'ending_desk',effects:[]},
+              {t:'Stay put, guard your section\'s people.',note:'Roots over branches',tone:'kind',flag:'stayed_put',goto:'ending_guardian',effects:[]},
+              {t:'Request transfer to the archives. Distance from tables.',note:'Quiet as strategy',tone:'cold',flag:'chose_archives',goto:'ending_archives',effects:[]}
+            ]
+          }
+        },
+
+        ending_desk:{
+          ending:{
+            id:'desk',title:'THE DEPUTY DESK, WITH ITS OWN SOUP',tone:'greedy',
+            epilogue:['You get the desk. The first thing on it is a request to draft a report on somebody else\'s section — the ministry recycles even irony.','You keep '+rival.label+'\'s warning taped inside the blotter: COUNT WHO PAYS THE BILL. So far, you pay your own. The soup, notably, tastes better on this side, and slightly of iron.'],
+            effects:[{kind:'jobRaise',amount:340},{kind:'stat',stat:'happiness',delta:2},{kind:'scrutiny',delta:6},{kind:'memory',type:'episode_director_desk',valence:.35,intensity:.65,summary:'SEATS AT THE LONG TABLE ended upstairs: Subject accepted the deputy desk and its menu.'}]
+          }
+        },
+
+        ending_guardian:{
+          ending:{
+            id:'guardian',title:'THE SECTION\'S UMBRELLA',tone:'kind',
+            epilogue:['Promotions pass you by with full honors, and your section quietly becomes the place where work is done honestly and nobody vanishes in April.','Years on, juniors fight to be posted to you. Lemech, retired and harmless, once asks what your secret was. "Umbrellas," you tell him. He dines out on the word for months.'],
+            effects:[{kind:'npcBond',npcId:rival.bind,delta:8},{kind:'stat',stat:'happiness',delta:5},{kind:'stat',stat:'relations',delta:3},{kind:'memory',type:'episode_director_guardian',valence:.7,intensity:.6,summary:'SEATS AT THE LONG TABLE ended grounded: Subject guarded the section instead of the ladder.'}]
+          }
+        },
+
+        ending_archives:{
+          ending:{
+            id:'archives',title:'THE ARCHIVES ARE LOVELY THIS TIME OF YEAR',tone:'cold',
+            epilogue:['Basement level two: constant temperature, no windows, no dinners. The files ask nothing and remember everything — colleagues after your own heart, in a manner of speaking.','Lemech forgets your face within the quarter, which is the finest review the archives can confer. You sleep like filed paper.'],
+            effects:[{kind:'stat',stat:'happiness',delta:3},{kind:'stat',stat:'smarts',delta:1},{kind:'scrutiny',delta:-6},{kind:'memory',type:'episode_director_archives',valence:.3,intensity:.5,summary:'SEATS AT THE LONG TABLE ended below ground: Subject chose the archives and their silence.'}]
+          }
+        },
+
+        ending_shielded:{
+          ending:{
+            id:'shielded',title:'THE REPORT THAT WASN\'T',tone:'kind',
+            epilogue:['Your draft lists irregularities and exonerations in equal measure, each sourced. Lemech files it with the expression of a man served decaf at an execution.','The ministry rotates him somewhere humid. '+rival.label+' survives intact and never mentions the warning — but every March, anonymously, your desk receives coffee from the good shop. The one across from the print shop.'],
+            effects:[{kind:'npcBond',npcId:rival.bind,delta:14},{kind:'stat',stat:'happiness',delta:4},{kind:'memory',type:'episode_director_shielded',valence:.65,intensity:.65,summary:'SEATS AT THE LONG TABLE ended mercifully: Subject\u2019s precise report shielded '+rival.name+'.'}]
+          }
+        }
+      }};
+    }
+  },
+
+  /* ================================================================
+     EPISODE 9 — THE WALL HAS EARS (a neighbor, a forbidden frequency)
+     ================================================================ */
+  {
+    id:'ep_wall_ears',
+    domain:'neighbor',
+    cast(world,S){
+      if(S.age<16) return null;
+      return [
+        {key:'neighbor',label:(rngName('N'))+' Novak'},
+        {key:'watcher',label:'Inspector Pelz'}
+      ];
+    },
+    eligible(world,S){ return S.age>=16; },
+    weight(){ return 2; },
+    build(bind,rng){
+      const nb=bind.neighbor, insp=bind.watcher;
+      return {
+      title:'STATIC AFTER MIDNIGHT',
+      bg:'street',
+      scenes:{
+        opening:{
+          lines:[
+            {sp:'narrator',t:'The wall between your flats is thin as bureaucracy. Most nights it delivers arguments and accordion practice. Lately, after midnight, it delivers something else: static, then a voice reading shipping tonnages in a foreign accent, then jazz — actual, forbidden, glorious jazz.'},
+            {sp:'neighbor',t:'(through the wall, muffled, unaware) "...and if the fish catch holds, brother, we hold too. Over."'},
+            {sp:'narrator',t:'A shortwave set. A fish-market network. And you, one plaster thickness from becoming either a witness or a wall yourself.'}
+          ],
+          choice:{
+            prompt:'The set crackles on, oblivious.',
+            options:[
+              {t:'Knock on their door with a bottle. Join the audience.',note:'Static is better shared',tone:'kind',flag:'joined_listeners',goto:'joined',effects:[{kind:'stat',stat:'happiness',delta:3},{kind:'scrutiny',delta:3}]},
+              {t:'Note the hours and the frequency. Information keeps.',note:'A notebook with teeth',tone:'greedy',flag:'logged_hours',goto:'logged',effects:[{kind:'stat',stat:'smarts',delta:1}]},
+              {t:'Say nothing and buy thicker pillows.',note:'Plaster diplomacy',tone:'cold',flag:'ignored',goto:'ending_pillows',effects:[]}
+            ]
+          }
+        },
+
+        joined:{
+          lines:[
+            {sp:'neighbor',t:'Novak pours tea like contraband and explains in half-sentences: brothers along the coast, prices, weather, songs the radio here forgot existed. "We don\'t plot," they say. "We count. Counting is legal." Their eyes add: usually.'},
+            {sp:'narrator',t:'The jazz comes through clear that night. You own no opinion on jazz. You develop one immediately and permanently.'}
+          ],
+          goto:'inspector'
+        },
+
+        logged:{
+          lines:[
+            {sp:'narrator',t:'Twelve nights of data: 00:40 to 01:55, frequency steady, accent coastal. The notebook weighs nothing. That is the problem with notebooks — the heavy ones are always somebody else\'s.'}
+          ],
+          goto:'inspector'
+        },
+
+        inspector:{
+          lines:[
+            {sp:'watcher',t:'Inspector Pelz appears at your door doing civic rounds, ears practically in his lapels. "Complaints of foreign broadcasts. Disturbances after midnight. You hear anything... statistical?" The pause around the last word is professionally furnished.'}
+          ],
+          choice:{
+            prompt:'Pelz waits. Bureaus hate silence almost as much as music.',
+            options:[
+              {t:'"Only accordions, Inspector. Terrible ones."',note:'Plaster holds',tone:'kind',flag:'shielded_neighbor',goto:'ending_shield',effects:[{kind:'stat',stat:'relations',delta:3}]},
+              {t:'Hand over everything. Hours, frequencies, all of it.',note:'Citizenship, loud',tone:'cold',flag:'handed_notes',goto:'ending_report',effects:[{kind:'scrutiny',delta:-8},{kind:'money',delta:80}]},
+              {t:'Sell ambiguity: "Might be fish prices. Might be ghosts. Worth a look upstairs."',note:'A nudge, deniable',tone:'greedy',flag:'nudged',goto:'ending_ghost',effects:[{kind:'stat',stat:'smarts',delta:1}]}
+            ]
+          }
+        },
+
+        ending_shield:{
+          ending:{
+            id:'shield',title:'THE ACCORDION ALIBI',tone:'kind',
+            epilogue:['Pelz departs unsatisfied but unfurnished. That night, the jazz plays a fraction louder — a thank-you at broadcast strength.','For years the wall carries music and fish futures and, once, your birthday requested over the air from three hundred kilometers away by strangers who know you only as "the accordion neighbor."'],
+            effects:[{kind:'stat',stat:'happiness',delta:5},{kind:'memory',type:'episode_wall_shield',valence:.7,intensity:.6,summary:'STATIC AFTER MIDNIGHT ended behind plaster: Subject shielded Novak\u2019s coast network from Inspector Pelz.'}]
+          }
+        },
+
+        ending_report:{
+          ending:{
+            id:'report',title:'EXHIBIT A: FREQUENCIES',tone:'cold',
+            epilogue:['The raid is polite and total. The set goes in a evidence bag; Novak goes in a van, waving at no one, counting on no one.','The reward voucher spends fine. The jazz, however, has ruined other music for you permanently — every shop song now sounds like testimony.'],
+            effects:[{kind:'stat',stat:'happiness',delta:-6},{kind:'memory',type:'episode_wall_report',valence:-.55,intensity:.7,summary:'STATIC AFTER MIDNIGHT ended in exhibits: Subject reported Novak\u2019s network and took the voucher.'}]
+          }
+        },
+
+        ending_ghost:{
+          ending:{
+            id:'ghost',title:'GHOSTS UPSTAIRS, GHOSTS DOWNSTAIRS',tone:'greedy',
+            epilogue:['Pelz finds the antenna and loses the operator — Novak, warned by the very visit your ambiguity caused, has gone visiting cousins indefinitely.','The bureau logs GHOSTS, PROBABLE. Novak sends no postcard. The wall stays silent at midnight now, and you discover you had grown fond of the traffic — of being adjacent, safely, to other people\'s courage.'],
+            effects:[{kind:'stat',stat:'happiness',delta:-2},{kind:'stat',stat:'smarts',delta:1},{kind:'memory',type:'episode_wall_ghost',valence:-.1,intensity:.55,summary:'STATIC AFTER MIDNIGHT ended in ghosts: Subject nudged the inspection and emptied the flat upstairs.'}]
+          }
+        },
+
+        ending_pillows:{
+          ending:{
+            id:'pillows',title:'THICKER PILLOWS',tone:'cold',
+            epilogue:['You hear nothing further, officially. Unofficially: one dawn arrest van, one new tenant, one accordion student with modern opinions.','The pillow strategy wins every battle it fights and every one of them costs exactly nothing except, eventually, a name in somebody else\u2019s memoir — listed under FURNITURE.'],
+            effects:[{kind:'stat',stat:'happiness',delta:-1},{kind:'memory',type:'episode_wall_pillows',valence:-.15,intensity:.4,summary:'STATIC AFTER MIDNIGHT ended in upholstery: Subject heard everything and did nothing at all.'}]
+          }
+        }
+      }};
+    }
+  },
+
+  /* ================================================================
+     EPISODE 10 — THE EMPTY CHAIR (a spouse variant: debt at the door)
+     ================================================================ */
+  {
+    id:'ep_empty_chair',
+    domain:'spouse',
+    cast(world,S){
+      const p=partnerOf(S); if(!p) return null;
+      return [{key:'spouse',label:p.name,bind:p.cid}];
+    },
+    eligible(world,S){
+      const p=partnerOf(S);
+      return !!(p&&S.married&&S.age>=21&&(Number(S.assets)||0)<900);
+    },
+    weight(){ return 2.4; },
+    build(bind,rng){
+      const sp=bind.spouse;
+      const debt=rng?rng.int(280,520):400;
+      return {
+      title:'THE MAN WITH THE ABACUS COMES TO DINNER',
+      bg:'night_flat',
+      scenes:{
+        opening:{
+          lines:[
+            {sp:'narrator',t:'He arrives punctually, hat in hand, abacus in the other: a collector of the old school, courteous as frost. The debt is '+debt+'. The debtor, apparently, is '+sp.label+', who has been losing afternoons at the track since spring and paying losses with money arranged in installments from a lender whose interest has interest.'},
+            {sp:sp.key,t:'"I was going to win it back before you ever—" The sentence surrenders. "No. I was going to keep losing it, one secret month at a time, until the arithmetic ate us."'}
+
+          ],
+          choice:{
+            prompt:'The abacus man taps one bead, patient as furniture.',
+            options:[
+              {t:'Pay in full, once, with both of you watching.',note:'End it in daylight',tone:'prudent',flag:'paid_full',goto:'pay_scene',effects:[{kind:'money',delta:-debt}]},
+              {t:'Renegotiate terms — installment, witnessed, stamped.',note:'Structure over shame',tone:'cold',flag:'renegotiated',goto:'terms',effects:[{kind:'money',delta:-Math.round(debt*0.3)}]},
+              {t:'Show him the door. Debts of honor stay outside.',note:'Defiance, expensive',tone:'greedy',flag:'door_shown',goto:'defiance',effects:[{kind:'stat',stat:'happiness',delta:-2}]}
+            ]
+          }
+        },
+
+        pay_scene:{
+          lines:[
+            {sp:'narrator',t:'Coins counted aloud, receipt torn on the dotted line, abacus closed with a click like a tiny cell door. At the threshold the collector allows himself one professional kindness: "Marriages recover. Track records don\'t. Good evening."'}
+          ],
+          goto:'aftermath_debt'
+        },
+
+        terms:{
+          lines:[
+            {sp:'narrator',t:'New schedule: quarterly, witnessed, a penalty clause in plain language. The collector respects structure the way cats respect closed doors — resentfully, and only briefly. The abacus leaves; its shadow agrees to visit four more times.'}
+          ],
+          goto:'aftermath_debt'
+        },
+
+        defiance:{
+          lines:[
+            {sp:'narrator',t:'The door shuts. Silence arranges itself around the room like new furniture. '+sp.label+' looks at the shut door, then at you, and you watch two calculations finish behind their eyes — relief arriving third, after terror and gratitude, which is the usual podium for relief.'},
+            {sp:'narrator',t:'The debt, of course, remains. Debts are not vampires; doors do not apply. But now it is YOUR debt, openly held, and there is a strange nutrition in that.'}
+          ],
+          choice:{
+            prompt:'Own it how?',
+            options:[
+              {t:'Take extra shifts until it bleeds dry.',note:'Labor, applied topically',tone:'kind',flag:'extra_shifts',goto:'ending_shifts',effects:[{kind:'stat',stat:'health',delta:-3},{kind:'partnerMood',delta:10}]},
+              {t:'Both of you go down to the track together — to watch, never bet, as penance education.',note:'The museum of temptation',tone:'prudent',flag:'track_lessons',goto:'ending_museum',effects:[{kind:'partnerMood',delta:6}]}
+            ]
+          }
+        },
+
+        aftermath_debt:{
+          lines:[
+            {sp:sp.key,t:'"I want to say it was the track," '+sp.label+' says to the table, "but the track is just where hiding went to exercise." They slide something across: a betting slip, blank, framed years ago by a parent who lost slower. "My mother\u2019s. I kept it as a warning. Then as a permission."'},
+            {sp:'narrator',t:'The slip goes into the stove that night, whichever path you choose. Paper burns fast; permissions take longer.'}
+          ],
+          choice:{
+            prompt:'What does the household vow, formally?',
+            options:[
+              {t:'No secrets above ten marks. Audit each other yearly, lovingly.',note:'Transparency, ratified',tone:'prudent',flag:'audited_vow',goto:'ending_audit',effects:[{kind:'partnerMood',delta:12}]},
+              {t:'Burn the slip, forgive fully, never speak of it again.',note:'Amnesty, total',tone:'kind',flag:'amnesty',goto:'ending_amnesty',effects:[{kind:'partnerMood',delta:8},{kind:'stat',stat:'happiness',delta:2}]}
+            ]
+          }
+        },
+
+        ending_shifts:{
+          ending:{
+            id:'shifts',title:'PAID IN CALLUSES',tone:'kind',
+            epilogue:['Nine weeks of doubled shifts retire the debt and age your hands five years. '+sp.label+' packs your suppers with notes of escalating absurdity — the ninth just says HOLD ON, LANDLORD OF MY HEART.','The last coin goes clink into the tin. You sleep like labor, which is the best-tasting sleep there is.'],
+            effects:[{kind:'partnerMood',delta:12},{kind:'stat',stat:'happiness',delta:3},{kind:'memory',type:'episode_chair_shifts',valence:.65,intensity:.65,summary:'THE ABACUS DINNER ended in calluses: Subject worked '+sp.name+'\u2019s debt off personally.'}]
+          }
+        },
+
+        ending_museum:{
+          ending:{
+            id:'museum',title:'THE MUSEUM OF TEMPTATION',tone:'prudent',
+            epilogue:['Every Sunday, two spectators at the rail: watching the horses ruin other families, holding hands like survivors of the same ship.','Betting slips become extinct in the house. The track becomes free theater. '+sp.label+'\u2019s afternoons relocate to kitchens and libraries, which are duller venues for doom and considerably cheaper.'],
+            effects:[{kind:'partnerMood',delta:9},{kind:'memory',type:'episode_chair_museum',valence:.5,intensity:.55,summary:'THE ABACUS DINNER ended in spectatorship: the couple studied the track without feeding it.'}]
+          }
+        },
+
+        ending_audit:{
+          ending:{
+            id:'audit',title:'THE YEARLY AUDIT OF US',tone:'prudent',
+            epilogue:['Each anniversary: one candle, two ledgers, total disclosure, and a bottle of the cheap good wine. It is the least romantic ritual ever invented and it functions like architecture.','Friends notice the marriage got calmer and credit maturity. It was accounting, but maturity is close enough.'],
+            effects:[{kind:'partnerMood',delta:10},{kind:'stat',stat:'smarts',delta:1},{kind:'memory',type:'episode_chair_audit',valence:.55,intensity:.6,summary:'THE ABACUS DINNER ended in ledgers: the couple instituted their yearly audit of us.'}]
+          }
+        },
+
+        ending_amnesty:{
+          ending:{
+            id:'amnesty',title:'AMNESTY, TOTAL AND IMMEDIATE',tone:'kind',
+            epilogue:['The slip burns green and quick. Forgiveness arrives before apology finishes asking — an advance payment against future sins, which is either wisdom or recklessness wearing wisdom\u2019s coat.','Time rules on appeal. Years later '+sp.label+' confesses the strangest part: that being forgiven first made cheating impossible. Trust, it turns out, is also surveillance — the kind nobody minds.'],
+            effects:[{kind:'partnerMood',delta:11},{kind:'stat',stat:'happiness',delta:3},{kind:'memory',type:'episode_chair_amnesty',valence:.6,intensity:.6,summary:'THE ABACUS DINNER ended in amnesty: forgiveness arrived ahead of apology and rearranged the marriage.'}]
+          }
+        },
+
+        ending_interest:{
+          ending:{
+            id:'interest',title:'THE SHADOW VISITS QUARTERLY',tone:'cold',
+            epilogue:['Installments hold. The abacus shadow crosses the doorway four times a year, always punctual, always polite, always costing exactly what was promised plus the special tax of remembering it.',''+sp.label+' keeps the penalty clause pinned inside the cupboard like an icon. Marriage adapts to anything, even arithmetic — though some nights the beads still click in dreams, both your dreams, taking attendance.'],
+            effects:[{kind:'partnerMood',delta:4},{kind:'stat',stat:'happiness',delta:-2},{kind:'memory',type:'episode_chair_interest',valence:.05,intensity:.55,summary:'THE ABACUS DINNER ended on installments: the shadow agreed to visit quarterly.'}]
+          }
+        }
+      }};
+    }
+  },
+
   {
     id:'ep_hold_ledger',
     domain:'hold',
