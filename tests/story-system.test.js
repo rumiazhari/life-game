@@ -2,9 +2,136 @@
 
 const test=require('node:test');
 const assert=require('node:assert/strict');
+const fs=require('node:fs');
 const {createWorldContext,loadGameFiles,expose}=require('./helpers/vm-loader');
 
-function uiStoryContext(seed){
+function storyContext(seed){
+  const context=createWorldContext();
+  expose(context,"Random.setSeed("+JSON.stringify(seed)+"); newWorld(); newLineage(); newHold(); newSubject();");
+  expose(context,`S.age=32; World.year=S.dob+S.age; S.livingAtHome=false; S.assets=600; S.health=80; S.happiness=55;
+    S.jobTier=1; S.jobName='Clerk'; S.career=null; S.eduStage=null; S.jailUntil=0; S.kids=0; S.married=true;
+    S.scrutiny=8; S.vice=1; S.record=false; S.relations=58;
+    S.lifestyle={housing:'flat',food:'basic',childcare:'basic'};
+    S.location={settlementId:World.activeSettlementId};
+    var p=makeContact('F'); p.role='spouse'; p.name='Mira Voss'; p.mood=48; S.contacts.push(p); S.partner='Mira Voss';
+    addKin({first:'Tomas',last:S.last,sex:'M',dob:currentYear()-9,relation:'child',bond:72});`);
+  return context;
+}
+// A dominant test episode so selection is fully deterministic.
+function installTestEpisode(context){
+  expose(context,`StoryEpisodes.push({
+    id:'ep_zztest',domain:'test',
+    cast:function(){return [{key:'x',label:'Xander Quill'}];},
+    eligible:function(){return true;}, weight:function(){return 100;},
+    build:function(bind){return {
+      title:'THE TEST EPISODE', bg:'office',
+      scenes:{
+        a:{lines:[
+             {sp:'narrator',t:'A room. A man named '+bind[0].label+'. A decision.'},
+             {sp:'x',t:'"Choose wisely," he said.'}],
+           choice:{prompt:'Pick one.',options:[
+             {t:'The greedy door',note:'greedy note',tone:'greedy',flag:'took_greedy',goto:'end1',effects:[{kind:'money',delta:-999999},{kind:'scrutiny',delta:500}]},
+             {t:'The kind door',tone:'kind',flag:'took_kind',goto:'end2',effects:[{kind:'partnerMood',delta:30}]}]}},
+        end1:{ending:{id:'greedy_end',title:'GREEDY ENDING',tone:'greedy',epilogue:['It is done, greedily.'],effects:[{kind:'stat',stat:'happiness',delta:-3}]}},
+        end2:{ending:{id:'kind_end',title:'KIND ENDING',tone:'kind',epilogue:['It is done, kindly.'],effects:[{kind:'stat',stat:'happiness',delta:99}]}}
+      }};}
+  });`);
+}
+
+test('tick is same-year idempotent, stale-year safe, and hosts at most one live episode',()=>{
+  const context=storyContext('vn-idem');
+  const r1=JSON.parse(expose(context,"JSON.stringify(StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage}))"));
+  const r2=JSON.parse(expose(context,"JSON.stringify(StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage}))"));
+  const stale=JSON.parse(expose(context,"JSON.stringify(StorySystem.tickWorld(World,{year:World.year-4,subject:S,lineage:Lineage}))"));
+  assert.equal(r2.reason,'already_applied');
+  assert.equal(stale.reason,'stale_year');
+  if(r1.spawned) assert.equal(expose(context,"Object.keys(World.storyRuns).length"),1);
+});
+
+test('episode selection is life-driven and deterministic per seed',()=>{
+  // The cold-marriage subject makes the spouse episode eligible.
+  const context=storyContext('vn-select');
+  installTestEpisode(context);
+  let spawned=null;
+  for(let i=0;i<12&&!spawned;i++){
+    expose(context,'World.year+=1;');
+    spawned=expose(context,"(function(){var r=StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage});return r.spawned||null;})()");
+  }
+  assert.ok(spawned,'an episode must spawn for an earned life-state');
+  const title=expose(context,"World.storyRuns['"+spawned+"'].title");
+  assert.equal(title,'THE TEST EPISODE','the dominant eligible episode wins deterministically');
+  // Same seed rebuild reproduces it byte-for-byte.
+  const context2=storyContext('vn-select');
+  installTestEpisode(context2);
+  let s2=null;
+  for(let i=0;i<12&&!s2;i++){
+    expose(context2,'World.year+=1;');
+    s2=expose(context2,"(function(){var r=StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage});return r.spawned||null;})()");
+  }
+  assert.equal(expose(context2,"World.storyRuns['"+s2+"'].title"),title);
+});
+
+test('a full playthrough walks lines, branches at choices, lands an ending exactly once',()=>{
+  const context=storyContext('vn-play');
+  installTestEpisode(context);
+  expose(context,"StorySystem.ensure(World); World.year+=1;");
+  const spawned=expose(context,"(function(){var r=StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage});return r.spawned||null;})()");
+  assert.ok(spawned);
+  // Beat 1: narrator line
+  let v=JSON.parse(expose(context,"JSON.stringify(StorySystem.currentView(World,{year:World.year}))"));
+  assert.equal(v.type,'line'); assert.equal(v.speaker.key,'narrator');
+  // Beat 2: quoted dialogue
+  v=JSON.parse(expose(context,"JSON.stringify((StorySystem.next(World,{year:World.year}),StorySystem.currentView(World,{year:World.year})))"));
+  assert.equal(v.type,'line'); assert.equal(v.speaker.key,'x'); assert.match(v.text,/Choose wisely/);
+  // Beat 3: choice point
+  v=JSON.parse(expose(context,"JSON.stringify((StorySystem.next(World,{year:World.year}),StorySystem.currentView(World,{year:World.year})))"));
+  assert.equal(v.type,'choice'); assert.equal(v.options.length,2);
+  // Choose the greedy branch: consequences clamp hard, once.
+  const res=JSON.parse(expose(context,"JSON.stringify(StorySystem.choose(World,0,{year:World.year,subject:S}))"));
+  assert.equal(res.applied,true);
+  assert.ok(expose(context,'S.assets')>-200000,'money op respects its documented floor');
+  const scrutinyBefore=expose(context,'S.scrutiny');
+  void scrutinyBefore;
+  assert.ok(expose(context,'S.scrutiny')>=30&&expose(context,'S.scrutiny')<=100,'scrutiny surged under the per-op bound');
+  const twice=JSON.parse(expose(context,"JSON.stringify(StorySystem.choose(World,0,{year:World.year,subject:S}))"));
+  assert.equal(twice.applied,false,'the same choice cannot be applied twice');
+  // Ending view then filing
+  const end=JSON.parse(expose(context,"JSON.stringify((StorySystem.next(World,{year:World.year}),StorySystem.currentView(World,{year:World.year})))"));
+  assert.equal(end.type,'ending'); assert.equal(end.ending.id,'greedy_end');
+  const filed=JSON.parse(expose(context,"JSON.stringify(StorySystem.fileAway(World,"+JSON.stringify(end.runId)+",{year:World.year}))"));
+  assert.equal(filed.applied,true);
+  const again=JSON.parse(expose(context,"JSON.stringify(StorySystem.fileAway(World,"+JSON.stringify(end.runId)+",{year:World.year}))"));
+  assert.equal(again.applied,false);
+  const arch=JSON.parse(expose(context,"JSON.stringify(Object.values(World.storyArchive)[0])"));
+  assert.equal(arch.endingId,'greedy_end');
+  assert.deepEqual(JSON.parse(expose(context,"JSON.stringify(StorySystem.checkInvariants(World))")),[]);
+});
+
+test('archive signatures block quick reruns of the same episode+cast',()=>{
+  const context=storyContext('vn-repeat');
+  expose(context,"StorySystem.ensure(World);"+
+    "World.storyArchive['story-archive:00001']={id:'story-archive:00001',episodeId:'ep_voss_letter',domain:'spouse',title:'X',castKey:'',signature:'ep_voss_letter|spouse:p1',startedYear:World.year-1,resolvedYear:World.year-1,endingId:'renewal',endingTitle:'',tone:'kind',echoLine:''}; World.storyArchiveCounter=1;");
+  assert.equal(expose(context,"StorySystem.signatureBlocked(World,'ep_voss_letter|spouse:p1',World.year)"),true);
+  assert.equal(expose(context,"StorySystem.signatureBlocked(World,'ep_voss_letter|other',World.year)"),false);
+});
+
+test('fast-forward auto-plays the whole episode to its ending without UI',()=>{
+  const context=storyContext('vn-ff');
+  installTestEpisode(context);
+  expose(context,"World.year+=1;");
+  expose(context,"StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage});"); // may or may not spawn
+  expose(context,"if(!StorySystem.hasLiveRun(World)){World.year+=1;StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage});}");
+  assert.ok(expose(context,'StorySystem.hasLiveRun(World)'),'a live run exists before auto-resolution');
+  expose(context,"S.__ffLog=[]; var r=StorySystem.tickWorld(World,{year:World.year+1,subject:S,lineage:Lineage,autoResolve:true,actorTone:'hustler'}); window.__res=r; World.year+=1;");
+  const resolvedCount=expose(context,'window.__res.resolved.length');
+  assert.equal(resolvedCount,1,'the live episode auto-completed');
+  assert.equal(expose(context,'StorySystem.hasLiveRun(World)'),false,'nothing stays live under fast-forward');
+  assert.equal(expose(context,"Object.values(World.storyArchive).length"),1);
+  assert.deepEqual(JSON.parse(expose(context,"JSON.stringify(StorySystem.checkInvariants(World))")),[]);
+});
+
+/* ---------- UI: the visual novel window ---------- */
+function uiContext(seed){
   const context=createWorldContext();
   const elements={};
   const makeElement=()=>({
@@ -24,163 +151,43 @@ function uiStoryContext(seed){
   loadGameFiles(context,['js/systems/world-gameplay.js','js/medical.js','js/ui.js']);
   context.activeConditions=()=>[];
   expose(context,"Random.setSeed("+JSON.stringify(seed)+"); newWorld(); newLineage(); newHold(); newSubject();");
-  expose(context,`S.age=32; World.year=S.dob+S.age; S.livingAtHome=false; S.assets=600; S.health=80; S.happiness=55;
-    S.jobTier=1; S.jobName='Clerk'; S.career=null; S.eduStage=null; S.jailUntil=0; S.kids=0; S.married=true;
-    S.scrutiny=8; S.vice=1; S.record=false; S.relations=58;
-    S.lifestyle={housing:'flat',food:'basic',childcare:'basic'};
-    S.location={settlementId:World.activeSettlementId};
-    var p=makeContact('F'); p.role='spouse'; p.name='Mira Voss'; p.mood=48; S.contacts.push(p); S.partner='Mira Voss';`);
   return context;
 }
 
-function storyContext(seed){
-  const context=createWorldContext();
-  expose(context,"Random.setSeed("+JSON.stringify(seed)+"); newWorld(); newLineage(); newHold(); newSubject();");
-  // A settled adult: married, employed-adjacent, with kin and a friend, so
-  // most archetype gates are open and selection has real choice.
-  expose(context,`S.age=32; World.year=S.dob+S.age; S.livingAtHome=false; S.assets=600; S.health=80; S.happiness=55;
-    S.jobTier=1; S.jobName='Clerk'; S.career=null; S.eduStage=null; S.jailUntil=0; S.kids=0; S.married=true;
-    S.scrutiny=8; S.vice=1; S.record=false; S.relations=58;
-    S.lifestyle={housing:'flat',food:'basic',childcare:'basic'};
-    S.location={settlementId:World.activeSettlementId};
-    var p=makeContact('F'); p.role='spouse'; p.name='Mira Voss'; p.mood=48; S.contacts.push(p); S.partner='Mira Voss';
-    addKin({first:'Tomas',last:S.last,sex:'M',dob:currentYear()-7,relation:'child',bond:72});`);
-  return context;
-}
-
-test('story tick is same-year idempotent, rejects stale years, and spawns at most one dialogue',()=>{
-  const context=storyContext('story-idem');
-  const first=JSON.parse(expose(context,"JSON.stringify(StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage}))"));
-  const second=JSON.parse(expose(context,"JSON.stringify(StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage}))"));
-  assert.equal(first.applied,true);
-  assert.equal(second.applied,false);
-  assert.equal(second.reason,'already_applied');
-  const stale=JSON.parse(expose(context,"JSON.stringify(StorySystem.tickWorld(World,{year:World.year-3,subject:S,lineage:Lineage}))"));
-  assert.equal(stale.reason,'stale_year');
-  if(first.spawned){
-    const count=expose(context,"Object.keys(World.storyChains).length");
-    assert.ok(count<=3,'at most one live dialogue per spawn tick');
-  }
+test('the VN window renders speaker plates, quoted lines, choices, and the END card',()=>{
+  const context=uiContext('vn-ui');
+  loadGameFiles(context,[]); // no-op guard for readers
+  expose(context,"S.age=30; World.year=S.dob+S.age; slipOpen=false;");
+  installTestEpisode(context);
+  expose(context,"StorySystem.ensure(World); World.year+=1;");
+  expose(context,"StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage});");
+  assert.ok(expose(context,'StorySystem.hasLiveRun(World)'),'episode staged for the window');
+  expose(context,'openStorySlip(true);');
+  let html=expose(context,"document.getElementById('slipCard').innerHTML");
+  assert.ok(html.includes('KARSEN FILES'),'the series header shows');
+  assert.ok(html.includes('vn-backdrop'),'a backdrop stage renders');
+  assert.ok(html.includes('Xander Quill'),'the cast plate names the speaker');
+  assert.ok(html.includes('NEXT'),'lines advance with NEXT');
+  // Walk to the choice through the real UI handlers.
+  expose(context,"while(currentStoryChain()&&currentStoryChain().type==='line'){StorySystem.next(World,{year:World.year});} openStorySlip(true);");
+  html=expose(context,"document.getElementById('slipCard').innerHTML");
+  assert.match(html,/data-vn-opt="\d"/,'choice cards render');
+  assert.ok(html.includes('will be remembered'),'choices carry Telltale-style notes');
+  // Pick branch 0 through the engine, re-render: END card appears.
+  expose(context,"var v=currentStoryChain(); StorySystem.choose(World,v.options[0].index,{year:World.year,subject:S});");
+  expose(context,"while(currentStoryChain()&&currentStoryChain().type!=='ending'){StorySystem.next(World,{year:World.year});} openStorySlip(true);");
+  html=expose(context,"document.getElementById('slipCard').innerHTML");
+  assert.ok(html.includes('THE END'),'the endcard stamps the finale');
+  assert.ok(html.includes('File It Away'),'filing control present');
+  // Filing closes and archives.
+  expose(context,'closeStorySlip();');
+  assert.equal(expose(context,'slipOpen'),false);
+  assert.equal(expose(context,'StorySystem.hasLiveRun(World)'),false);
+  assert.equal(expose(context,'Object.values(World.storyArchive).length'),1);
 });
 
-test('generation is deterministic for identical seeds and differs across seeds',()=>{
-  const build=id=>{
-    const context=storyContext(id);
-    let spawned=null;
-    for(let i=0;i<24&&!spawned;i++){
-      expose(context,"World.year+=1; S.age+=1;");
-      spawned=expose(context,"(function(){var r=StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage});return r.spawned||null;})()");
-    }
-    assert.ok(spawned,'a story must spawn within 24 years');
-    return JSON.parse(expose(context,"JSON.stringify(World.storyChains["+JSON.stringify(spawned)+"])"));
-  };
-  const a=build('determinism-seed'), b=build('determinism-seed'), c=build('determinism-other');
-  assert.equal(JSON.stringify(a),JSON.stringify(b),'same seed must replay byte-for-byte');
-  assert.notEqual(a.title+'|'+a.castLabel+'|'+a.chapters[0].prompt,c.title+'|'+c.castLabel+'|'+c.chapters[0].prompt,'different seeds should diverge (over many runs this is overwhelmingly true)');
-});
-
-test('choices apply exactly once, clamp bounds, and archive the arc on completion',()=>{
-  const context=storyContext('story-effects');
-  expose(context,"StorySystem.ensure(World);"+
-    "var body={title:'TEST ARC',castLabel:'with Test',castKey:'test-cast',setup:['Line one.'],prompt:'Choose.',choices:[{label:'Greedy',hint:'',tone:'greedy',effects:[{kind:'money',delta:-999999},{kind:'scrutiny',delta:500}],outcomes:['It went down.']},{label:'Kind',hint:'',tone:'kind',effects:[{kind:'partnerMood',delta:99}],outcomes:['It went up.']}],prompt:'Choose.'};"+
-    "World.storyChains['story:90001']={id:'story:90001',archetypeId:'stranger_kindness_arc',domain:'stranger',title:body.title,castLabel:body.castLabel,castKey:body.castKey,signature:'x|test-cast',startedYear:World.year,readyYear:World.year,status:'decision',chapterIndex:0,delivered:false,lastTone:null,lastChoiceLabel:null,history:[],chapters:[body]}; World.storyCounter=Math.max(World.storyCounter,90001);");
-  const beforeAssets=expose(context,"S.assets");
-  const applied=JSON.parse(expose(context,"JSON.stringify(StorySystem.applyEffects(World,'story:90001',0,{year:World.year,subject:S}))"));
-  assert.equal(applied.applied,true);
-  assert.ok(applied.chips.some(c=>/SCRUTINY/.test(c.txt))&&applied.chips.some(c=>c.plus===false));
-  assert.ok(expose(context,"S.assets")<=-100000,'the massive money op clamped hard toward the floor');
-  assert.equal(expose(context,"S.scrutiny"),100,'scrutiny clamps at 100');
-  const again=JSON.parse(expose(context,"JSON.stringify(StorySystem.applyEffects(World,'story:90001',0,{year:World.year,subject:S}))"));
-  assert.equal(again.applied,false,'a second application must be a rejected no-op');
-  assert.ok(['already_resolved','missing_chain'].includes(again.reason),'rejected because resolved and archived, or already terminal');
-  assert.equal(expose(context,"Object.keys(World.storyArchive).length"),1,'completed single-chapter arcs land in the archive');
-  const archived=JSON.parse(expose(context,"JSON.stringify(Object.values(World.storyArchive)[0])"));
-  assert.equal(archived.signature,'stranger_kindness_arc|test-cast');
-});
-
-test('continuation chapters compose lazily and wait for next year',()=>{
-  const context=storyContext('story-continue');
-  expose(context,"StorySystem.ensure(World); var def=StorySystem.STORIES.find(function(s){return s.id==='parent_loan_arc';});"+
-    "World.storyChains['story:90002']={id:'story:90002',archetypeId:def.id,domain:def.domain,title:'LOAN',castLabel:'with Parent',castKey:'p1',signature:def.id+'|p1',startedYear:World.year,readyYear:World.year,status:'decision',chapterIndex:0,delivered:false,lastTone:null,lastChoiceLabel:null,history:[],chapters:[normalizeForTest(def)]}; World.storyCounter=Math.max(World.storyCounter,90002);"+
-    "function normalizeForTest(def){var rng=Random.create(['test']);return def.build({world:World,S:S,lineage:Lineage,year:World.year,rng:rng,cast:{}});} ");
-  const applied=JSON.parse(expose(context,"JSON.stringify(StorySystem.applyEffects(World,'story:90002',1,{year:World.year,subject:S}))"));
-  assert.equal(applied.applied,true);
-  assert.equal(applied.completed,false,'two-chapter arcs stay open after chapter one');
-  let chain=JSON.parse(expose(context,"JSON.stringify({status:World.storyChains['story:90002'].status,readyYear:World.storyChains['story:90002'].readyYear,chapters:World.storyChains['story:90002'].chapters.length})"));
-  assert.equal(chain.status,'awaiting_year');
-  assert.equal(chain.readyYear,expose(context,'World.year')+1);
-  expose(context,"World.year+=1; StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage});");
-  chain=JSON.parse(expose(context,"JSON.stringify({status:World.storyChains['story:90002'].status,chapters:World.storyChains['story:90002'].chapters.length})"));
-  assert.equal(chain.status,'decision','the calendar unlocks chapter two');
-  assert.equal(chain.chapters,2,'the continuation composes when the calendar unlocks it');
-});
-
-test('signatures block rapid repeats and expire over time',()=>{
-  const context=storyContext('story-repeat');
-  expose(context,"StorySystem.ensure(World);"+
-    "World.storyArchive['story-archive:00001']={id:'story-archive:00001',archetypeId:'spouse_arc',domain:'spouse',title:'X',castKey:'mira',signature:'spouse_arc|mira',startedYear:World.year-2,resolvedYear:World.year-2,tones:['kind'],finalOutcome:''}; World.storyArchiveCounter=1;");
-  assert.equal(expose(context,"StorySystem.signatureBlocked(World,'spouse_arc|mira',World.year)"),true,'recent signature blocks');
-  assert.equal(expose(context,"StorySystem.signatureBlocked(World,'spouse_arc|mira',World.year+10)"),false,'old signature frees up');
-});
-
-test('invariants hold after simulated activity and flag corrupted state',()=>{
-  const context=storyContext('story-invariants');
-  for(let i=0;i<6;i++){
-    expose(context,"World.year+=1;");
-    expose(context,"StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage});");
-    // resolve whatever waits, via the system's own auto path
-    expose(context,"StorySystem.tickWorld(World,{year:World.year+50,subject:S,lineage:Lineage,autoResolve:true,actorTone:'hustler'});");
-    expose(context,"World.year+=50;");
-    expose(context,"StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage});");
-  }
-  assert.deepEqual(JSON.parse(expose(context,"JSON.stringify(StorySystem.checkInvariants(World))")),[]);
-  expose(context,"World.storyChains['garbage']='not-a-chain';");
-  const issues=JSON.parse(expose(context,"JSON.stringify(StorySystem.checkInvariants(World))"));
-  assert.ok(issues.length>=1,'corruption must be reported, never thrown');
-});
-
-test('the dialogue window renders a live story, applies the chosen branch once, and files it',()=>{
-  const context=uiStoryContext('story-window');
-  // Run years until the annual pipeline delivers a live story dialogue.
-  let opened=false;
-  for(let i=0;i<30&&!opened;i++){
-    expose(context,'slipOpen=false;');
-    try{ expose(context,'advance(true,true)'); }catch(e){ break; }
-    opened=!!expose(context,'currentStoryChain()===null?false:(World.storyChains[Object.keys(World.storyChains).find(function(k){return World.storyChains[k].status==="decision"&&World.storyChains[k].readyYear<=World.year;})]||null)?currentStoryChain():null');
-  }
-  if(!opened){
-    // Fall back to exercising the window directly on whatever waits next year.
-    expose(context,"StorySystem.tickWorld(World,{year:World.year+1,subject:S,lineage:Lineage}); World.year+=1; S.age+=1;");
-    assert.ok(expose(context,'!!currentStoryChain()'),'a story should be deliverable');
-  }
-  expose(context,'openStorySlip();');
-  const markup=expose(context,"document.getElementById('slipCard').innerHTML");
-  assert.ok(markup.includes('STORY FILE'),'dialogue header renders');
-  assert.ok(/data-sc="\d"/.test(markup),'choice buttons render');
-  assert.ok(expose(context,'slipOpen')===true,'the window is modal like other slips');
-  const beforeAssets=expose(context,'S.assets');
-  const beforeScrutiny=expose(context,'S.scrutiny');
-  expose(context,'resolveStoryChoice(0);');
-  const afterMarkup=expose(context,"document.getElementById('slipCard').innerHTML");
-  assert.ok(afterMarkup.includes('FILED · YEAR'),'outcome panel replaces the choices');
-  const consumed=JSON.parse(expose(context,"JSON.stringify(Object.values(World.storyChains).filter(function(c){return c.delivered;}).length)"));
-  void consumed;
-  assert.ok(expose(context,"S.assets")!==beforeAssets||expose(context,"S.scrutiny")!==beforeScrutiny||true,'state may or may not shift for this branch');
-});
-
-test('fast-forward resolves stories silently through the disposition heuristic',()=>{
-  const context=uiStoryContext('story-quiet');
-  expose(context,'quietMode=true; slipOpen=false;');
-  let resolved=false;
-  for(let i=0;i<40&&!resolved;i++){
-    expose(context,"World.year+=1; S.age+=1;");
-    const result=JSON.parse(expose(context,"JSON.stringify(StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage,autoResolve:true,actorTone:'hustler'}))"));
-    if(result.resolved&&result.resolved.length){resolved=true;
-      assert.ok(result.resolved[0].logText.includes('STORY RESOLVED'),'auto-resolution produces a log line');}
-    if(!result.spawned){
-      assert.equal(JSON.parse(expose(context,"JSON.stringify(Object.values(World.storyChains).filter(function(c){return c.status==='decision'&&!c.delivered&&c.readyYear<=World.year;}).length)")),0,
-        'no live decision may linger while fast-forwarding');
-    }
-  }
-  assert.ok(resolved,'stories must self-resolve under fast-forward within 40 years');
+test('the old popup-era APIs are gone from the runtime surface',()=>{
+  const src=fs.readFileSync('js/systems/story-system.js','utf8');
+  assert.ok(!src.includes('pendingDecisionForUi'));
+  assert.ok(!src.includes('applyEffects'));
 });

@@ -2334,47 +2334,94 @@ function resolveNotice(n){
   }
 }
 
-/* ================= STORY DIALOGUE WINDOW =================
- * Procedural, seed-generated life-stories. The window shows the scene and
- * two or three choices whose mechanical consequences stay hidden until the
- * outcome is filed -- the player decides on flavor and judgement alone. */
-function openStorySlip(){
-  const chain=currentStoryChain(); if(!chain) return;
+/* ================= KARSEN FILES — VISUAL NOVEL WINDOW =================
+ * Episodes play as scenes of quoted dialogue: backdrop, colored speaker
+ * plate with monogram portrait, text advanced with NEXT ▸, branching
+ * choice cards (with "…will remember that" notes), and THE END card whose
+ * consequences have already landed on the real file. */
+function currentStoryChain(){
+  if(typeof StorySystem!=='object'||!StorySystem||typeof World==='undefined'||!World) return null;
+  try{ return StorySystem.currentView(World,{year:World.year}); }catch(e){ return null; }
+}
+const VN_SPEAKER_CLASS={narrator:'vn-narr',you:'vn-you'};
+function vnSpeakerClass(key){ return VN_SPEAKER_CLASS[key]||('vn-c'+Math.abs(String(key).split('').reduce((a,c)=>a+c.charCodeAt(0),0))%6); }
+function vnMonogram(label){
+  const initials=String(label||'?').trim().split(/\s+/).map(w=>w.charAt(0)).slice(0,2).join('').toUpperCase()||'?';
+  return '<span class="vn-portrait">'+initials+'</span>';
+}
+function runStoryYearTick(){
+  if(typeof StorySystem!=='object'||!StorySystem||typeof World==='undefined'||!World) return null;
+  let actorTone=null;
+  try{ actorTone=currentDisposition(S).it.id; }catch(e){}
+  const result=StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage,autoResolve:!!quietMode,actorTone});
+  if(quietMode&&result&&Array.isArray(result.resolved)){
+    result.resolved.forEach(entry=>{
+      ffRecordAction('EPISODE · '+entry.title+' — '+entry.endingTitle);
+      logEv(entry.logText,{},'story','KARSEN FILE · YEAR '+S.age);
+    });
+  }
+  return result;
+}
+let vnLastViewKey='';
+function openStorySlip(force){
+  const view=currentStoryChain(); if(!view) return;
+  const key=view.runId+':'+view.type+':'+(view.type==='line'?view.lineIndex:view.type==='choice'?'c':view.ending.id);
+  if(!force&&key===vnLastViewKey) return; // render exactly once per beat
+  vnLastViewKey=key;
   slipOpen=true; document.body.classList.add('slip-open');
-  const card=$('#slipCard'); card.className='slipcard dialogue';
-  const chapter=chain.chapters[chain.chapterIndex]||{setup:[],prompt:'Choose.',choices:[]};
-  const chapterTag=chain.chapters.length>1?(' · CHAPTER '+(chain.chapterIndex+1)+' OF '+chain.chapters.length):'';
-  const bodyHtml=chapter.setup.map(line=>'<p class="sl-body">'+fill(line)+'</p>').join('');
-  const choicesHtml=chapter.choices.map((c,i)=>
-    '<button class="sl-btn '+(c.tone==='greedy'?'no':c.tone==='kind'?'ok':'maybe')+'" data-sc="'+i+'">'+fill(c.label)+(c.hint?'<small>'+fill(c.hint)+'</small>':'')+'</button>'
-  ).join('');
-  card.innerHTML='<div class="sl-head story"><span>STORY FILE № '+String(chain.id.replace('story:',''))+'</span><span class="sl-req">'+(chain.domain||'life').toUpperCase()+' · YEAR '+S.age+chapterTag+'</span></div>'+
-    '<div class="sl-title story">'+fill(chain.title)+'</div>'+
-    (chain.castLabel?'<p class="sl-speaker">'+fill(chain.castLabel)+'</p>':'')+
-    bodyHtml+
-    '<p class="sl-note">'+fill(chapter.prompt)+'</p>'+
-    '<div class="sl-actions">'+choicesHtml+'</div>';
-  card.onclick=e=>{ const b=e.target.closest('[data-sc]'); if(!b)return; resolveStoryChoice(+b.dataset.sc); };
+  const card=$('#slipCard'); card.className='slipcard vn';
+  const echo=(typeof StorySystem.echoLineFor==='function')?StorySystem.echoLineFor(World):null;
+  let html='<div class="sl-head story"><span>KARSEN FILES</span><span class="sl-req">'+String(view.domain||'life').toUpperCase()+(view.sceneNo?' · SCENE '+view.sceneNo:'')+' · YEAR '+S.age+'</span></div>';
+  html+='<div class="vn-titlebar">'+fill(view.title||'AN EPISODE')+'</div>';
+  if(view.type==='ending'){
+    const e=view.ending;
+    html+='<div class="vn-backdrop vn-bg-'+(view.bg||'street')+' vn-endbg"><div class="vn-endstamp">THE END</div></div>';
+    html+='<div class="vn-titlebar endname">'+fill(e.title)+'</div>';
+    html+=e.epilogue.map(l=>'<p class="sl-body vn-epi">'+fill(l)+'</p>').join('');
+    html+='<div class="sl-note">The consequences are already on the file.</div>'+
+      '<div class="sl-actions"><button class="sl-btn ok" data-vn="file">File It Away ▸</button></div>';
+  } else {
+    html+='<div class="vn-backdrop vn-bg-'+(view.bg||'street')+'"></div>';
+    if(view.type==='line'){
+      const spk=view.speaker||{key:'narrator',label:''};
+      const isNarr=spk.key==='narrator';
+      html+='<div class="vn-stage">'+
+        (isNarr?'':'<div class="vn-plate '+vnSpeakerClass(spk.key)+'">'+vnMonogram(spk.label)+'<b>'+escapeHtml(spk.label)+'</b></div>')+
+        '<div class="vn-text'+(isNarr?' narr':'')+'">'+escapeHtml(fill(view.text))+'</div>'+
+        '</div>';
+      html+=(view.remember?'<div class="vn-remember">'+escapeHtml(view.remember)+' — that will be remembered.</div>':'');
+      html+='<div class="sl-actions"><button class="sl-btn ok" data-vn="next">'+(view.isLastLine?'The scene turns ▸':'NEXT ▸')+'</button></div>';
+    } else if(view.type==='choice'){
+      html+='<div class="vn-prompt">'+escapeHtml(fill(view.prompt||'Choose.'))+'</div>';
+      html+='<div class="vn-choices">'+view.options.map(o=>
+        '<button class="sl-btn '+(o.tone==='greedy'?'no':o.tone==='kind'?'ok':'maybe')+'" data-vn-opt="'+o.index+'"><span>'+escapeHtml(fill(o.t))+'</span>'+(o.note?'<small>'+escapeHtml(o.note)+' …will be remembered.</small>':'<small>…will be remembered.</small>')+'</button>'
+      ).join('')+'</div>';
+    }
+  }
+  void echo;
+  card.innerHTML=html;
+  card.onclick=e=>{
+    const nx=e.target.closest('[data-vn]');
+    if(nx){
+      if(nx.dataset.vn==='file'){ closeStorySlip(); return; }
+      const v2=StorySystem.next(World,{year:World.year,subject:S,lineage:Lineage});
+      snd(v2&&v2.type==='choice'?'paper':'tick');
+      openStorySlip(true); updateBar(); return;
+    }
+    const opt=e.target.closest('[data-vn-opt]');
+    if(opt){
+      const res=StorySystem.choose(World,+opt.dataset.vnOpt,{year:World.year,subject:S,lineage:Lineage});
+      snd('stamp');
+      if(res.applied){ window.C={}; renderStats(window.C); }
+      openStorySlip(true); updateBar(); return;
+    }
+  };
   $('#slipWrap').classList.remove('hidden'); snd('paper'); updateBar();
 }
-function resolveStoryChoice(choiceIndex){
-  const chain=currentStoryChain(); if(!chain){ closeStorySlip(); return; }
-  const result=typeof StorySystem==='object'&&StorySystem?StorySystem.applyEffects(World,chain.id,choiceIndex,{year:World.year,subject:S,lineage:Lineage}):null;
-  snd('stamp');
-  const card=$('#slipCard'); card.onclick=null;
-  const chips=(result&&Array.isArray(result.chips)&&result.chips.length)
-    ?'<div class="sl-chips">'+result.chips.map(c=>'<span class="fx '+(c.plus?'plus':'minus')+'">'+c.txt+'</span>').join('')+'</div>'
-    :'';
-  const completed=result&&result.completed;
-  card.innerHTML='<div class="sl-head story"><span>STORY FILE № '+String(chain.id.replace('story:',''))+'</span><span class="sl-req">FILED · YEAR '+S.age+'</span></div>'+
-    '<div class="sl-title story">'+fill(chain.title)+'</div>'+
-    '<p class="sl-body">'+fill(result&&result.outcome?result.outcome:'The matter is filed.')+'</p>'+chips+
-    '<p class="sl-note">'+(completed?'The arc closes. The archive keeps its shape for later lives to echo — rarely.':chain.status==='awaiting_year'?'The file stays open. Next year, this story continues from what you chose here.':'Filed away.')+'</p>'+
-    '<div class="sl-actions"><button class="sl-btn ok" data-story-ack="1">File Away ▸</button></div>';
-  card.onclick=e=>{ if(e.target.closest('[data-story-ack]')) closeStorySlip(); };
-  updateBar();
-}
+function escapeHtml(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function closeStorySlip(){
+  try{ if(typeof StorySystem==='object'&&StorySystem&&currentStoryChain()&&currentStoryChain().type==='ending'){ StorySystem.fileAway(World,currentStoryChain().runId,{year:World.year}); } }catch(e){}
+  vnLastViewKey='';
   $('#slipWrap').classList.add('hidden'); slipOpen=false; document.body.classList.remove('slip-open');
   window.C={}; renderStats(window.C); updateBar();
   drainNextSlip();
@@ -3414,26 +3461,6 @@ function resolvePendingVacancies(){
 }
 function syncPlayerVacancyPortal(){
   if(S.age>=16&&S.age<65&&S.jailUntil<=S.age) rollJobVacancies();
-}
-// Story & dialogue annual tick (procedural life-stories). Spawns at most one
-// live dialogue per year; during fast-forward it resolves live stories itself
-// via the subject's disposition heuristic so no slips block the years.
-function runStoryYearTick(){
-  if(typeof StorySystem!=='object'||!StorySystem||typeof World==='undefined'||!World) return null;
-  let actorTone=null;
-  try{ actorTone=currentDisposition(S).it.id; }catch(e){}
-  const result=StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage,autoResolve:!!quietMode,actorTone});
-  if(quietMode&&result&&Array.isArray(result.resolved)){
-    result.resolved.forEach(entry=>{
-      ffRecordAction('STORY · '+entry.title+' — '+entry.choiceLabel);
-      logEv(entry.logText,{},'story','STORY FILE · YEAR '+S.age);
-    });
-  }
-  return result;
-}
-function currentStoryChain(){
-  if(typeof StorySystem!=='object'||!StorySystem||typeof World==='undefined'||!World) return null;
-  try{ return StorySystem.pendingDecisionForUi(World,S); }catch(e){ return null; }
 }
 function advanceYear(suppressBurst,quiet){
   if(!S||!S.alive||slipOpen) return;
