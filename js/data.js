@@ -933,7 +933,7 @@ const PURSUITS=[
    note:()=>`a meal at the mission line · free · the ladle comes with eyes`,
    apply:(S2)=>{const year=(typeof currentYear==='function')?currentYear():((typeof S.dob==='number'?S.dob:0)+S.age); S.soupKitchenYear=year;
      return{fx:{happiness:2},text:pick(['Subject queued at the mission kitchen and ate what was given. It was hot. That counted for something.','Subject held out the tin bowl and answered the ladle questions with a nod. The food helped; the eyes did not.'])};}},
- {id:'rest',cat:'health',icon:'💤',cost:0,avail:s=>s.age>=6&&!S.queue.some(q=>q.id==='rest'),note:()=>`do nothing · recover a little`,
+ {id:'rest',cat:'health',icon:'💤',cost:0,avail:s=>s.age>=6&&!S.queue.some(q=>q.id==='rest')&&!(((s.__doneActions||{})[currentYear()]||[]).includes('rest')),note:()=>`do nothing · recover a little`,
    apply:()=>({fx:{health:1,happiness:2},text:pick(['Subject did nothing, on purpose, for a day. The Bureau has no form for this, which is why it worked.','Subject rested. The ceiling beams were counted. The subject was, briefly, not tired.'])})},
  {id:'bottle',cat:'vice',icon:'🍺',cost:1,avail:s=>s.age>=16,dark:1,note:()=>`+HAPPINESS now · −HEALTH · +VICE`,
    apply:()=>{S.vice=Math.min(10,S.vice+1);return{fx:{happiness:3,health:-3},text:pick(['Subject drank to feel better. It worked, briefly, then charged interest.','Subject and the bottle kept an appointment. The bottle was punctual.'])}}},

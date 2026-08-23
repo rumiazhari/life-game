@@ -342,7 +342,7 @@ function autoPlanCandidates(){
   return out;
 }
 // Greedily fills S.queue with the best available candidates within this
-// year's plan-hour budget, honoring every queueAdd() guard (definition,
+// year's plan-hour budget, honoring every performActionNow() guard (definition,
 // once-per-year reservation, availability, hour fit) without its per-action
 // UI side effects. Player-queued items already in S.queue are kept; only
 // remaining hours are topped up.
@@ -484,7 +484,7 @@ function fxPreviewChips(fx){
 }
 function planNoteText(def,type,id,ok,afford,dup){
   if(dup)return actionReservedNote(id);
-  if(!afford)return 'needs '+(def.cost||1)+'h free';
+  if(!afford)return 'needs ⚡'+(def.cost||1)+' free';
   if(!ok){const w=whyNotFor(id);return w?('— '+w):(type==='p'?'— not available this year':'— not available');}
   return fillLabel(def.note?def.note(S):'');
 }
@@ -544,8 +544,8 @@ function renderCoach(){
   const el=$('#coachBar');if(!el)return;
   if(!S||!S.alive||slipOpen){el.classList.add('hidden');return;}
   let step=null;
-  if(!coachGet('plan'))step=['STEP 1 · PLAN','Tap PLAN THE YEAR — queue pursuits, then seal.'];
-  else if(!coachGet('seal'))step=['STEP 2 · SEAL','Seal &amp; Advance — the Bureau stamps the year forward.'];
+  if(!coachGet('plan'))step=['STEP 1 · LIVE','Tap LIVE THE YEAR — act on things now; each act costs energy.'];
+  else if(!coachGet('seal'))step=['STEP 2 · END THE YEAR','End the Year — the Bureau stamps the year forward.'];
   else if(!coachGet('report'))step=['STEP 3 · THE REPORT','Each year files an Annual Report above the bar. Tap it to skim.'];
   else {el.classList.add('hidden');return;}
   el.innerHTML='<span class="cb-txt"><b>'+step[0]+'</b>'+step[1]+'</span><button id="coachDismiss">GOT IT</button>';
@@ -807,7 +807,7 @@ function openMedicalTreatmentPicker(conditionId){
     '<div class="chips">'+rows+'</div><div class="ps-foot"><button class="btn" id="medicalTreatmentCancel">Back ▸</button></div>';
   $('#skillSheet').onclick=e=>{
     const choice=e.target.closest('[data-medical-treatment]');
-    if(choice){ queueAdd('d','treatment',{condition:condition.instanceId,treatment:choice.dataset.medicalTreatment}); $('#skillWrap').classList.add('hidden'); return; }
+    if(choice){ performActionNow('d','treatment',{condition:condition.instanceId,treatment:choice.dataset.medicalTreatment}); $('#skillWrap').classList.add('hidden'); return; }
     if(e.target.id==='medicalTreatmentCancel') $('#skillWrap').classList.add('hidden');
   };
   $('#skillWrap').classList.remove('hidden');
@@ -1471,6 +1471,8 @@ function renderStage(){
   el.textContent=STAGE_INFO[S.stage].name;
   renderLifeRibbon();
 }
+// ENERGY: the year's budget for deliberate action. Same arithmetic the old
+// "hours" ran on, renamed to what it always meant -- vigor, not clock time.
 function computeHours(){
   if(S.age<6||S.jailUntil>S.age) return 0;
   let h=S.age<14?2:S.age<65?3:2;
@@ -1479,16 +1481,33 @@ function computeHours(){
   return clamp(h,0,4);
 }
 function planHours(){ const total=computeHours(); return Math.max(0,total-(S.autoTrain&&total>=1?1:0)); }
+function energyUsed(){
+  const done=doneActionsThisYear().reduce((a,id)=>{const d=PUR_MAP[id]?PUR_MAP[id].cost:(DEC_MAP[id]?DEC_MAP[id].cost:0);return a+(d||0);},0);
+  return done+S.queue.reduce((a,q)=>a+(PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0)),0);
+}
+// Actions performed directly this year (the LIVE sheet resolves instantly;
+// this ledger enforces once-per-year actions and feeds why-not reasons).
+function doneActionsThisYear(){
+  const y=currentYear();
+  if(!S.__doneActions||typeof S.__doneActions!=='object'||Array.isArray(S.__doneActions)) return [];
+  return Array.isArray(S.__doneActions[y])?S.__doneActions[y]:[];
+}
+function markActionDone(id){
+  const y=currentYear();
+  if(!S.__doneActions||typeof S.__doneActions!=='object'||Array.isArray(S.__doneActions)) S.__doneActions={};
+  (S.__doneActions[y]=S.__doneActions[y]||[]).push(id);
+  S.__actedThisYear=true;
+}
 function updateBar(){
-  const total=computeHours(), h=planHours(), used=S.queue.reduce((a,q)=>a+(PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0)),0);
+  const total=computeHours(), h=planHours(), used=energyUsed();
   const rem=Math.max(0,h-used), btn=$('#btn-plan'), lab=$('#plan-label'), pips=$('#plan-pips');
   pips.innerHTML=''; for(let i=0;i<h;i++){const e=document.createElement('i'); if(i<rem)e.className='on'; pips.appendChild(e);}
   const disabled = slipOpen || total===0 || !S.alive;
   btn.classList.toggle('disabled',disabled); btn.classList.toggle('ready',!disabled);
   if(slipOpen) lab.textContent='RESOLVE SLIP FIRST';
   else if(total===0) lab.textContent=(S.jailUntil>S.age?'IN CUSTODY':'NO AGENCY YET');
-  else lab.textContent='PLAN THE YEAR';
-  $('#bar-micro').textContent = h===0 ? (S.jailUntil>S.age?'in custody — stamp the years':'too young to choose — stamp the years') : 'plan the year · stamp it forward';
+  else lab.textContent='LIVE THE YEAR';
+  $('#bar-micro').textContent = h===0 ? (S.jailUntil>S.age?'in custody — stamp the years':'too young to choose — stamp the years') : 'act now · then stamp the year forward';
 }
 
 /* ================= PLAN SHEET ================= */
@@ -1498,7 +1517,8 @@ function openPlan(){
   snd('paper'); renderPlan(); $('#planWrap').classList.remove('hidden');
 }
 function closePlan(){ $('#planWrap').classList.add('hidden'); }
-function actionReservedThisYear(id){ return S.queue.some(q=>q.id===id)||(id==='practice'&&S.autoTrain); }
+function renderPlanIfOpen(){ const w=$('#planWrap'); if(w&&!w.classList.contains('hidden')) renderPlan(); }
+function actionReservedThisYear(id){ return doneActionsThisYear().includes(id)||S.queue.some(q=>q.id===id)||(id==='practice'&&S.autoTrain); }
 function actionReservedNote(id){ return id==='practice'&&S.autoTrain?'reserved for auto-training':'already filed this year'; }
 function oddsHint(id){
   try{
@@ -1529,19 +1549,21 @@ function planActionButton(def,type,rem){
   const label=isP?pursuitLabel(def):decisionLabel(def);
   const fxLine=(ok&&!dup)?fxPreviewHtmlSafe(def):'';
   const odds=ok&&!dup?oddsHint(id):null;
-  return '<button class="slipbtn'+(def.dark?' dark':'')+(cant?' cant':'')+(dup?' queued':'')+'" data-'+type+'="'+id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(def.icon?'<span class="sb-icon">'+def.icon+'</span> ':'')+fillLabel(label)+(odds?'<span class="sb-odds">'+odds+'</span>':'')+'</span><span class="sb-cost">'+(def.cost?def.cost+'h':'free')+'</span></div><div class="sb-note">'+planNoteText(def,type,id,ok,afford,dup)+'</div>'+fxLine+'</button>';
+  return '<button class="slipbtn'+(def.dark?' dark':'')+(cant?' cant':'')+'" data-'+type+'="'+id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(def.icon?'<span class="sb-icon">'+def.icon+'</span> ':'')+fillLabel(label)+(odds?'<span class="sb-odds">'+odds+'</span>':'')+'</span><span class="sb-cost">'+(def.cost?'⚡'+def.cost:'free')+'</span></div><div class="sb-note">'+planNoteText(def,type,id,ok,afford,dup)+'</div>'+fxLine+'</button>';
 }
 function fxPreviewHtmlSafe(def){
   try{const h=typeof def.fx==='object'&&def.fx?fxPreviewChips(def.fx):'';return h?'<div class="sb-fx">'+h+'</div>':'';}catch(e){return '';}
 }
 let planTab='pursuits';
 function renderPlan(){
-  const h=planHours(), used=S.queue.reduce((a,q)=>a+(PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0)),0);
+  const h=planHours(), used=energyUsed();
   const rem=Math.max(0,h-used);
   let qh='';
-  if(S.queue.length){ S.queue.forEach((q,i)=>{const d=PUR_MAP[q.id]||DEC_MAP[q.id]; qh+='<div class="qitem">'+(d.icon?d.icon+' ':'')+(d.dark?'⚑ ':'')+fillLabel(labelOf(q))+'<button class="qx" data-rm="'+i+'">✕</button></div>';}); }
-  else qh='<div class="qempty">Nothing filed yet.</div>';
-  const autoRow='<button class="autotrain-toggle'+(S.autoTrain?' on':'')+'" id="autoTrainBtn"><b>AUTO-TRAIN A SKILL</b><span>'+(S.autoTrain?'ON · best skill trains itself':'OFF · reserve 1h each year')+'</span></button>';
+  const doneList=doneActionsThisYear();
+  if(doneList.length){
+    qh='<div class="qempty">Already done this year: '+doneList.map(id=>{const d=PUR_MAP[id]||DEC_MAP[id];return d?fillLabel(pursuitLabel(d)||decisionLabel(d)):id;}).filter(Boolean).join(' · ')+'.</div>';
+  }
+  const autoRow='<button class="autotrain-toggle'+(S.autoTrain?' on':'')+'" id="autoTrainBtn"><b>AUTO-TRAIN A SKILL</b><span>'+(S.autoTrain?'ON · reserves ⚡1 for year-end practice':'OFF · keep all your energy for now')+'</span></button>';
   let ph='';
   PUR_CATS.forEach(cat=>{
     if(cat.id==='hold') return;
@@ -1549,7 +1571,7 @@ function renderPlan(){
     let ih='';
     items.forEach(p=>{const ok=p.avail(S); const afford=rem>=p.cost;
       const dup=actionReservedThisYear(p.id); const cant=!ok||!afford||dup;
-      ih+='<button class="slipbtn'+(p.dark?' dark':'')+(cant?' cant':'')+(dup?' queued':'')+'" data-p="'+p.id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(p.icon?'<span class="sb-icon">'+p.icon+'</span> ':'')+fillLabel(pursuitLabel(p))+'</span><span class="sb-cost">'+(p.cost?p.cost+'h':'free')+'</span></div><div class="sb-note">'+(ok?(dup?actionReservedNote(p.id):fillLabel(p.note(S))):'— not available this year')+'</div></button>';});
+      ih+='<button class="slipbtn'+(p.dark?' dark':'')+(cant?' cant':'')+'" data-p="'+p.id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(p.icon?'<span class="sb-icon">'+p.icon+'</span> ':'')+fillLabel(pursuitLabel(p))+'</span><span class="sb-cost">'+(p.cost?'⚡'+p.cost:'free')+'</span></div><div class="sb-note">'+(ok?(dup?actionReservedNote(p.id):fillLabel(p.note(S))):(dup?actionReservedNote(p.id):'— not available now'))+'</div></button>';});
     ph+='<div class="ps-catlab">'+cat.label+'</div><div class="sliplist">'+ih+'</div>';
   });
   let hh='';
@@ -1586,23 +1608,23 @@ function renderPlan(){
   }
   let body='';
   if(planTab==='decisions'){ body=dh+hh; }
-  else if(planTab==='desk'){ body=(lh?'<div class="ps-catlab">LIVING — NO HOURS</div>'+lh:'')+'<div class="ps-catlab">CLERK’S DISCRETION</div><div class="ps-clerk">'+ch+'</div>'; }
+  else if(planTab==='desk'){ body=(lh?'<div class="ps-catlab">LIVING — NO ENERGY</div>'+lh:'')+'<div class="ps-catlab">CLERK’S DISCRETION</div><div class="ps-clerk">'+ch+'</div>'; }
   else {
     const recChips=recommendedActions(rem);
     const recStrip=recChips.length?'<div class="rec-strip"><span class="rec-lab">SUGGESTED NOW</span>'+recChips.join('')+'</div>':'';
     body=recStrip+autoRow+ph;
   }
   $('#planSheet').innerHTML=
-    '<div class="ps-head"><span>SCHEDULE OF PURSUITS · FORM 7</span><span style="display:flex;align-items:center;gap:10px"><span class="hrs">'+rem+'/'+h+' HOURS '+pipsHTML(rem,h)+'</span><button class="ps-close" id="planClose" aria-label="Close">✕</button></span></div>'+
-    '<div class="ps-sub"><span>FILED THIS YEAR</span>'+(S.queue.length?'<button class="voidbtn" id="voidLast">VOID LAST</button>':'')+'</div>'+qh+
+    '<div class="ps-head"><span>DIRECT ORDERS · FORM 7</span><span style="display:flex;align-items:center;gap:10px"><span class="hrs">⚡ '+rem+'/'+h+' ENERGY '+pipsHTML(rem,h)+'</span><button class="ps-close" id="planClose" aria-label="Close">✕</button></span></div>'+
+    '<div class="ps-sub"><span>WHAT IS DONE IS DONE — ACTS LAND IMMEDIATELY</span></div>'+qh+
     '<div class="plan-tabs">'+
-      '<button class="ptab'+(planTab==='pursuits'?' on':'')+'" data-plan-tab="pursuits">PURSUITS</button>'+
+      '<button class="ptab'+(planTab==='pursuits'?' on':'')+'" data-plan-tab="pursuits">ACT NOW</button>'+
       '<button class="ptab'+(planTab==='decisions'?' on':'')+'" data-plan-tab="decisions">DECISIONS</button>'+
       '<button class="ptab'+(planTab==='desk'?' on':'')+'" data-plan-tab="desk">BUREAU DESK</button>'+
     '</div>'+
     body+
     projectionHtml(rem)+
-    '<div class="ps-foot sticky"><button class="btn" id="sealAdvance">Seal &amp; Advance the Year ▸</button></div>';
+    '<div class="ps-foot sticky"><button class="btn" id="sealAdvance">End the Year ▸</button></div>';
 }
 function pipsHTML(rem,h){let s='';for(let i=0;i<h;i++)s+='<i class="'+(i<rem?'on':'')+'"></i>';return s;}
 function lifeToggle(items,current,dataAttr,priceFn){
@@ -1642,21 +1664,34 @@ $('#planSheet').addEventListener('click',e=>{
   if(uiOpen){ if(uiOpen.dataset.uiOpen==='household'){ snd('paper'); openHousehold(); } return; }
   const pb=e.target.closest('[data-p]'); if(pb&&!pb.classList.contains('cant')){
     let ex=null; try{ex=pb.dataset.extra?JSON.parse(pb.dataset.extra):null;}catch(err){ex=null;}
-    if(ex&&pb.dataset.p==='gig'&&ex.openingId){ queueAdd('p','gig',{gigId:ex.gigId||null,openingId:ex.openingId}); return; }
+    if(ex&&pb.dataset.p==='gig'&&ex.openingId){ performActionNow('p','gig',{gigId:ex.gigId||null,openingId:ex.openingId}); return; }
     triggerAction('p',pb.dataset.p); return; }
   const db=e.target.closest('[data-d]'); if(db&&!db.classList.contains('cant')){ triggerAction('d',db.dataset.d); return; }
   const cb=e.target.closest('[data-c]'); if(cb&&cb.classList.contains('ready')){deskAction(cb.dataset.c);renderPlan();return;}
   if(e.target.closest('#openHousehold')){ snd('paper'); openHousehold(); return; }
   if(e.target.closest('#askMoveOut')){ snd('paper'); closePlan(); openLivingDilemma('leave-request'); return; }
-  if(e.target.id==='voidLast'){S.queue.pop();snd('paper');renderPlan();updateBar();return;}
   if(e.target.id==='sealAdvance'){coachSet('seal');closePlan();advance();return;}
 });
-function queueAdd(type,id,extra){
+// LIVE ACTIONS: clicking an action performs it immediately -- effects, log
+// line, and energy cost land right now, not at year's end. The old queue
+// survives only as the fast-forward autopilot's internal scratchpad.
+function performActionNow(type,id,extra){
+  if(!S||!S.alive||slipOpen) return;
   const d=type==='p'?PUR_MAP[id]:DEC_MAP[id]; if(!d) return;
   if(actionReservedThisYear(id)){ shake(); return; }
-  const h=planHours(), used=S.queue.reduce((a,q)=>a+(PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0)),0);
-  if(used+d.cost>h){shake();return;}
-  S.queue.push(Object.assign({id,type},extra||{})); snd('stamp'); renderPlan(); updateBar();
+  const total=planHours(), used=energyUsed();
+  if(used+(d.cost||0)>total){ shake(); snd('stamp'); return; }
+  window.C={}; S.acts++;
+  let r;
+  if(id==='learntrade'&&extra&&extra.program&&typeof educationCompleteProgram==='function'){
+    const result=educationCompleteProgram(extra.program);
+    r=result.ok?{fx:{happiness:2},text:'Subject completed '+result.program.name+'. '+result.program.desc+(result.shortfall?' The unpaid '+money(result.shortfall)+' was entered as education debt.':' The certificate was paid from assets.') }:{fx:{happiness:-1},text:'Subject reached for vocational training, but the course was not available on the current record.'};
+  } else r=d.apply(S,extra||{});
+  const chips=r&&r.fx?applyFx(r.fx):[];
+  if(r&&r.follow) pushFollow(r.follow);
+  logChips(r&&r.text?fill(r.text):'It was done.',chips,type==='p'?'plan':'decision',(type==='p'?'PURSUIT':'DECISION')+' · NOW');
+  markActionDone(id);
+  renderStats(window.C); updateBar(); renderPlanIfOpen();
 }
 const CONTACT_TARGET_ROLES={flirt:null,flirtsecret:'affair',tendcontact:'friend',cutcontact:null};
 function openContactTargetPicker(id){
@@ -1666,14 +1701,14 @@ function openContactTargetPicker(id){
     if(roles==='friend')return c.role==='friend';
     return true;
   });
-  if(!cands.length){queueAdd('p',id,{});return;}
+  if(!cands.length){performActionNow('p',id,{});return;}
   const rows=cands.map(c=>'<button class="chipbtn" data-cid="'+c.cid+'"><b>'+sexSym(c.sex)+' '+abbrevName(c.name,18)+'</b><span>'+moodPips(c.mood)+' · '+charmLabel(c.charm!=null?c.charm:50)+'</span></button>').join('');
   $('#skillSheet').innerHTML='<div class="ps-head"><span>'+fillLabel(pursuitLabel(def)).toUpperCase()+' — CHOOSE WHO</span></div>'+
     '<div class="chips">'+rows+'</div>'+
     '<div class="ps-foot"><button class="btn" id="skillCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
     const b=e.target.closest('[data-cid]');
-    if(b){queueAdd('p',id,{cid:b.dataset.cid});$('#skillWrap').classList.add('hidden');return;}
+    if(b){performActionNow('p',id,{cid:b.dataset.cid});$('#skillWrap').classList.add('hidden');return;}
     if(e.target.id==='skillCancel')$('#skillWrap').classList.add('hidden');
   };
   $('#skillWrap').classList.remove('hidden');
@@ -1687,11 +1722,11 @@ function triggerAction(type,id,extra){
     if(id==='gig'){openGigPicker();return;}
     if(id==='meetsomeone'){openMeetPicker();return;}
     if(Object.prototype.hasOwnProperty.call(CONTACT_TARGET_ROLES,id)){openContactTargetPicker(id);return;}
-    queueAdd('p',id,extra);
+    performActionNow('p',id,extra);
   } else {
     if(id==='learntrade'){openTrainingPicker();return;}
     if(id==='treatment'){openMedicalTreatmentPicker();return;}
-    queueAdd('d',id,extra);
+    performActionNow('d',id,extra);
   }
 }
 const PER_CONTACT_IDS=new Set(['flirt','flirtsecret','tendcontact','covertracks']);
@@ -1841,7 +1876,7 @@ function openSkillPick(){
     '<div style="margin:0 2px">'+ih+'</div>'+
     '<div class="ps-foot"><button class="btn" id="skillCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
-    const sb=e.target.closest('[data-skill]'); if(sb){queueAdd('p','practice',{skill:sb.dataset.skill}); $('#skillWrap').classList.add('hidden'); return;}
+    const sb=e.target.closest('[data-skill]'); if(sb){performActionNow('p','practice',{skill:sb.dataset.skill}); $('#skillWrap').classList.add('hidden'); return;}
     if(e.target.id==='skillCancel'){$('#skillWrap').classList.add('hidden');}
     const row=e.target.closest('[data-skill-row]'); if(row){openSkillDetail(row.dataset.skillRow);return;}
   };
@@ -1871,7 +1906,7 @@ function openSkillDetail(skillId){
     '<div style="margin:4px 2px 0">'+rows+'</div>'+
     '<div class="ps-foot">'+(canTrain?'<button class="btn" style="margin-bottom:8px" data-train="'+skillId+'">Train This Year ▸</button>':'')+'<button class="btn" id="skillDetailClose">Close ▸</button></div>';
   $('#jobDetailSheet').onclick=e=>{
-    const b=e.target.closest('[data-train]'); if(b){queueAdd('p','practice',{skill:b.dataset.train}); $('#jobDetailWrap').classList.add('hidden'); $('#skillWrap').classList.add('hidden'); return;}
+    const b=e.target.closest('[data-train]'); if(b){performActionNow('p','practice',{skill:b.dataset.train}); $('#jobDetailWrap').classList.add('hidden'); $('#skillWrap').classList.add('hidden'); return;}
     if(e.target.id==='skillDetailClose'){$('#jobDetailWrap').classList.add('hidden');}
   };
   $('#jobDetailWrap').classList.remove('hidden');
@@ -1889,7 +1924,7 @@ function openTrainingPicker(){
     '<div class="ps-foot"><button class="btn" id="trainingCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
     const b=e.target.closest('[data-training]');
-    if(b){queueAdd('d','learntrade',{program:b.dataset.training});$('#skillWrap').classList.add('hidden');return;}
+    if(b){performActionNow('d','learntrade',{program:b.dataset.training});$('#skillWrap').classList.add('hidden');return;}
     if(e.target.id==='trainingCancel')$('#skillWrap').classList.add('hidden');
   };
   $('#skillWrap').classList.remove('hidden');
@@ -1942,7 +1977,7 @@ function openJobPortal(){
     '<button class="household-tile" id="openGigs"><b>🕶 Off the Books</b><span>Paid in cash — maybe</span><i>No résumé required.</i></button>'+
     '<div class="ps-foot"><button class="btn" id="jobCancel">Keep Looking ▸</button></div>';
   $('#jobSheet').onclick=e=>{
-    const b=e.target.closest('[data-apply]'); if(b){ queueAdd('p','lookwork',{track:b.dataset.track,stage:+b.dataset.stage}); $('#jobWrap').classList.add('hidden'); return; }
+    const b=e.target.closest('[data-apply]'); if(b){ performActionNow('p','lookwork',{track:b.dataset.track,stage:+b.dataset.stage}); $('#jobWrap').classList.add('hidden'); return; }
     if(e.target.id==='jobCancel'){ $('#jobWrap').classList.add('hidden'); return; }
     if(e.target.closest('#openGigs')){ $('#jobWrap').classList.add('hidden'); openGigPicker(); return; }
     const row=e.target.closest('[data-track-row]'); if(row){ openJobDetail(row.dataset.trackRow); }
@@ -1991,7 +2026,7 @@ function openJobPortalPersistent(){
     '<button class="household-tile" id="openGigs"><b>🕶 Off the Books</b><span>Paid in cash — maybe</span><i>No résumé required.</i></button>'+
     '<div class="ps-foot"><button class="btn" id="jobCancel">Keep Looking ▸</button></div>';
   $('#jobSheet').onclick=e=>{
-    const b=e.target.closest('[data-apply]'); if(b){ queueAdd('p','lookwork',{vacancyId:b.dataset.vacancy}); $('#jobWrap').classList.add('hidden'); return; }
+    const b=e.target.closest('[data-apply]'); if(b){ performActionNow('p','lookwork',{vacancyId:b.dataset.vacancy}); $('#jobWrap').classList.add('hidden'); return; }
     if(e.target.id==='jobCancel'){ $('#jobWrap').classList.add('hidden'); return; }
     if(e.target.closest('#openGigs')){ $('#jobWrap').classList.add('hidden'); openGigPicker(); return; }
     const row=e.target.closest('[data-track-row]'); if(row&&row.dataset.trackRow){ openJobDetail(row.dataset.trackRow,row.dataset.vacancyRow); }
@@ -2020,7 +2055,7 @@ function openGigPicker(){
     ch+
     '<div class="ps-foot"><button class="btn" id="skillCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
-    const gb=e.target.closest('[data-gig]'); if(gb){queueAdd('p','gig',{gig:gb.dataset.gig}); $('#skillWrap').classList.add('hidden'); return;}
+    const gb=e.target.closest('[data-gig]'); if(gb){performActionNow('p','gig',{gig:gb.dataset.gig}); $('#skillWrap').classList.add('hidden'); return;}
     if(e.target.id==='skillCancel'){$('#skillWrap').classList.add('hidden');}
   };
   $('#skillWrap').classList.remove('hidden');
@@ -2039,7 +2074,7 @@ function openMeetPicker(){
     '<div class="chips">'+ch+'</div>'+
     '<div class="ps-foot"><button class="btn" id="skillCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
-    const vb=e.target.closest('[data-venue]'); if(vb){queueAdd('p','meetsomeone',{venue:vb.dataset.venue}); $('#skillWrap').classList.add('hidden'); return;}
+    const vb=e.target.closest('[data-venue]'); if(vb){performActionNow('p','meetsomeone',{venue:vb.dataset.venue}); $('#skillWrap').classList.add('hidden'); return;}
     if(e.target.id==='skillCancel'){$('#skillWrap').classList.add('hidden');}
   };
   $('#skillWrap').classList.remove('hidden');
@@ -2095,8 +2130,8 @@ function openJobDetail(trackId,vacancyId){
   $('#jobDetailSheet').onclick=e=>{
     const b=e.target.closest('[data-apply]');
     if(b){
-      if(b.dataset.vacancy) queueAdd('p','lookwork',{vacancyId:b.dataset.vacancy});
-      else queueAdd('p','lookwork',{track:b.dataset.track,stage:+b.dataset.stage});
+      if(b.dataset.vacancy) performActionNow('p','lookwork',{vacancyId:b.dataset.vacancy});
+      else performActionNow('p','lookwork',{track:b.dataset.track,stage:+b.dataset.stage});
       $('#jobDetailWrap').classList.add('hidden'); $('#jobWrap').classList.add('hidden'); return;
     }
     if(e.target.id==='jobDetailClose'){ $('#jobDetailWrap').classList.add('hidden'); }
@@ -2162,7 +2197,7 @@ function openMemberPick(){
   $('#skillSheet').innerHTML='<div class="ps-head"><span>CHOOSE WHO TO LOOK AFTER</span></div><div class="chips">'+ch+'</div>'+
     '<div class="ps-foot"><button class="btn" id="skillCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
-    const mb=e.target.closest('[data-member]'); if(mb){queueAdd('p','tendmember',{member:mb.dataset.member}); $('#skillWrap').classList.add('hidden'); return;}
+    const mb=e.target.closest('[data-member]'); if(mb){performActionNow('p','tendmember',{member:mb.dataset.member}); $('#skillWrap').classList.add('hidden'); return;}
     if(e.target.id==='skillCancel'){$('#skillWrap').classList.add('hidden');}
   };
   $('#skillWrap').classList.remove('hidden');
@@ -2662,6 +2697,8 @@ function runBudget(WAR){
 function resolvePlan(){
   const q=S.queue.slice(); S.queue=[];
   let autoTrained=false;
+  const actedDirectly=!!S.__actedThisYear;
+  S.__actedThisYear=false;
   if(S.autoTrain&&computeHours()>=1){
     const skillId=autoPickSkill();
     if(skillId){ autoTrained=true; window.C={}; const r=PUR_MAP['practice'].apply(S,{skill:skillId}); const chips=r.fx?applyFx(r.fx):[];
@@ -2669,7 +2706,7 @@ function resolvePlan(){
       logChips(fill(r.text)+' (auto-trained)',chips,'plan','PURSUIT · YEAR '+S.age);
       renderStats(window.C); }
   }
-  if(!q.length&&!autoTrained&&computeHours()>0){
+  if(!q.length&&!autoTrained&&!actedDirectly&&computeHours()>0){
     window.C={};
     logChips('A quiet year. Not every one needs a headline.',[],'idle','YEAR '+S.age);
   }
@@ -3402,6 +3439,12 @@ function advanceYear(suppressBurst,quiet){
   if(!S||!S.alive||slipOpen) return;
   captureYearSnapshot();
   rpgTierBefore=S.jobTier||0;
+  // New year: prune old done-action years. The "acted this year" flag is
+  // consumed by the year-end resolution pass below, not reset here --
+  // direct acts performed before the stamp belong to the year being ended.
+  if(S.__doneActions&&typeof S.__doneActions==='object'&&!Array.isArray(S.__doneActions)){
+    Object.keys(S.__doneActions).forEach(k=>{ if(Number(k)<currentYear()-1) delete S.__doneActions[k]; });
+  }
   if(S.age>0) evaluateYearStreak(quiet);
   yearLog=[]; collectingYear=true;
   S.age++; World.year++;

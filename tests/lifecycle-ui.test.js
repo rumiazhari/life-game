@@ -187,9 +187,9 @@ test('coach marks advance through plan, seal, and report steps',()=>{
   const result=JSON.parse(expose(context,`(function(){
     renderCoach();
     const bar=document.getElementById('coachBar');
-    const step1=bar.innerHTML.includes('STEP 1 · PLAN');
+    const step1=bar.innerHTML.includes('STEP 1 · LIVE');
     coachSet('plan');
-    const step2=bar.innerHTML.includes('STEP 2 · SEAL');
+    const step2=bar.innerHTML.includes('STEP 2 · END THE YEAR');
     coachSet('seal');
     const step3=bar.innerHTML.includes('STEP 3 · THE REPORT');
     coachSet('report');
