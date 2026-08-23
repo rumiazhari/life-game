@@ -2299,6 +2299,52 @@ function resolveNotice(n){
   }
 }
 
+/* ================= STORY DIALOGUE WINDOW =================
+ * Procedural, seed-generated life-stories. The window shows the scene and
+ * two or three choices whose mechanical consequences stay hidden until the
+ * outcome is filed -- the player decides on flavor and judgement alone. */
+function openStorySlip(){
+  const chain=currentStoryChain(); if(!chain) return;
+  slipOpen=true; document.body.classList.add('slip-open');
+  const card=$('#slipCard'); card.className='slipcard dialogue';
+  const chapter=chain.chapters[chain.chapterIndex]||{setup:[],prompt:'Choose.',choices:[]};
+  const chapterTag=chain.chapters.length>1?(' · CHAPTER '+(chain.chapterIndex+1)+' OF '+chain.chapters.length):'';
+  const bodyHtml=chapter.setup.map(line=>'<p class="sl-body">'+fill(line)+'</p>').join('');
+  const choicesHtml=chapter.choices.map((c,i)=>
+    '<button class="sl-btn '+(c.tone==='greedy'?'no':c.tone==='kind'?'ok':'maybe')+'" data-sc="'+i+'">'+fill(c.label)+(c.hint?'<small>'+fill(c.hint)+'</small>':'')+'</button>'
+  ).join('');
+  card.innerHTML='<div class="sl-head story"><span>STORY FILE № '+String(chain.id.replace('story:',''))+'</span><span class="sl-req">'+(chain.domain||'life').toUpperCase()+' · YEAR '+S.age+chapterTag+'</span></div>'+
+    '<div class="sl-title story">'+fill(chain.title)+'</div>'+
+    (chain.castLabel?'<p class="sl-speaker">'+fill(chain.castLabel)+'</p>':'')+
+    bodyHtml+
+    '<p class="sl-note">'+fill(chapter.prompt)+'</p>'+
+    '<div class="sl-actions">'+choicesHtml+'</div>';
+  card.onclick=e=>{ const b=e.target.closest('[data-sc]'); if(!b)return; resolveStoryChoice(+b.dataset.sc); };
+  $('#slipWrap').classList.remove('hidden'); snd('paper'); updateBar();
+}
+function resolveStoryChoice(choiceIndex){
+  const chain=currentStoryChain(); if(!chain){ closeStorySlip(); return; }
+  const result=typeof StorySystem==='object'&&StorySystem?StorySystem.applyEffects(World,chain.id,choiceIndex,{year:World.year,subject:S,lineage:Lineage}):null;
+  snd('stamp');
+  const card=$('#slipCard'); card.onclick=null;
+  const chips=(result&&Array.isArray(result.chips)&&result.chips.length)
+    ?'<div class="sl-chips">'+result.chips.map(c=>'<span class="fx '+(c.plus?'plus':'minus')+'">'+c.txt+'</span>').join('')+'</div>'
+    :'';
+  const completed=result&&result.completed;
+  card.innerHTML='<div class="sl-head story"><span>STORY FILE № '+String(chain.id.replace('story:',''))+'</span><span class="sl-req">FILED · YEAR '+S.age+'</span></div>'+
+    '<div class="sl-title story">'+fill(chain.title)+'</div>'+
+    '<p class="sl-body">'+fill(result&&result.outcome?result.outcome:'The matter is filed.')+'</p>'+chips+
+    '<p class="sl-note">'+(completed?'The arc closes. The archive keeps its shape for later lives to echo — rarely.':chain.status==='awaiting_year'?'The file stays open. Next year, this story continues from what you chose here.':'Filed away.')+'</p>'+
+    '<div class="sl-actions"><button class="sl-btn ok" data-story-ack="1">File Away ▸</button></div>';
+  card.onclick=e=>{ if(e.target.closest('[data-story-ack]')) closeStorySlip(); };
+  updateBar();
+}
+function closeStorySlip(){
+  $('#slipWrap').classList.add('hidden'); slipOpen=false; document.body.classList.remove('slip-open');
+  window.C={}; renderStats(window.C); updateBar();
+  drainNextSlip();
+}
+
 /* ================= YEAR RESOLUTION ================= */
 function vtext(e){
   S.usedV[e.id]=S.usedV[e.id]||[];
@@ -3332,6 +3378,26 @@ function resolvePendingVacancies(){
 function syncPlayerVacancyPortal(){
   if(S.age>=16&&S.age<65&&S.jailUntil<=S.age) rollJobVacancies();
 }
+// Story & dialogue annual tick (procedural life-stories). Spawns at most one
+// live dialogue per year; during fast-forward it resolves live stories itself
+// via the subject's disposition heuristic so no slips block the years.
+function runStoryYearTick(){
+  if(typeof StorySystem!=='object'||!StorySystem||typeof World==='undefined'||!World) return null;
+  let actorTone=null;
+  try{ actorTone=currentDisposition(S).it.id; }catch(e){}
+  const result=StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage,autoResolve:!!quietMode,actorTone});
+  if(quietMode&&result&&Array.isArray(result.resolved)){
+    result.resolved.forEach(entry=>{
+      ffRecordAction('STORY · '+entry.title+' — '+entry.choiceLabel);
+      logEv(entry.logText,{},'story','STORY FILE · YEAR '+S.age);
+    });
+  }
+  return result;
+}
+function currentStoryChain(){
+  if(typeof StorySystem!=='object'||!StorySystem||typeof World==='undefined'||!World) return null;
+  try{ return StorySystem.pendingDecisionForUi(World,S); }catch(e){ return null; }
+}
 function advanceYear(suppressBurst,quiet){
   if(!S||!S.alive||slipOpen) return;
   captureYearSnapshot();
@@ -3466,6 +3532,7 @@ function advanceYear(suppressBurst,quiet){
   guardianIncidentTick();
   schoolYearTick();
   runRandomEvents();
+  runStoryYearTick();
   if(S.alive) checkMortality();
   if(S.alive){ S.hapSum+=S.happiness; S.hapYears++; S.peakHap=Math.max(S.peakHap,S.happiness); }
   pushSparkPoint();
@@ -3480,6 +3547,7 @@ function advanceYear(suppressBurst,quiet){
     else if(S.__pendingReverseDiscovery){ const ctx=S.__pendingReverseDiscovery; S.__pendingReverseDiscovery=null; dispatchReverseDiscoveryReaction(ctx); }
     else if(S.__pendingTheirSpouseNotice){ const n=S.__pendingTheirSpouseNotice; S.__pendingTheirSpouseNotice=null; openNotice(n); }
     else if(S.__pendingGuardianNotice){ const gp=S.__pendingGuardianNotice; S.__pendingGuardianNotice=null; openGuardianNotice(gp); }
+    else if(!quietMode&&currentStoryChain()){ openStorySlip(); }
     else if(!checkGuardianEviction()&&!checkParentingStyleChoice()) maybeSlip();
   }
   if(!S.alive) handleDeath();
