@@ -929,9 +929,25 @@ function applyMapTransform(){
   applyAnnotationScale();
 }
 function mapPoint(e,svg){
-  const r=svg.getBoundingClientRect();
-  const view=svg.viewBox?.baseVal||{width:100,height:82};
-  return {x:(e.clientX-r.left)/r.width*view.width,y:(e.clientY-r.top)/r.height*view.height};
+  /* Production path: real SVG screen matrix (handles letterboxing from
+     preserveAspectRatio and any CSS sizing). */
+  if(svg&&typeof svg.getScreenCTM==='function'){
+    try{
+      const ctm=svg.getScreenCTM();
+      if(ctm&&typeof ctm.inverse==='function'){
+        const inv=ctm.inverse();
+        if(typeof DOMPoint==='function') return new DOMPoint(e.clientX,e.clientY).matrixTransform(inv);
+        if(typeof svg.createSVGPoint==='function'){
+          const pt=svg.createSVGPoint(); pt.x=e.clientX; pt.y=e.clientY;
+          return pt.matrixTransform(inv);
+        }
+      }
+    }catch(err){/* fall through to manual conversion */}
+  }
+  /* Test/no-SVG fallback with correct letterboxing math. */
+  const rect=svg&&typeof svg.getBoundingClientRect==='function'?svg.getBoundingClientRect():{left:0,top:0,width:100,height:100};
+  const view=svg&&svg.viewBox&&svg.viewBox.baseVal||{width:100,height:82};
+  return MapSystem.viewboxPoint(e.clientX,e.clientY,rect,view);
 }
 function mapViewSize(svg){
   /* Settlement sheets are their own world space: the viewBox equals the
@@ -1028,7 +1044,9 @@ function renderSettlementMap(){
   const canonicalEls=Object.keys(scene.canonical).map(cid=>{
     const v=scene.canonical[cid];
     const sel=cid===selectedId?' selected':'', cur=cid===currentB?' current':'';
-    return '<path class="map-building '+v.kind+sel+cur+'" data-map-building="'+cid+'" tabindex="0" role="button" aria-label="'+(names[cid]||'')+'" d="'+MapSystem.polyPath(v.poly)+'"></path>';
+    /* invisible generous hit area first, then the visible footprint */
+    return '<path class="map-building-hit" data-map-building="'+cid+'" d="'+MapSystem.polyPath(v.hitPoly)+'"></path>'
+      +'<path class="map-building '+v.kind+sel+cur+'" data-map-building="'+cid+'" tabindex="0" role="button" aria-label="'+(names[cid]||'')+'" d="'+MapSystem.polyPath(v.poly)+'"></path>';
   }).join('');
   const selected=buildingById(s.id,selectedId)||s.buildings[0];
   const route=routeBetween(currentSettlement().id,s.id), cost=same?0:travelCost(currentSettlement(),s);
@@ -1065,20 +1083,23 @@ function refreshSettlementAnnotations(force){
   const selectedId=World.map.selectedBuildingId||s.buildings[0].id;
   const currentB=same?World.activeBuildingId:null;
   const anno=MapSystem.annotationItems(scene,mapViewport,view,tier,names,selectedId,currentB);
-  const k=anno.unit/anno.scale;
+  /* Every annotation is anchored at its world position; only the inner
+     .map-anno group is counter-scaled (unit / camera scale), so text and
+     icons hold constant screen size while staying glued to their entities.
+     The annotation LAYER itself is never transformed. */
+  const k=(anno.unit/anno.scale).toFixed(5);
   leaders.innerHTML=anno.labels.filter(l=>l.leader).map(l=>
     '<path class="map-poi-leader" d="M '+l.leader.from.x.toFixed(1)+' '+l.leader.from.y.toFixed(1)+' L '+l.leader.to.x.toFixed(1)+' '+l.leader.to.y.toFixed(1)+'"></path>').join('');
-  holder.setAttribute('transform','scale('+k.toFixed(5)+')');
   holder.innerHTML=anno.districtLabels.map(d=>
-    '<g transform="translate('+d.centroid.x.toFixed(0)+' '+d.centroid.y.toFixed(0)+')"><text class="map-district-label" text-anchor="middle">'+d.name.toUpperCase()+'</text></g>').join('')
+    '<g transform="translate('+d.centroid.x.toFixed(0)+' '+d.centroid.y.toFixed(0)+')"><g class="map-anno" data-k="'+k+'"><text class="map-district-label" text-anchor="middle">'+d.name.toUpperCase()+'</text></g></g>').join('')
     +anno.labels.map(l=>{
       if(l.annoKind==='street'){
-        return '<g transform="translate('+l.pos.x.toFixed(1)+' '+l.pos.y.toFixed(1)+')"><text class="map-label street" text-anchor="middle" transform="rotate('+(l.angle*180/Math.PI).toFixed(1)+')">'+l.text+'</text></g>';
+        return '<g transform="translate('+l.pos.x.toFixed(1)+' '+l.pos.y.toFixed(1)+')"><g class="map-anno" data-k="'+k+'"><text class="map-label street" text-anchor="middle" transform="rotate('+Number(l.deg||0).toFixed(1)+')">'+l.text+'</text></g></g>';
       }
       const emphasized=l.emphasized?' emphasized':'';
       const icon='<g transform="translate(0 '+(-anno.unit*0.62).toFixed(1)+')">'+MapSystem.poiSymbolMarkup(l.symbol,0,0,(anno.unit*0.3).toFixed(2))+'</g>';
-      return '<g transform="translate('+l.anchor.x.toFixed(1)+' '+l.anchor.y.toFixed(1)+')"><g class="map-anno poi-icon'+emphasized+'" data-k="'+k.toFixed(5)+'">'+icon+'</g></g>'
-        +'<g transform="translate('+l.pos.x.toFixed(1)+' '+l.pos.y.toFixed(1)+')"><g class="map-anno anno-text'+emphasized+'" data-k="'+k.toFixed(5)+'"><text class="map-label poi'+emphasized+'" text-anchor="'+(l.leader&&l.pos.x>=l.anchor.x?'start':l.leader?'end':'middle')+'">'+l.text+'</text></g></g>';
+      return '<g transform="translate('+l.anchor.x.toFixed(1)+' '+l.anchor.y.toFixed(1)+')"><g class="map-anno poi-icon'+emphasized+'" data-k="'+k+'">'+icon+'</g></g>'
+        +'<g transform="translate('+l.pos.x.toFixed(1)+' '+l.pos.y.toFixed(1)+')"><g class="map-anno anno-text'+emphasized+'" data-k="'+k+'"><text class="map-label poi'+emphasized+'" text-anchor="'+(l.leader&&l.pos.x>=l.anchor.x?'start':l.leader?'end':'middle')+'">'+l.text+'</text></g></g>';
     }).join('');
   mapAnnoLast={tier:tier,cx:mapViewport.x,cy:mapViewport.y,scale:mapViewport.scale};
 }

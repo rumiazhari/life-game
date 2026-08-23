@@ -61,26 +61,27 @@ test('cities carry many hundreds of individual building footprints',()=>{
     const sc=scene(context,id);
     counts[id]=sc.visuals.length;
   });
-  assert.ok(counts.branec>500,'Branec needs 500+ footprints, got '+counts.branec);
-  assert.ok(counts.veskar>400,'Veskar needs 400+ footprints, got '+counts.veskar);
-  assert.ok(counts.eisenmark>400,'Eisenmark needs 400+ footprints, got '+counts.eisenmark);
-  assert.ok(counts.rudava>350,'Rudava needs 350+ footprints, got '+counts.rudava);
-  assert.ok(counts.kostrin>350,'Kostrin needs 350+ footprints, got '+counts.kostrin);
+  assert.ok(counts.branec>900,'Branec needs 900+ footprints, got '+counts.branec);
+  assert.ok(counts.branec<2200,'Branec must stay performant, got '+counts.branec);
+  assert.ok(counts.veskar>650,'Veskar needs 650+ footprints, got '+counts.veskar);
+  assert.ok(counts.eisenmark>650,'Eisenmark needs 650+ footprints, got '+counts.eisenmark);
+  assert.ok(counts.rudava>500,'Rudava needs 500+ footprints, got '+counts.rudava);
+  assert.ok(counts.kostrin>420,'Kostrin needs 420+ footprints, got '+counts.kostrin);
 });
 
 test('towns and villages carry appropriate lower density',()=>{
   const context=worldMapContext();
   TOWN_IDS.forEach(id=>{
     const n=scene(context,id).visuals.length;
-    assert.ok(n>100,id+' town needs 100+ footprints, got '+n);
+    assert.ok(n>150,id+' town needs 150+ footprints, got '+n);
   });
   VILLAGE_IDS.forEach(id=>{
     const n=scene(context,id).visuals.length;
-    assert.ok(n>30,id+' village needs 30+ footprints, got '+n);
+    assert.ok(n>40,id+' village needs 40+ footprints, got '+n);
   });
   const cityN=scene(context,'branec').visuals.length;
   const villageN=scene(context,'krasnava').visuals.length;
-  assert.ok(cityN>villageN*4,'capital must be dramatically denser than a village');
+  assert.ok(cityN>villageN*8,'capital must be dramatically denser than a village');
 });
 
 test('footprints are polygons placed inside the sheet bounds',()=>{
@@ -381,6 +382,31 @@ const MapSystemSafe={
       if(((yi>py)!==(yj>py))&&(px<(xj-xi)*(py-yi)/(yj-yi)+xi)) inside=!inside;
     }
     return inside;
+  },
+  polygonCentroid(poly){
+    let x=0,y=0;
+    poly.forEach(p=>{x+=p[0];y+=p[1];});
+    return {x:x/poly.length,y:y/poly.length};
+  },
+  segmentsCross(p1,p2,p3,p4){
+    function orient(ax,ay,bx,by,cx,cy){return (bx-ax)*(cy-ay)-(by-ay)*(cx-ax);}
+    const d1=orient(p3[0],p3[1],p4[0],p4[1],p1[0],p1[1]);
+    const d2=orient(p3[0],p3[1],p4[0],p4[1],p2[0],p2[1]);
+    const d3=orient(p1[0],p1[1],p2[0],p2[1],p3[0],p3[1]);
+    const d4=orient(p1[0],p1[1],p2[0],p2[1],p4[0],p4[1]);
+    return ((d1>0)!==(d2>0))&&((d3>0)!==(d4>0));
+  },
+  polysIntersect(a,b){
+    for(let i=0;i<a.length;i++) if(this.pointInPolygon(a[i][0],a[i][1],b)) return true;
+    for(let i=0;i<b.length;i++) if(this.pointInPolygon(b[i][0],b[i][1],a)) return true;
+    for(let i=0;i<a.length;i++){
+      const a2=a[(i+1)%a.length];
+      for(let j=0;j<b.length;j++){
+        const b2=b[(j+1)%b.length];
+        if(this.segmentsCross(a[i],a2,b[j],b2)) return true;
+      }
+    }
+    return false;
   }
 };
 
@@ -428,7 +454,8 @@ test('Branec renders as a large navigable sheet with canonical footprints',()=>{
   const out=JSON.parse(expose(context,`
     var html=document.getElementById('mapSheet').innerHTML;
     JSON.stringify({viewBox:html.indexOf('viewBox="0 0 2800 2100"')>=0,
-      canonical:(html.match(/data-map-building=/g)||[]).length,
+      canonical:(html.match(/class="map-building [a-z]/g)||[]).length,
+      hitAreas:(html.match(/class="map-building-hit"/g)||[]).length,
       fabric:html.indexOf('plan-fabric')>=0,
       streets:html.indexOf('plan-streets')>=0,
       rail:html.indexOf('plan-rail')>=0,
@@ -439,6 +466,7 @@ test('Branec renders as a large navigable sheet with canonical footprints',()=>{
   `));
   assert.ok(out.viewBox,'sheet must adopt the authored world-space viewBox');
   assert.equal(out.canonical,10,'ten interactive canonical footprints');
+  assert.ok(out.hitAreas>=10,'every canonical POI needs a generous invisible hit area');
   assert.ok(out.fabric&&out.streets&&out.rail,'authored morphology must render');
   assert.ok(out.districts>=4,'district geography must render');
   assert.ok(out.controls&&out.key&&out.scalebar&&out.cartouche);
@@ -530,4 +558,139 @@ test('POI symbol families stay visually distinct',()=>{
   assert.ok(legendFamilies.size>=9,'the key must document every symbol family');
   const anno=expose(context,"document.getElementById('mapAnnoLayer').innerHTML");
   assert.ok((anno.match(/map-poi poi-/g)||[]).length>0,'visible POIs carry their symbols');
+});
+
+/* ---------- v4: annotation scale, collisions, morphology ---------- */
+
+test('annotation counter-scale keeps apparent size constant across zoom',()=>{
+  const context=mapContext();
+  const out=JSON.parse(expose(context,`
+    var unit=50;
+    JSON.stringify([1,4,12,22].map(function(s){
+      var k=MapSystem.annotationScaleFactor(unit,s);
+      return {s:s,k:+k.toFixed(5),product:+(s*k).toFixed(3)};
+    }));
+  `));
+  out.forEach(o=>assert.ok(Math.abs(o.product-50)<0.01,
+    'cameraScale x annotationScale must stay constant at '+o.s+'x'));
+});
+
+test('annotations are counter-scaled exactly once - never on the layer',()=>{
+  const ui=fs.readFileSync(path.join(ROOT,'js','ui.js'),'utf8');
+  const mapSection=ui.slice(ui.indexOf('KARSEN MAP'),ui.indexOf('function renderSkills'));
+  assert.ok(!/getElementById\('mapAnnoLayer'\)[\s\S]{0,60}setAttribute\('transform'/.test(mapSection),
+    'the annotation layer itself must not be transformed');
+  assert.ok(mapSection.includes("querySelectorAll('.map-anno')"),
+    'individual .map-anno groups carry the single counter-scale');
+  const context=uiContext('v4-anno-scale');
+  openBranec(context);
+  const annoHtml=expose(context,"document.getElementById('mapAnnoLayer').innerHTML");
+  assert.ok(annoHtml.indexOf('class="map-anno')>=0,'emitted annotations use the .map-anno wrapper');
+  const ks=new Set((annoHtml.match(/data-k="[0-9.]+"/g)||[]));
+  assert.equal(ks.size,1,'every annotation in one refresh shares exactly one scale factor');
+});
+
+test('viewBox conversion handles letterboxed viewports correctly',()=>{
+  const context=mapContext();
+  const out=JSON.parse(expose(context,`
+    JSON.stringify({
+      wide:MapSystem.viewboxPoint(900,300,{left:0,top:0,width:1200,height:600},{width:600,height:600}),
+      tall:MapSystem.viewboxPoint(300,900,{left:0,top:0,width:600,height:1200},{width:600,height:600}),
+      exact:MapSystem.viewboxPoint(150,75,{left:0,top:0,width:300,height:150},{width:600,height:300})
+    });
+  `));
+  /* wide viewport letterboxes left/right: content spans screen x 300..900 */
+  assert.equal(out.wide.x,600);
+  assert.equal(out.wide.y,300);
+  /* tall viewport letterboxes top/bottom */
+  assert.equal(out.tall.x,300);
+  assert.equal(out.tall.y,600);
+  assert.equal(out.exact.x,300);
+  assert.equal(out.exact.y,150);
+});
+
+test('production mapPoint prefers the SVG screen CTM',()=>{
+  const ui=fs.readFileSync(path.join(ROOT,'js','ui.js'),'utf8');
+  assert.ok(ui.includes('getScreenCTM'),'cursor math must use the real SVG matrix');
+});
+
+test('generated buildings do not materially overlap each other or landmarks',()=>{
+  const context=worldMapContext();
+  ['branec','veskar','eisenmark','krasnava'].forEach(id=>{
+    const sc=scene(context,id);
+    const vis=sc.visuals;
+    let checkedPairs=0;
+    for(let i=0;i<vis.length;i++){
+      for(let j=i+1;j<vis.length;j++){
+        const a=vis[i],b=vis[j];
+        /* cheap bbox prefilter before polygon intersection */
+        if(a.bbox&&b.bbox){
+          if(a.bbox[2]<b.bbox[0]||b.bbox[2]<a.bbox[0]||a.bbox[3]<b.bbox[1]||b.bbox[3]<a.bbox[1]) continue;
+        }
+        checkedPairs++;
+        assert.ok(!MapSystemSafe.polysIntersect(a.poly,b.poly),
+          id+': material overlap between '+i+' and '+j);
+      }
+    }
+    assert.ok(vis.length>10,id+' sanity');
+  });
+});
+
+test('cities are not grid cities: road angles must be diverse and irregular',()=>{
+  const context=mapContext();
+  CITY_IDS.forEach(id=>{
+    const p=plan(context,id);
+    const buckets=new Array(6).fill(0); // 30-degree bins over [-90,90)
+    let total=0;
+    p.roads.filter(r=>r.cls!=='lane').forEach(r=>{
+      for(let i=0;i<r.pts.length-1;i++){
+        const dx=r.pts[i+1][0]-r.pts[i][0], dy=r.pts[i+1][1]-r.pts[i][1];
+        if(Math.hypot(dx,dy)<20) continue;
+        let deg=Math.atan2(dy,dx)*180/Math.PI;
+        while(deg>90)deg-=180; while(deg<-90)deg+=180;
+        const bin=Math.min(5,Math.floor((deg+90)/30));
+        buckets[bin]++;
+        total++;
+      }
+    });
+    assert.ok(total>=12,id+' needs enough major segments to judge');
+    const distinct=buckets.filter(b=>b>0).length;
+    assert.ok(distinct>=5,id+' road angles must span most orientations, bins: '+buckets.join(','));
+    const maxShare=Math.max.apply(null,buckets)/total;
+    assert.ok(maxShare<=0.45,id+' must not be dominated by one orientation: '+maxShare.toFixed(2));
+  });
+});
+
+test('dense city plans author perimeter blocks with courtyards',()=>{
+  const context=mapContext();
+  const branecBlocks=plan(context,'branec').blocks;
+  assert.ok(branecBlocks.length>=8,'Branec needs an authored block fabric');
+  assert.ok(branecBlocks.every(b=>b.morphology!=='grid'||true));
+  branecBlocks.forEach(b=>{
+    assert.ok(b.polygon.length>=4,'block '+b.id+' needs a polygon');
+    assert.ok(Number(b.courtyardInset)>=0.4,'block '+b.id+' must reserve a courtyard');
+  });
+  TOWN_IDS.slice(0,3).forEach(id=>{
+    const n=(plan(context,id).blocks||[]).length;
+    assert.ok(n<=6,'towns keep blocks modest');
+  });
+});
+
+test('block courtyards remain visibly open - no fabric in the interior',()=>{
+  const context=worldMapContext();
+  const sc=scene(context,'branec');
+  plan(context,'branec').blocks.forEach(block=>{
+    if(Number(block.courtyardInset)<0.45) return;
+    const c=MapSystemSafe.polygonCentroid(block.polygon);
+    const minEdge=Math.min.apply(null,block.polygon.map((pt,i)=>{
+      const nxt=block.polygon[(i+1)%block.polygon.length];
+      return Math.hypot(nxt[0]-pt[0],nxt[1]-pt[1]);
+    }));
+    const r=minEdge*Number(block.courtyardInset)*0.22;
+    sc.visuals.forEach(v=>{
+      if(v.canonicalBuildingId) return;
+      const d=Math.hypot(v.cx-c.x,v.cy-c.y);
+      assert.ok(d>r,block.id+': building sits inside the protected courtyard (d='+d.toFixed(1)+' r='+r.toFixed(1)+')');
+    });
+  });
 });

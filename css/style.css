@@ -1098,3 +1098,10 @@ body{background:var(--olive);color:var(--ink)}
 .poi-icon .sym-heavy{stroke:#59472c;fill:none;stroke-width:2.6;stroke-linecap:round}
 .poi-icon.emphasized .sym-fill{fill:#8b3027}
 .poi-icon.emphasized .sym-heavy,.poi-icon.emphasized .sym-line{stroke:#8b3027}
+
+/* ================= MAP v4: DENSITY + GESTURE/ANNO FIXES ================ */
+.map-building-hit{fill:none;stroke:none;pointer-events:all;cursor:pointer}
+#mapAnnoLayer{transform:none}
+.plan-road{stroke-width:30}
+.plan-road.secondary{stroke-width:18}
+.plan-road.lane{stroke-width:9}

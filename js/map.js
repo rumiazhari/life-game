@@ -140,8 +140,27 @@ const MapSystem=(function(){
     }
     return inside;
   }
+  function segmentsCross(p1,p2,p3,p4){
+    function orient(ax,ay,bx,by,cx,cy){
+      return (bx-ax)*(cy-ay)-(by-ay)*(cx-ax);
+    }
+    const d1=orient(p3[0],p3[1],p4[0],p4[1],p1[0],p1[1]);
+    const d2=orient(p3[0],p3[1],p4[0],p4[1],p2[0],p2[1]);
+    const d3=orient(p1[0],p1[1],p2[0],p2[1],p3[0],p3[1]);
+    const d4=orient(p1[0],p1[1],p2[0],p2[1],p4[0],p4[1]);
+    return ((d1>0)!==(d2>0))&&((d3>0)!==(d4>0));
+  }
   function polysIntersect(a,b){
-    return a.some(p=>pointInPolygon(p[0],p[1],b))||b.some(p=>pointInPolygon(p[0],p[1],a));
+    for(let i=0;i<a.length;i++) if(pointInPolygon(a[i][0],a[i][1],b)) return true;
+    for(let i=0;i<b.length;i++) if(pointInPolygon(b[i][0],b[i][1],a)) return true;
+    for(let i=0;i<a.length;i++){
+      const a2=a[(i+1)%a.length];
+      for(let j=0;j<b.length;j++){
+        const b2=b[(j+1)%b.length];
+        if(segmentsCross(a[i],a2,b[j],b2)) return true;
+      }
+    }
+    return false;
   }
   function polyPath(poly){
     return 'M '+poly.map(p=>p[0]+' '+p[1]).join(' L ')+' Z';
@@ -160,12 +179,20 @@ const MapSystem=(function(){
   }
 
   /* ======================= MORPHOLOGY GENERATORS ======================
-     Deterministic street-driven building generation. Corridor recipes are
-     attached to authored roads so footprints face the streets; villages use
-     wide frontage with deeper barn rows; industrial corridors produce long
-     halls aligned to service roads and spurs.
+     Deterministic street-driven building generation.
+
+     Generators emit candidate footprints into a `place` callback which
+     validates them against a SpatialGrid (existing fabric + canonical
+     landmarks), road carriageways, open water and protected open land.
+     Rejected candidates never reach the map, so ordinary buildings cannot
+     materially overlap each other or the streets they front.
+
+     generatePerimeterBlock builds dense Central-European perimeter blocks:
+     individual buildings along every block edge facing outward, interior
+     left open as a courtyard, optional rear workshops on the courtyard
+     ring and passage gaps in the frontage.
      --------------------------------------------------------------------- */
-  function generateCorridor(seg,params,rnd,out,idBase){
+  function generateCorridor(seg,params,rnd,place){
     const dirX=Math.cos(seg.angle), dirY=Math.sin(seg.angle);
     const perpX=-dirY, perpY=dirX;
     const interval=num(params.interval,26), setback=num(params.setback,5);
@@ -181,33 +208,134 @@ const MapSystem=(function(){
         sides.forEach(side=>{
           const sign=side==='left'?1:-1;
           const off=setback+depth/2;
-          const cx=seg.ax+dirX*d+perpX*sign*off;
-          const cy=seg.ay+dirY*d+perpY*sign*off;
-          out.push({poly:rectPoly(cx,cy,w,depth,seg.angle),kind:cls,minor:false});
-          if(params.back&&rnd()<params.back){
-            const off2=setback+depth+num(params.backGap,7)+(params.backDepth||depth*0.8)/2;
-            out.push({poly:rectPoly(
-              seg.ax+dirX*d+w*rnd()*0.4+perpX*sign*off2,
-              seg.ay+dirY*d+w*rnd()*0.4+perpY*sign*off2,
-              w*0.55+rnd()*w*0.3,(params.backDepth||depth*0.8),seg.angle+rnd()*0.5-0.25),kind:cls,minor:true});
-          }
+          place(rectPoly(
+            seg.ax+dirX*d+dirX*w/2+perpX*sign*off,
+            seg.ay+dirY*d+dirY*w/2+perpY*sign*off,
+            w,depth*(0.85+rnd()*0.3),seg.angle),cls,false);
         });
+        if(params.back){
+          sides.forEach(side=>{
+            if(rnd()>=params.back) return;
+            const sign=side==='left'?1:-1;
+            const off2=setback+depth+num(params.backGap,7)+(params.backDepth||depth*0.8)/2;
+            place(rectPoly(
+              seg.ax+dirX*d+dirX*w*rnd()*0.5+perpX*sign*off2,
+              seg.ay+dirY*d+dirY*w*rnd()*0.5+perpY*sign*off2,
+              w*(0.45+rnd()*0.35),(params.backDepth||depth*0.8)*(0.8+rnd()*0.4),
+              seg.angle+rnd()*0.6-0.3),cls,true);
+          });
+        }
         d+=w+interval*(0.5+rnd()*0.9);
       } else {
         d+=interval*(0.5+rnd());
       }
     }
-    void idBase;
   }
-  function generateShedGrid(spec,rnd,out){
+  function generateShedGrid(spec,rnd,place){
     const cols=num(spec.cols,3), rows=num(spec.rows,2);
     const w=num(spec.w,22), h=num(spec.h,11), gap=num(spec.gap,7);
     const a=num(spec.angle,0);
     for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
       const cx=spec.x+c*(w+gap)*Math.cos(a)-r*(h+gap)*Math.sin(a)+rnd()*2;
       const cy=spec.y+c*(w+gap)*Math.sin(a)+r*(h+gap)*Math.cos(a)+rnd()*2;
-      out.push({poly:rectPoly(cx,cy,w*(0.85+rnd()*0.3),h,a),kind:spec.class||'industrial',minor:false});
+      place(rectPoly(cx,cy,w*(0.85+rnd()*0.3),h,a),spec.class||'industrial',false);
     }
+  }
+  function generatePerimeterBlock(spec,rnd,place){
+    const pts=spec.polygon;
+    const cls=spec.class||'expansion';
+    const depth=num(spec.frontageDepth,11);
+    const targetW=num(spec.subdivision,26);
+    const gapProb=clamp(num(spec.gap,0.08),0,1);
+    const setback=num(spec.setback,2);
+    const cen=polyCentroid(pts);
+    for(let i=0;i<pts.length;i++){
+      const a=pts[i], b=pts[(i+1)%pts.length];
+      const dx=b[0]-a[0], dy=b[1]-a[1], len=Math.hypot(dx,dy);
+      if(len<10) continue;
+      const ux=dx/len, uy=dy/len, nx=-uy, ny=ux;
+      const mx=(a[0]+b[0])/2-cen.x, my=(a[1]+b[1])/2-cen.y;
+      const sign=(mx*nx+my*ny)>=0?1:-1;
+      const n=Math.max(1,Math.round(len/targetW));
+      for(let j=0;j<n;j++){
+        if(rnd()<gapProb) continue;
+        const t0=(j+rnd()*0.12)/n, t1=((j+1)-rnd()*0.12)/n;
+        const w=len*(t1-t0);
+        if(w<6) continue;
+        const off=setback+depth/2;
+        place(rectPoly(
+          a[0]+dx*t0+ux*w/2+nx*sign*off,
+          a[1]+dy*t0+uy*w/2+ny*sign*off,
+          w*0.96,depth*(0.85+rnd()*0.3),Math.atan2(dy,dx)),cls,false);
+      }
+    }
+    /* rear workshops on the courtyard ring - the courtyard itself stays open */
+    const rear=clamp(num(spec.rear,0.25),0,1);
+    const inset=clamp(num(spec.courtyardInset,.55),0.2,0.85);
+    if(rear>0){
+      for(let i=0;i<pts.length;i++){
+        if(rnd()>=rear) continue;
+        const a=pts[i], b=pts[(i+1)%pts.length];
+        const dx=b[0]-a[0], dy=b[1]-a[1], len=Math.hypot(dx,dy);
+        if(len<24) continue;
+        const t=0.3+rnd()*0.4;
+        /* sit on the courtyard ring: inset of the way from center to edge */
+        const ex=a[0]+dx*t, ey=a[1]+dy*t;
+        const wx=cen.x+(ex-cen.x)*inset;
+        const wy=cen.y+(ey-cen.y)*inset;
+        place(rectPoly(wx,wy,len*0.14+rnd()*8,7+rnd()*4,Math.atan2(dy,dx)),cls,true);
+      }
+    }
+  }
+
+  /* ---- spatial index for collision rejection ---- */
+  function SpatialGrid(cell){
+    this.cellSize=num(cell,64);
+    this.cells=new Map();
+  }
+  SpatialGrid.prototype.key=function(cx,cy){ return cx+':'+cy; };
+  SpatialGrid.prototype.insert=function(item,poly){
+    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    poly.forEach(p=>{minX=Math.min(minX,p[0]);maxX=Math.max(maxX,p[0]);minY=Math.min(minY,p[1]);maxY=Math.max(maxY,p[1]);});
+    item.bbox=[minX,minY,maxX,maxY];
+    const c=this.cellSize;
+    for(let gx=Math.floor(minX/c);gx<=Math.floor(maxX/c);gx++)
+      for(let gy=Math.floor(minY/c);gy<=Math.floor(maxY/c);gy++){
+        const k=this.key(gx,gy);
+        if(!this.cells.has(k)) this.cells.set(k,[]);
+        this.cells.get(k).push(item);
+      }
+  };
+  SpatialGrid.prototype.query=function(poly){
+    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    poly.forEach(p=>{minX=Math.min(minX,p[0]);maxX=Math.max(maxX,p[0]);minY=Math.min(minY,p[1]);maxY=Math.max(maxY,p[1]);});
+    const c=this.cellSize, seen=new Set(), out=[];
+    for(let gx=Math.floor(minX/c);gx<=Math.floor(maxX/c);gx++)
+      for(let gy=Math.floor(minY/c);gy<=Math.floor(maxY/c);gy++){
+        const list=this.cells.get(this.key(gx,gy));
+        if(!list) continue;
+        list.forEach(item=>{
+          const b=item.bbox;
+          if(b[2]<minX||b[0]>maxX||b[3]<minY||b[1]>maxY) return;
+          if(!seen.has(item)){seen.add(item);out.push(item);}
+        });
+      }
+    return out;
+  };
+
+  /* ---- screen↔viewBox conversion with letterboxing (xMidYMid meet) ---- */
+  function viewboxPoint(px,py,rect,view){
+    const vw=num(view&&view.width,100), vh=num(view&&view.height,100);
+    const rw=num(rect&&rect.width,vw), rh=num(rect&&rect.height,vh);
+    const scale=Math.min(rw/vw,rh/vh)||1;
+    const dx=(rw-vw*scale)/2, dy=(rh-vh*scale)/2;
+    return {x:(num(px,0)-num(rect&&rect.left,0)-dx)/scale,y:(num(py,0)-num(rect&&rect.top,0)-dy)/scale};
+  }
+
+  /* ---- annotation counter-scale: k = unit / cameraScale, so the pair
+     (camera scale × annotation scale) stays constant across zooms ---- */
+  function annotationScaleFactor(unit,cameraScale){
+    return num(unit,50)/Math.max(num(cameraScale,1),0.0001);
   }
 
   /* ======================= PORTRAIT LAYOUT (national) ================= */
@@ -471,20 +599,36 @@ const MapSystem=(function(){
         {name:'Workers\u2019 Ring',pts:[[290,1490],[1090,1370],[1910,1410],[2570,1510],[2490,2030],[370,2070]]}
       ],
       roads:[
-        {id:'registry-avenue',name:'Registry Avenue',cls:'primary',pts:[[800,760],[1360,820],[1980,860],[2600,900]]},
-        {id:'old-market-st',name:'Old Market Street',cls:'secondary',pts:[[430,330],[520,760],[470,1130],[560,1570]]},
-        {id:'north-avenue',name:'North Offices Avenue',cls:'primary',pts:[[1730,420],[2150,570],[2540,720]]},
-        {id:'workers-ring-road',name:'Workers\u2019 Ring Road',cls:'primary',pts:[[350,1670],[1010,1580],[1710,1630],[2390,1710],[2670,1650]]},
-        {id:'station-road',name:'Station Road',cls:'primary',pts:[[1290,2050],[1330,1560],[1370,1120],[1400,880]]},
-        {id:'cross-street',name:'Cross Street',cls:'secondary',pts:[[230,1070],[900,1010],[1770,1050],[2570,1090]]},
-        {id:'chandler-lane',name:'Chandler Lane',cls:'lane',pts:[[610,530],[870,600]]},
-        {id:'parchment-row',name:'Parchment Row',cls:'lane',pts:[[1480,590],[1750,650]]},
-        {id:'ring-cross',name:'Ring Crossing',cls:'secondary',pts:[[1000,1590],[1035,1170]]},
-        {id:'east-ring',name:'East Ring Street',cls:'secondary',pts:[[2390,1700],[2410,1180]]},
-        {id:'west-steps',name:'West Steps',cls:'lane',pts:[[290,900],[430,1190]]},
-        {id:'north-lane',name:'North Lane',cls:'lane',pts:[[2010,290],[2040,830]]},
-        {id:'mint-street',name:'Mint Street',cls:'secondary',pts:[[950,460],[980,1000]]},
-        {id:'terminus-forecourt',name:'Terminus Forecourt',cls:'secondary',pts:[[1140,1830],[1500,1840]]}
+        {id:'registry-avenue',name:'Registry Avenue',cls:'primary',pts:[[800,760],[1080,792],[1360,820],[1660,840],[1980,860],[2300,882],[2600,900]]},
+        {id:'old-market-st',name:'Old Market Street',cls:'secondary',pts:[[430,330],[500,560],[520,760],[480,980],[470,1130],[520,1370],[560,1570]]},
+        {id:'north-avenue',name:'North Offices Avenue',cls:'primary',pts:[[1730,420],[1930,498],[2150,570],[2350,650],[2540,720]]},
+        {id:'workers-ring-road',name:'Workers\u2019 Ring Road',cls:'primary',pts:[[350,1670],[700,1622],[1010,1580],[1370,1602],[1710,1630],[2050,1682],[2390,1710],[2670,1650]]},
+        {id:'station-road',name:'Station Road',cls:'primary',pts:[[1290,2050],[1312,1810],[1330,1560],[1356,1330],[1370,1120],[1392,1000],[1400,880]]},
+        {id:'cross-street',name:'Cross Street',cls:'secondary',pts:[[230,1070],[520,1012],[900,1036],[1300,1058],[1770,1050],[2200,1076],[2570,1090]]},
+        {id:'old-ring',name:'Old Ring',cls:'secondary',pts:[[290,1440],[520,1320],[760,1235],[1010,1180]]},
+        {id:'northeast-radial',name:'Northeast Radial',cls:'secondary',pts:[[1500,600],[1720,512],[1930,452],[2140,392],[2330,330]]},
+        {id:'east-boulevard',name:'East Boulevard',cls:'primary',pts:[[2560,1090],[2600,1260],[2580,1420],[2500,1620],[2430,1700]]},
+        {id:'butchers-walk',name:'Butchers\u2019 Walk',cls:'secondary',pts:[[560,1570],[700,1500],[830,1470],[1010,1590]]},
+        {id:'chandler-lane',name:'Chandler Lane',cls:'lane',pts:[[610,530],[720,562],[870,600]]},
+        {id:'parchment-row',name:'Parchment Row',cls:'lane',pts:[[1480,590],[1610,622],[1750,650]]},
+        {id:'ring-cross',name:'Ring Crossing',cls:'secondary',pts:[[1000,1590],[1022,1380],[1035,1170]]},
+        {id:'east-ring',name:'East Ring Street',cls:'secondary',pts:[[2390,1700],[2402,1450],[2408,1180]]},
+        {id:'west-steps',name:'West Steps',cls:'lane',pts:[[290,900],[360,1060],[430,1190]]},
+        {id:'north-lane',name:'North Lane',cls:'lane',pts:[[2010,290],[2026,570],[2040,830]]},
+        {id:'mint-street',name:'Mint Street',cls:'secondary',pts:[[950,460],[962,740],[975,1000]]},
+        {id:'terminus-forecourt',name:'Terminus Forecourt',cls:'secondary',pts:[[1140,1830],[1320,1836],[1520,1842]]}
+      ],
+      blocks:[
+        {id:'branec-old-01',district:'Old Market',class:'core',polygon:[[560,600],[905,622],[888,940],[545,928]],frontageDepth:12,subdivision:21,gap:.06,courtyardInset:.58,rear:.35,setback:3},
+        {id:'branec-old-02',district:'Old Market',class:'core',polygon:[[300,640],[520,620],[505,900],[285,915]],frontageDepth:11,subdivision:20,gap:.08,courtyardInset:.55,rear:.3,setback:3},
+        {id:'branec-old-03',district:'Old Market',class:'core',polygon:[[575,1090],[900,1075],[890,1330],[595,1345]],frontageDepth:11,subdivision:21,gap:.07,courtyardInset:.56,rear:.32,setback:3},
+        {id:'branec-reg-01',district:'Registry Quarter',class:'expansion',polygon:[[1010,852],[1640,872],[1630,1012],[1020,995]],frontageDepth:13,subdivision:30,gap:.1,courtyardInset:.62,rear:.22,setback:5},
+        {id:'branec-reg-02',district:'Registry Quarter',class:'expansion',polygon:[[1040,1085],[1560,1100],[1548,1330],[1055,1315]],frontageDepth:12,subdivision:27,gap:.09,courtyardInset:.6,rear:.25,setback:5},
+        {id:'branec-north-01',district:'North Offices',class:'expansion',polygon:[[1780,485],[2440,565],[2420,855],[1795,795]],frontageDepth:12,subdivision:33,gap:.12,courtyardInset:.64,rear:.18,setback:6},
+        {id:'branec-ring-01',district:'Workers\u2019 Ring',class:'ring',polygon:[[440,1720],[950,1652],[975,1826],[478,1888]],frontageDepth:10,subdivision:24,gap:.07,courtyardInset:.52,rear:.42,setback:3},
+        {id:'branec-ring-02',district:'Workers\u2019 Ring',class:'ring',polygon:[[1110,1688],[1640,1698],[1662,1856],[1130,1846]],frontageDepth:10,subdivision:24,gap:.07,courtyardInset:.52,rear:.42,setback:3},
+        {id:'branec-east-01',district:'North Offices',class:'expansion',polygon:[[1460,1150],[2090,1168],[2072,1420],[1478,1402]],frontageDepth:12,subdivision:29,gap:.09,courtyardInset:.6,rear:.28,setback:5},
+        {id:'branec-east-02',district:'Workers\u2019 Ring',class:'ring',polygon:[[1510,1480],[1990,1520],[1958,1760],[1492,1722]],frontageDepth:10,subdivision:25,gap:.08,courtyardInset:.54,rear:.38,setback:4}
       ],
       railways:[
         {pts:[[0,1800],[520,1860],[1010,1930],[1225,1980]]},
@@ -512,20 +656,24 @@ const MapSystem=(function(){
         {ref:'b10',kind:'public',x:1565,y:1690,w:26,h:18,district:'Workers\u2019 Ring'}
       ],
       corridors:[
-        {road:'registry-avenue',sides:'both',interval:29,setback:8,depth:11,wMin:9,wMax:15,density:.93,back:.32,class:'expansion'},
-        {road:'old-market-st',sides:'both',interval:23,setback:5,depth:10,wMin:8,wMax:13,density:.96,back:.45,class:'core'},
-        {road:'north-avenue',sides:'both',interval:31,setback:8,depth:11,wMin:10,wMax:16,density:.9,back:.3,class:'expansion'},
-        {road:'workers-ring-road',sides:'both',interval:26,setback:6,depth:10,wMin:9,wMax:14,density:.9,back:.5,class:'ring'},
-        {road:'station-road',sides:'both',interval:27,setback:6,depth:10,wMin:8,wMax:13,density:.92,back:.35,class:'expansion'},
-        {road:'cross-street',sides:'both',interval:27,setback:6,depth:10,wMin:8,wMax:13,density:.9,back:.3,class:'expansion'},
-        {road:'mint-street',sides:'both',interval:24,setback:5,depth:9,wMin:8,wMax:12,density:.94,back:.4,class:'core'},
-        {road:'chandler-lane',sides:'both',interval:30,setback:4,depth:8,wMin:6,wMax:10,density:.8,back:.2,class:'core'},
-        {road:'parchment-row',sides:'both',interval:30,setback:4,depth:8,wMin:6,wMax:10,density:.8,back:.2,class:'core'},
-        {road:'ring-cross',sides:'both',interval:28,setback:5,depth:9,wMin:7,wMax:11,density:.86,back:.3,class:'ring'},
-        {road:'east-ring',sides:'both',interval:28,setback:5,depth:9,wMin:7,wMax:11,density:.84,back:.3,class:'ring'},
-        {road:'west-steps',sides:'left',interval:32,setback:4,depth:8,wMin:6,wMax:9,density:.75,back:.2,class:'core'},
-        {road:'north-lane',sides:'both',interval:33,setback:5,depth:9,wMin:7,wMax:10,density:.78,back:.25,class:'expansion'},
-        {road:'terminus-forecourt',sides:'right',interval:30,setback:5,depth:9,wMin:7,wMax:11,density:.85,back:.2,class:'ring'}
+        {road:'registry-avenue',sides:'both',interval:24,setback:8,depth:11,wMin:9,wMax:15,density:.95,back:.42,class:'expansion'},
+        {road:'old-market-st',sides:'both',interval:20,setback:5,depth:10,wMin:8,wMax:13,density:.97,back:.5,class:'core'},
+        {road:'north-avenue',sides:'both',interval:26,setback:8,depth:11,wMin:10,wMax:16,density:.93,back:.38,class:'expansion'},
+        {road:'workers-ring-road',sides:'both',interval:22,setback:6,depth:10,wMin:9,wMax:14,density:.94,back:.55,class:'ring'},
+        {road:'station-road',sides:'both',interval:23,setback:6,depth:10,wMin:8,wMax:13,density:.94,back:.45,class:'expansion'},
+        {road:'cross-street',sides:'both',interval:23,setback:6,depth:10,wMin:8,wMax:13,density:.93,back:.4,class:'expansion'},
+        {road:'mint-street',sides:'both',interval:21,setback:5,depth:9,wMin:8,wMax:12,density:.96,back:.48,class:'core'},
+        {road:'chandler-lane',sides:'both',interval:27,setback:4,depth:8,wMin:6,wMax:10,density:.85,back:.3,class:'core'},
+        {road:'parchment-row',sides:'both',interval:27,setback:4,depth:8,wMin:6,wMax:10,density:.85,back:.3,class:'core'},
+        {road:'ring-cross',sides:'both',interval:24,setback:5,depth:9,wMin:7,wMax:11,density:.92,back:.42,class:'ring'},
+        {road:'east-ring',sides:'both',interval:24,setback:5,depth:9,wMin:7,wMax:11,density:.9,back:.4,class:'ring'},
+        {road:'west-steps',sides:'left',interval:29,setback:4,depth:8,wMin:6,wMax:9,density:.82,back:.28,class:'core'},
+        {road:'north-lane',sides:'both',interval:29,setback:5,depth:9,wMin:7,wMax:10,density:.84,back:.35,class:'expansion'},
+        {road:'old-ring',sides:'both',interval:25,setback:5,depth:9,wMin:8,wMax:12,density:.9,back:.4,class:'core'},
+        {road:'northeast-radial',sides:'both',interval:27,setback:7,depth:11,wMin:9,wMax:14,density:.9,back:.32,class:'expansion'},
+        {road:'east-boulevard',sides:'both',interval:26,setback:8,depth:11,wMin:9,wMax:14,density:.9,back:.35,class:'expansion'},
+        {road:'butchers-walk',sides:'both',interval:26,setback:4,depth:9,wMin:7,wMax:10,density:.88,back:.35,class:'core'},
+        {road:'terminus-forecourt',sides:'right',interval:27,setback:5,depth:9,wMin:7,wMax:11,density:.88,back:.28,class:'ring'}
       ],
       yards:[
         {x:1950,y:1760,w:52,h:16,rows:2,cols:3,gap:12,class:'industrial',angle:.04},
@@ -552,7 +700,18 @@ const MapSystem=(function(){
         {id:'ward-cross',name:'Ward Cross',cls:'secondary',pts:[[820,300],[880,800]]},
         {id:'warehouse-row',name:'Warehouse Row',cls:'secondary',pts:[[980,1240],[1020,1500]]},
         {id:'signal-stairs',name:'Signal Stairs',cls:'lane',pts:[[1900,900],[1930,1240]]},
-        {id:'north-cliff',name:'North Cliff Road',cls:'secondary',pts:[[200,220],[900,180],[1650,220],[2300,260]]}
+        {id:'north-cliff',name:'North Cliff Road',cls:'secondary',pts:[[200,220],[900,180],[1650,220],[2300,260]]},
+        {id:'basin-curve',name:'Basin Curve',cls:'secondary',pts:[[960,1180],[1180,1140],[1400,1150],[1620,1190]]},
+        {id:'customs-diagonal',name:'Customs Diagonal',cls:'secondary',pts:[[1000,320],[1240,520],[1420,720]]},
+        {id:'salt-passage',name:'Salt Passage',cls:'lane',pts:[[1980,420],[2012,700],[1992,940]]}
+      ],
+      blocks:[
+        {id:'veskar-customs-01',district:'Customs Ward',class:'expansion',polygon:[[880,340],[1360,320],[1380,620],[900,640]],frontageDepth:12,subdivision:28,gap:.09,courtyardInset:.6,rear:.25,setback:5},
+        {id:'veskar-salt-01',district:'Salt Market',class:'expansion',polygon:[[1760,380],[2200,400],[2180,780],[1745,750]],frontageDepth:11,subdivision:27,gap:.08,courtyardInset:.58,rear:.3,setback:5},
+        {id:'veskar-fish-01',district:'Fishermen\u2019s Row',class:'core',polygon:[[240,420],[520,395],[545,760],[265,785]],frontageDepth:10,subdivision:20,gap:.06,courtyardInset:.52,rear:.42,setback:2},
+        {id:'veskar-docks-01',district:'Old Docks',class:'industrial',polygon:[[300,1300],[860,1275],[875,1440],[315,1460]],frontageDepth:13,subdivision:32,gap:.1,courtyardInset:.55,rear:.2,setback:3},
+        {id:'veskar-docks-02',district:'Old Docks',class:'industrial',polygon:[[1420,1280],[1820,1290],[1810,1450],[1430,1440]],frontageDepth:13,subdivision:30,gap:.1,courtyardInset:.55,rear:.2,setback:3},
+        {id:'veskar-ward-02',district:'Customs Ward',class:'expansion',polygon:[[900,900],[1340,880],[1355,1130],[915,1150]],frontageDepth:11,subdivision:26,gap:.08,courtyardInset:.58,rear:.3,setback:5}
       ],
       railways:[],
       waterways:[
@@ -619,7 +778,18 @@ const MapSystem=(function(){
         {id:'slag-lane',name:'Slag Lane',cls:'lane',pts:[[1120,600],[1360,640]]},
         {id:'colliers-row',name:'Colliers Row',cls:'secondary',pts:[[520,520],[760,560]]},
         {id:'gate-street',name:'Foundry Gate Street',cls:'secondary',pts:[[1300,180],[1340,600],[1310,1000]]},
-        {id:'east-service',name:'East Service Road',cls:'lane',pts:[[2100,500],[2160,1000]]}
+        {id:'east-service',name:'East Service Road',cls:'lane',pts:[[2100,500],[2160,1000]]},
+        {id:'slag-curve',name:'Slag Curve',cls:'secondary',pts:[[900,700],[1080,760],[1240,860],[1330,980]]},
+        {id:'colliers-diagonal',name:'Colliers Diagonal',cls:'secondary',pts:[[420,300],[640,480],[800,660]]},
+        {id:'barracks-cross',name:'Barracks Cross',cls:'lane',pts:[[1900,1180],[1930,1420],[1900,1680]]}
+      ],
+      blocks:[
+        {id:'eisenmark-foundry-01',district:'Foundry Ward',class:'industrial',polygon:[[1560,620],[2240,650],[2215,920],[1545,890]],frontageDepth:14,subdivision:36,gap:.12,courtyardInset:.55,rear:.18,setback:5},
+        {id:'eisenmark-row-01',district:'Company Row',class:'ring',polygon:[[160,320],[720,300],[745,620],[185,645]],frontageDepth:10,subdivision:23,gap:.07,courtyardInset:.52,rear:.42,setback:3},
+        {id:'eisenmark-row-02',district:'Company Row',class:'ring',polygon:[[180,700],[600,685],[620,1060],[205,1075]],frontageDepth:10,subdivision:23,gap:.08,courtyardInset:.52,rear:.4,setback:3},
+        {id:'eisenmark-ash-01',district:'Ash Market',class:'ring',polygon:[[950,1320],[1380,1300],[1400,1740],[970,1760]],frontageDepth:10,subdivision:24,gap:.08,courtyardInset:.54,rear:.38,setback:3},
+        {id:'eisenmark-barracks-01',district:'Barracks',class:'expansion',polygon:[[1780,1200],[2280,1230],[2250,1620],[1760,1590]],frontageDepth:11,subdivision:30,gap:.1,courtyardInset:.6,rear:.25,setback:5},
+        {id:'eisenmark-station-01',district:'Ash Market',class:'expansion',polygon:[[520,1360],[880,1345],[895,1520],[535,1535]],frontageDepth:11,subdivision:26,gap:.09,courtyardInset:.58,rear:.3,setback:4}
       ],
       railways:[
         {pts:[[0,1380],[600,1330],[1300,1290],[2500,1240]]},
@@ -687,7 +857,16 @@ const MapSystem=(function(){
         {id:'station-branch',name:'Station Branch',cls:'secondary',pts:[[260,1420],[300,1240],[380,1120]]},
         {id:'chapter-street',name:'Chapter Street',cls:'secondary',pts:[[1180,200],[1220,560],[1180,840]]},
         {id:'cloister-lane',name:'Cloister Lane',cls:'lane',pts:[[420,700],[640,730]]},
-        {id:'ward-lane',name:'Ward Lane',cls:'lane',pts:[[940,900],[960,1120]]}
+        {id:'ward-lane',name:'Ward Lane',cls:'lane',pts:[[940,900],[958,1010],[960,1120]]},
+        {id:'garden-diagonal',name:'Garden Diagonal',cls:'secondary',pts:[[560,1180],[820,1260],[1080,1320],[1340,1360]]},
+        {id:'chapter-curve',name:'Chapter Curve',cls:'secondary',pts:[[1000,240],[1100,340],[1160,460],[1180,580]]}
+      ],
+      blocks:[
+        {id:'kostrin-college-01',district:'College Hill',class:'core',polygon:[[150,220],[540,200],[570,520],[180,545]],frontageDepth:11,subdivision:25,gap:.08,courtyardInset:.6,rear:.28,setback:4},
+        {id:'kostrin-hospital-01',district:'Hospital Ward',class:'expansion',polygon:[[700,780],[1040,795],[1030,1020],[715,1000]],frontageDepth:12,subdivision:29,gap:.09,courtyardInset:.62,rear:.22,setback:5},
+        {id:'kostrin-gardens-01',district:'South Gardens',class:'expansion',polygon:[[320,1300],[820,1280],[835,1560],[335,1580]],frontageDepth:11,subdivision:28,gap:.1,courtyardInset:.6,rear:.26,setback:5},
+        {id:'kostrin-chapel-01',district:'Chapel District',class:'core',polygon:[[880,160],[1340,175],[1355,420],[895,400]],frontageDepth:11,subdivision:24,gap:.08,courtyardInset:.58,rear:.32,setback:4},
+        {id:'kostrin-ward-02',district:'Hospital Ward',class:'core',polygon:[[1060,930],[1420,945],[1432,1140],[1072,1125]],frontageDepth:10,subdivision:23,gap:.07,courtyardInset:.55,rear:.34,setback:3}
       ],
       railways:[],
       waterways:[],
@@ -742,7 +921,17 @@ const MapSystem=(function(){
         {id:'station-approach',name:'Station Approach',cls:'secondary',pts:[[640,270],[680,120],[720,60]]},
         {id:'yard-lane',name:'Yard Lane',cls:'lane',pts:[[200,520],[420,500],[660,480]]},
         {id:'east-lane',name:'East Lane',cls:'lane',pts:[[1960,340],[1990,820]]},
-        {id:'homes-cross',name:'Homes Crossing',cls:'lane',pts:[[1300,1000],[1330,1400]]}
+        {id:'homes-cross',name:'Homes Crossing',cls:'lane',pts:[[1300,1000],[1330,1400]]},
+        {id:'junction-curve',name:'Junction Curve',cls:'secondary',pts:[[1060,700],[1240,730],[1420,760],[1600,820]]},
+        {id:'barracks-diagonal',name:'Barracks Diagonal',cls:'secondary',pts:[[1820,300],[1960,520],[2040,740]]}
+      ],
+      blocks:[
+        {id:'rudava-homes-01',district:'Railway Homes',class:'ring',polygon:[[1080,1040],[1560,1020],[1590,1380],[1105,1400]],frontageDepth:10,subdivision:23,gap:.07,courtyardInset:.52,rear:.45,setback:3},
+        {id:'rudava-junction-01',district:'Junction Ward',class:'expansion',polygon:[[1180,470],[1660,450],[1690,720],[1205,740]],frontageDepth:12,subdivision:28,gap:.09,courtyardInset:.6,rear:.28,setback:5},
+        {id:'rudava-freight-01',district:'Freight Yards',class:'industrial',polygon:[[170,680],[800,650],[825,880],[195,905]],frontageDepth:13,subdivision:34,gap:.11,courtyardInset:.55,rear:.2,setback:3},
+        {id:'rudava-barracks-01',district:'East Barracks',class:'expansion',polygon:[[1830,340],[2140,360],[2120,820],[1800,800]],frontageDepth:11,subdivision:29,gap:.1,courtyardInset:.6,rear:.25,setback:5},
+        {id:'rudava-cross-01',district:'Railway Homes',class:'ring',polygon:[[1090,1480],[1520,1460],[1540,1680],[1110,1700]],frontageDepth:10,subdivision:24,gap:.08,courtyardInset:.54,rear:.38,setback:3},
+        {id:'rudava-platform-01',district:'Junction Ward',class:'expansion',polygon:[[240,180],[900,150],[915,330],[255,355]],frontageDepth:11,subdivision:27,gap:.09,courtyardInset:.58,rear:.3,setback:4}
       ],
       railways:[
         {pts:[[0,420],[500,395],[1050,360],[1600,320],[2300,280]]},
@@ -1078,6 +1267,7 @@ const MapSystem=(function(){
     },
     krasnava:{
       motif:'linear agricultural village: long houses facing the road, narrow plots and barns behind, green at the heart',
+      protectedLand:['gardens','green'],
       bounds:{w:950,h:750},
       zoomMax:13,
       districts:[
@@ -1126,6 +1316,7 @@ const MapSystem=(function(){
     },
     brezin:{
       motif:'forest village: clearings strung along the timber road under broad woodland and low hills',
+      protectedLand:['gardens','green'],
       bounds:{w:1000,h:800},
       zoomMax:13,
       districts:[
@@ -1175,6 +1366,7 @@ const MapSystem=(function(){
     },
     svetlin:{
       motif:'monastery village: walled close and clinic road at the heart, gardens and fields around',
+      protectedLand:['gardens','institutional'],
       bounds:{w:900,h:720},
       zoomMax:13,
       districts:[
@@ -1220,6 +1412,7 @@ const MapSystem=(function(){
     },
     oberhain:{
       motif:'estate village: lawns and chapel lane strung along the old military road',
+      protectedLand:['gardens','green','estate'],
       bounds:{w:900,h:720},
       zoomMax:13,
       districts:[
@@ -1281,53 +1474,116 @@ const MapSystem=(function(){
     const rnd=seeded(hashSeed('scene:'+id));
     const visuals=[];
     const canonical={};
-    const exclusions=[];
+    const grid=new SpatialGrid(64);
+
+    /* protected open land: ordinary fabric may not fill these unless the
+       plan overrides the list (e.g. villages allow barns deep in fields) */
+    const DEFAULT_PROTECTED=['gardens','green','meadow','estate','orchard','institutional','farmland'];
+    const protectedKinds=p.protectedLand||DEFAULT_PROTECTED;
+    const PROTECTED={};
+    protectedKinds.forEach(k=>{PROTECTED[k]=1;});
+    const openLand=(p.landUse||[]).filter(l=>PROTECTED[l.kind]);
+    /* open water polygons */
+    const waterAreas=(p.waterways||[]).filter(w=>w.kind==='water'||w.kind==='basin');
+    /* road carriageways: reject only what sits well inside the roadway -
+       frontage buildings are meant to hug the street edge */
+    const ROAD_HALFWIDTH={primary:16,secondary:11,lane:7};
+    const roadSegs=[];
+    (p.roads||[]).forEach(r=>{
+      const hw=ROAD_HALFWIDTH[r.cls]||9;
+      segmentsOf(r.pts).forEach(seg=>{seg.hw=hw;roadSegs.push(seg);});
+    });
+    function distToSeg(px,py,s){
+      const dx=s.bx-s.ax, dy=s.by-s.ay;
+      const t=clamp(((px-s.ax)*dx+(py-s.ay)*dy)/(s.len*s.len||1),0,1);
+      return Math.hypot(px-(s.ax+dx*t),py-(s.ay+dy*t));
+    }
+    function nearRoad(px,py){
+      for(let i=0;i<roadSegs.length;i++){
+        const s=roadSegs[i];
+        if(Math.abs(px-(s.ax+s.bx)/2)>s.len/2+s.hw+6) continue;
+        if(distToSeg(px,py,s)<s.hw*0.3) return true;
+      }
+      return false;
+    }
+    function inPolyList(list,x,y){
+      for(let i=0;i<list.length;i++) if(pointInPolygon(x,y,list[i].pts||list[i])) return true;
+      return false;
+    }
+
+    /* canonical landmarks first - everything else must respect them */
     (p.landmarks||[]).forEach(lm=>{
       const poly=rectPoly(lm.x,lm.y,lm.w,lm.h,num(lm.a,0));
-      const v={id:id+'-'+lm.ref,poly,kind:lm.kind,minor:false,canonicalBuildingId:id+'-'+lm.ref,
+      const v={id:id+'-'+lm.ref,poly,hitPoly:rectPoly(lm.x,lm.y,lm.w+18,lm.h+18,num(lm.a,0)),
+        kind:lm.kind,minor:false,canonicalBuildingId:id+'-'+lm.ref,
         district:lm.district,cx:lm.x,cy:lm.y,w:lm.w,h:lm.h,a:num(lm.a,0),fabricClass:'landmark'};
+      v.bbox=polyBBox(poly);
       visuals.push(v);
+      grid.insert({poly:v.poly},v.poly);
       canonical[v.canonicalBuildingId]=v;
-      exclusions.push(rectPoly(lm.x,lm.y,lm.w+10,lm.h+10,num(lm.a,0)));
     });
+
+    let fabricIndex=0;
+    function polyBBox(poly){
+      let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+      poly.forEach(pt=>{minX=Math.min(minX,pt[0]);maxX=Math.max(maxX,pt[0]);minY=Math.min(minY,pt[1]);maxY=Math.max(maxY,pt[1]);});
+      return [minX,minY,maxX,maxY];
+    }
+    const blockPolys=(p.blocks||[]).map(b=>b.polygon);
+    /* fromCorridor: ordinary street fabric may not invade an authored
+       perimeter block - the block owns its own interior and edges. */
+    function place(poly,cls,minor,fromCorridor){
+      const c=polyCentroid(poly);
+      if(c.x<2||c.y<2||c.x>p.bounds.w-2||c.y>p.bounds.h-2) return false;
+      if(fromCorridor&&blockPolys.some(bp=>pointInPolygon(c.x,c.y,bp))) return false;
+      if(nearRoad(c.x,c.y)) return false;
+      if(inPolyList(openLand,c.x,c.y)) return false;
+      if(inPolyList(waterAreas,c.x,c.y)) return false;
+      const nearby=grid.query(poly);
+      for(let i=0;i<nearby.length;i++) if(polysIntersect(poly,nearby[i].poly)) return false;
+      fabricIndex++;
+      const v={id:id+'-vb-'+String(fabricIndex).padStart(5,'0'),poly,kind:cls,minor,
+        canonicalBuildingId:null,cx:+c.x.toFixed(1),cy:+c.y.toFixed(1),fabricClass:cls};
+      v.bbox=polyBBox(poly);
+      visuals.push(v);
+      grid.insert({poly},poly);
+      return true;
+    }
+
+    (p.blocks||[]).forEach(b=>generatePerimeterBlock(b,rnd,function(poly,cls,minor){
+      return place(poly,cls,minor,false);
+    }));
     const roadById={};
     (p.roads||[]).forEach(r=>{ roadById[r.id]=r; });
     (p.corridors||[]).forEach(c=>{
       const road=roadById[c.road];
       if(!road) return;
-      segmentsOf(road.pts).forEach(seg=>generateCorridor(seg,c,rnd,visuals));
+      segmentsOf(road.pts).forEach(seg=>generateCorridor(seg,c,rnd,function(poly,cls,minor){
+        return place(poly,cls,minor,true);
+      }));
     });
-    (p.yards||[]).forEach(y=>generateShedGrid(y,rnd,visuals));
-    function blocked(cx,cy){
-      for(let i=0;i<exclusions.length;i++) if(pointInPolygon(cx,cy,exclusions[i])) return true;
-      return false;
-    }
-    let fabricIndex=0;
-    const kept=[];
-    visuals.forEach(v=>{
-      if(v.canonicalBuildingId){ kept.push(v); return; }
-      const c=polyCentroid(v.poly);
-      if(c.x<0||c.y<0||c.x>p.bounds.w||c.y>p.bounds.h) return;
-      if(blocked(c.x,c.y)) return;
-      fabricIndex++;
-      v.id=id+'-vb-'+String(fabricIndex).padStart(5,'0');
-      v.cx=c.x; v.cy=c.y;
-      kept.push(v);
-    });
+    (p.yards||[]).forEach(y=>generateShedGrid(y,rnd,function(poly,cls,minor){
+      return place(poly,cls,minor,true);
+    }));
+
+    /* street name labels; angle normalized so text never reads upside-down */
     const streetLabels=[];
     (p.roads||[]).forEach(r=>{
       if(!r.name||r.cls==='lane') return;
       const segs=segmentsOf(r.pts);
       if(!segs.length) return;
       const longest=segs.reduce((m,s)=>s.len>m.len?s:m,segs[0]);
+      let deg=longest.angle*180/Math.PI;
+      while(deg>90)deg-=180;
+      while(deg<-90)deg+=180;
       streetLabels.push({id:'st-'+r.id,text:r.name,cls:r.cls,
-        x:(longest.ax+longest.bx)/2,y:(longest.ay+longest.by)/2,angle:longest.angle});
+        x:(longest.ax+longest.bx)/2,y:(longest.ay+longest.by)/2,angle:longest.angle,deg});
     });
     return {
       id,bounds:p.bounds,motif:p.motif,
       districts:p.districts||[],roads:p.roads||[],waterways:p.waterways||[],railways:p.railways||[],
-      landUse:p.landUse||[],bridges:p.bridges||[],
-      visuals:kept,canonical,streetLabels
+      landUse:p.landUse||[],bridges:p.bridges||[],blocks:p.blocks||[],
+      visuals,canonical,streetLabels
     };
   }
   function settlementScene(id){
@@ -1490,7 +1746,7 @@ const MapSystem=(function(){
       if(sl.cls!=='primary'&&(tier<2||s<1.2)) return;
       if(!inView(sl.x,sl.y)) return;
       items.push({id:sl.id,world:{x:sl.x,y:sl.y},x:sl.x*s+camera.x+padX,y:sl.y*s+camera.y+padY,
-        text:sl.text,priority:1.2,r:font*0.5,annoKind:'street',angle:sl.angle,cls:sl.cls,forced:false});
+        text:sl.text,priority:1.2,r:font*0.5,annoKind:'street',angle:sl.angle,deg:sl.deg,cls:sl.cls,forced:false});
     });
     const layout=layoutLabels(items,{width:view.width+padX*2,height:view.height+padY*2,dots:reserved,
       fontSize:font,charW:charW,margin:font*0.3});
@@ -1499,7 +1755,7 @@ const MapSystem=(function(){
       const p=layout.placements[item.id];
       if(!p) return;
       labels.push({
-        id:item.id,text:item.text,annoKind:item.annoKind,symbol:item.symbol,angle:item.angle||0,
+        id:item.id,text:item.text,annoKind:item.annoKind,symbol:item.symbol,angle:item.angle||0,deg:item.deg||0,
         anchor:{x:item.world.x,y:item.world.y},
         pos:{x:(p.x-padX-camera.x)/s,y:(p.y-padY-camera.y)/s},
         leader:item.leader?{from:{x:item.world.x,y:item.world.y},to:{x:(p.x-padX-camera.x)/s,y:(p.y-padY-camera.y)/s}}:null,
@@ -1576,6 +1832,7 @@ const MapSystem=(function(){
     createCamera,clampCamera,zoomAtPoint,panBy,fitBounds,centerOn,viewCenterWorld,viewRectWorld,
     classifyGesture,isDoubleTap,
     rectPoly,polyCentroid,pointInPolygon,polysIntersect,polyPath,linePath,segmentsOf,
+    SpatialGrid,generatePerimeterBlock,viewboxPoint,annotationScaleFactor,
     estimateTextSize,rectsIntersect,layoutLabels,labelLeaderPath,seeded,hashSeed,
     nationalLayout,transformY,geoTransform,TERRAIN,nationalGeographyMarkup,regionLabelsMarkup,
     seaLabelsMarkup,routePath,routeMidPoint,nationalTier,nationalKindVisible,settlementTier,patternDefs,
