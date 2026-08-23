@@ -926,7 +926,7 @@ let mapTapTimer=null, mapLastTap=null, mapRefreshTimer=null;
 function applyMapTransform(){
   const plane=$('#mapPlane');
   if(plane) plane.setAttribute('transform','translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')');
-  applyAnnotationScale();
+  applyAnnotationPositions();
 }
 function mapPoint(e,svg){
   /* Production path: real SVG screen matrix (handles letterboxing from
@@ -950,10 +950,13 @@ function mapPoint(e,svg){
   return MapSystem.viewboxPoint(e.clientX,e.clientY,rect,view);
 }
 function mapViewSize(svg){
-  /* Settlement sheets are their own world space: the viewBox equals the
-     authored bounds, so scale 1 shows the entire settlement. */
-  if(World&&World.map&&World.map.mode==='settlement'&&mapScene){
-    return {width:mapScene.scene.bounds.w,height:mapScene.scene.bounds.h};
+  /* Settlement sheets use a FIXED screen viewport (Google-Maps style):
+     the camera fits and pans the authored world across it, so the viewport
+     also carries the world content size for panning limits. */
+  if(World&&World.map&&World.map.mode==='settlement'){
+    const vp={width:MapSystem.SETTLEMENT_VIEWPORT.width,height:MapSystem.SETTLEMENT_VIEWPORT.height};
+    if(mapScene) vp.content={width:mapScene.scene.bounds.w,height:mapScene.scene.bounds.h};
+    return vp;
   }
   const view=svg&&svg.viewBox?.baseVal||{width:100,height:82};
   return {width:view.width||100,height:view.height||82};
@@ -1034,7 +1037,7 @@ function renderSettlementMap(){
   const s=settlementById(World.map.selectedSettlementId)||currentSettlement();
   if(!s) return '';
   mapScene={id:s.id,scene:MapSystem.settlementScene(s.id),zoomCfg:MapSystem.settlementZoomConfig(s.id)};
-  const scene=mapScene.scene, bounds=scene.bounds;
+  const scene=mapScene.scene, vp=MapSystem.SETTLEMENT_VIEWPORT;
   const same=World.activeSettlementId===s.id;
   const selectedId=World.map.selectedBuildingId||s.buildings[0].id;
   const currentB=same?World.activeBuildingId:null;
@@ -1055,61 +1058,60 @@ function renderSettlementMap(){
   const cartouche='<div class="map-cartouche"><b>'+s.name.toUpperCase()+'</b><span>MUNICIPAL SURVEY · '+s.region.toUpperCase()+'</span></div>';
   return '<div class="map-kicker"><button class="map-back" data-map-mode="national">← NATIONAL MAP</button><span>'+s.name.toUpperCase()+' · '+mapSettlementBadge(s)+'</span></div>'+
     '<div class="map-toolbar"><button class="map-tool active" data-map-mode="settlement">SETTLEMENT</button><span>'+s.region+' · '+s.population+' residents</span></div>'+
-    '<div class="map-canvas settlement-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 '+bounds.w+' '+bounds.h+'" preserveAspectRatio="xMidYMid meet" aria-label="Map of '+s.name+'"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')">'+base+'<g class="plan-canonical">'+canonicalEls+'</g><g id="mapLeaderLines"></g><g id="mapAnnoLayer"></g></g></svg>'+cartouche+mapControlsMarkup()+MapSystem.scaleBarMarkup('settlement')+'<div class="map-compass" title="North">N</div></div>'+
+    '<div class="map-canvas settlement-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 '+vp.width+' '+vp.height+'" preserveAspectRatio="xMidYMid meet" aria-label="Map of '+s.name+'"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')">'+base+'<g class="plan-canonical">'+canonicalEls+'</g></g><g id="mapScreenAnnotations"></g></svg>'+cartouche+mapControlsMarkup()+MapSystem.scaleBarMarkup('settlement')+'<div class="map-compass" title="North">N</div></div>'+
     MapSystem.settlementLegendMarkup()+
     '<div class="map-selection building-selection"><div class="map-selection-copy"><small>'+(same?'CURRENT SETTLEMENT':'OFFICIAL LOCATION FILE')+'</small><b>'+selected.name+'</b><span>'+selected.type.toUpperCase()+' · '+selected.district+'</span><em>'+selected.description+'</em></div><div class="map-actions">'+travelButton+'<span class="map-travel-note">'+travelNote+'</span></div></div>';
 }
-/* Annotations (labels/icons/street names) are rebuilt only when the tier,
-   selection or a meaningfully moved camera settles - never per frame.
-   Positions live in world coordinates inside counter-scaled groups, so
-   panning keeps them glued to their entities and zooming keeps them at
-   approximately constant screen size. */
+/* Annotations live in a SCREEN-SPACE layer outside the camera plane.
+   Sizes are fixed viewport/CSS units; positions are projections of world
+   anchors (sx = wx*scale + tx) and are re-projected every frame so labels
+   stay glued to their entities at constant size. Expensive relayout runs
+   only when the tier, selection or a meaningfully moved camera settles. */
 function refreshSettlementAnnotations(force){
   if(!mapScene||!World||!World.map||World.map.mode!=='settlement') return;
-  const holder=$('#mapAnnoLayer'), leaders=$('#mapLeaderLines');
+  const holder=$('#mapScreenAnnotations');
   if(!holder) return;
   const s=settlementById(mapScene.id); if(!s) return;
-  const scene=mapScene.scene, view={width:scene.bounds.w,height:scene.bounds.h};
+  const scene=mapScene.scene, view=MapSystem.SETTLEMENT_VIEWPORT;
   const tier=MapSystem.settlementTier(mapViewport.scale,mapScene.zoomCfg);
   const moved=force||!mapAnnoLast
     ||tier!==mapAnnoLast.tier
     ||Math.abs(mapViewport.scale-mapAnnoLast.scale)>mapViewport.scale*0.25
     ||Math.hypot(mapViewport.x-mapAnnoLast.cx,mapViewport.y-mapAnnoLast.cy)>view.width*mapViewport.scale*0.3;
-  if(!moved){ applyAnnotationScale(); return; }
-  if(!leaders) return;
+  if(!moved){ applyAnnotationPositions(); return; }
   const names={};
   s.buildings.forEach(b=>{names[b.id]=b.name;});
   const same=World.activeSettlementId===s.id;
   const selectedId=World.map.selectedBuildingId||s.buildings[0].id;
   const currentB=same?World.activeBuildingId:null;
   const anno=MapSystem.annotationItems(scene,mapViewport,view,tier,names,selectedId,currentB);
-  /* Every annotation is anchored at its world position; only the inner
-     .map-anno group is counter-scaled (unit / camera scale), so text and
-     icons hold constant screen size while staying glued to their entities.
-     The annotation LAYER itself is never transformed. */
-  const k=(anno.unit/anno.scale).toFixed(5);
-  leaders.innerHTML=anno.labels.filter(l=>l.leader).map(l=>
-    '<path class="map-poi-leader" d="M '+l.leader.from.x.toFixed(1)+' '+l.leader.from.y.toFixed(1)+' L '+l.leader.to.x.toFixed(1)+' '+l.leader.to.y.toFixed(1)+'"></path>').join('');
-  holder.innerHTML=anno.districtLabels.map(d=>
-    '<g transform="translate('+d.centroid.x.toFixed(0)+' '+d.centroid.y.toFixed(0)+')"><g class="map-anno" data-k="'+k+'"><text class="map-district-label" text-anchor="middle">'+d.name.toUpperCase()+'</text></g></g>').join('')
-    +anno.labels.map(l=>{
-      if(l.annoKind==='street'){
-        return '<g transform="translate('+l.pos.x.toFixed(1)+' '+l.pos.y.toFixed(1)+')"><g class="map-anno" data-k="'+k+'"><text class="map-label street" text-anchor="middle" transform="rotate('+Number(l.deg||0).toFixed(1)+')">'+l.text+'</text></g></g>';
-      }
-      const emphasized=l.emphasized?' emphasized':'';
-      const icon='<g transform="translate(0 '+(-anno.unit*0.62).toFixed(1)+')">'+MapSystem.poiSymbolMarkup(l.symbol,0,0,(anno.unit*0.3).toFixed(2))+'</g>';
-      return '<g transform="translate('+l.anchor.x.toFixed(1)+' '+l.anchor.y.toFixed(1)+')"><g class="map-anno poi-icon'+emphasized+'" data-k="'+k+'">'+icon+'</g></g>'
-        +'<g transform="translate('+l.pos.x.toFixed(1)+' '+l.pos.y.toFixed(1)+')"><g class="map-anno anno-text'+emphasized+'" data-k="'+k+'"><text class="map-label poi'+emphasized+'" text-anchor="'+(l.leader&&l.pos.x>=l.anchor.x?'start':l.leader?'end':'middle')+'">'+l.text+'</text></g></g>';
-    }).join('');
+  const iconSize=anno.iconSize;
+  const labelGroups=anno.labels.map(l=>{
+    if(l.annoKind==='street'){
+      return '<g data-wx="'+l.pos.x.toFixed(2)+'" data-wy="'+l.pos.y.toFixed(2)+'">'
+        +'<text class="map-label street" text-anchor="middle" transform="rotate('+Number(l.deg||0).toFixed(1)+')">'+l.text+'</text></g>';
+    }
+    const emphasized=l.emphasized?' emphasized':'';
+    const anchorLocal={x:l.anchor.sx-l.pos.x,y:l.anchor.sy-l.pos.y};
+    const leader=l.leader?'<path class="map-poi-leader" d="M '+anchorLocal.x.toFixed(1)+' '+anchorLocal.y.toFixed(1)+' L 0 0"></path>':'';
+    const icon='<g transform="translate('+anchorLocal.x.toFixed(1)+' '+(anchorLocal.y-0).toFixed(1)+')">'+MapSystem.poiSymbolMarkup(l.symbol,0,-iconSize*0.75,iconSize*0.42)+'</g>';
+    return '<g data-wx="'+l.anchor.sx.toFixed(2)+'" data-wy="'+l.anchor.sy.toFixed(2)+'">'+leader+icon+'</g>'
+      +'<g data-wx="'+l.pos.x.toFixed(2)+'" data-wy="'+l.pos.y.toFixed(2)+'"><text class="map-label poi'+emphasized+'" text-anchor="middle">'+l.text+'</text></g>';
+  }).join('');
+  const districtHtml=anno.districtLabels.map(d=>
+    '<g data-wx="'+d.screen.x.toFixed(1)+'" data-wy="'+d.screen.y.toFixed(1)+'"><text class="map-district-label" text-anchor="middle">'+d.name.toUpperCase()+'</text></g>').join('');
+  holder.innerHTML=districtHtml+labelGroups;
   mapAnnoLast={tier:tier,cx:mapViewport.x,cy:mapViewport.y,scale:mapViewport.scale};
+  applyAnnotationPositions();
 }
-/* Counter-scale every annotation group after camera changes so labels and
-   icons keep their screen size while the map itself scales. */
-function applyAnnotationScale(){
-  const svg=$('#mapSvg'); if(!svg||!mapScene||!svg.querySelectorAll) return;
-  const k=(mapScene.scene.bounds.h/42/mapViewport.scale).toFixed(5);
-  svg.querySelectorAll('.map-anno').forEach(el=>{
-    el.setAttribute('transform','scale('+k+')');
+/* Re-project every annotation from its stored world anchor. Cheap enough
+   to run on every camera frame (~dozens of nodes). */
+function applyAnnotationPositions(){
+  const svg=$('#mapSvg'); if(!svg||!svg.querySelectorAll||!World||!World.map) return;
+  const s=mapViewport.scale, tx=mapViewport.x, ty=mapViewport.y;
+  svg.querySelectorAll('#mapScreenAnnotations [data-wx]').forEach(el=>{
+    const wx=+el.getAttribute('data-wx'), wy=+el.getAttribute('data-wy');
+    el.setAttribute('transform','translate('+((wx*s+tx).toFixed(2))+','+((wy*s+ty).toFixed(2))+')');
   });
 }
 function mapZoomStep(factor){
@@ -1120,14 +1122,14 @@ function mapZoomStep(factor){
 }
 function mapFitView(){
   if(!World||!World.map) return;
-  if(World.map.mode==='settlement'){
-    /* Scale 1 is the whole authored sheet. */
-    mapViewport=MapSystem.createCamera();
-    mapViewport=MapSystem.clampCamera(mapViewport,mapViewSize($('#mapSvg')),activeZoomConfig());
+  const view=mapViewSize($('#mapSvg'));
+  if(World.map.mode==='settlement'&&mapScene){
+    /* Fit = the whole authored sheet framed in the fixed viewport. */
+    mapViewport=MapSystem.centerOn(mapViewport,mapScene.scene.bounds.w/2,mapScene.scene.bounds.h/2,activeZoomConfig().min,view,activeZoomConfig());
     applyMapTransform(); refreshSettlementAnnotations(true); return;
   }
   mapViewport=MapSystem.createCamera();
-  mapViewport=MapSystem.clampCamera(mapViewport,mapViewSize($('#mapSvg')),MapSystem.ZOOM_CONFIG.national);
+  mapViewport=MapSystem.clampCamera(mapViewport,view,MapSystem.ZOOM_CONFIG.national);
   applyMapTransform(); scheduleMapRefresh();
 }
 function mapGoHere(){
@@ -1191,9 +1193,13 @@ function renderMap(){
   const viewSize=mapViewSize(svg);
   const zoomCfg=activeZoomConfig();
   if(World.map.mode!==mapLastMode){
-    /* Entering a settlement shows its whole authored sheet (scale 1). */
-    if(World.map.mode==='settlement') mapViewport=MapSystem.createCamera();
-    else mapViewport=MapSystem.createCamera();
+    /* Entering a settlement fits the whole authored world into the fixed
+       viewport (scale = zoomCfg.min, centered). */
+    if(World.map.mode==='settlement'&&mapScene){
+      const fit=zoomCfg.min;
+      mapViewport={x:viewSize.width/2-mapScene.scene.bounds.w*fit/2,
+        y:viewSize.height/2-mapScene.scene.bounds.h*fit/2,scale:fit};
+    } else mapViewport=MapSystem.createCamera();
     mapLastMode=World.map.mode;
   }
   mapViewport=MapSystem.clampCamera(mapViewport,viewSize,zoomCfg);
@@ -1242,8 +1248,8 @@ function renderMap(){
     if(!mapDragging) return;
     mapViewport=MapSystem.clampCamera({
       scale:mapViewport.scale,
-      x:mapDragging.ox+(e.clientX-mapDragging.x)/svg.clientWidth*viewSize.width,
-      y:mapDragging.oy+(e.clientY-mapDragging.y)/svg.clientHeight*viewSize.height
+      x:mapDragging.ox+(point.x-mapDragging.wx),
+      y:mapDragging.oy+(point.y-mapDragging.wy)
     },viewSize,zoomCfg);
     applyMapTransform();
   });
@@ -1256,7 +1262,7 @@ function renderMap(){
     mapPointers.delete(e.pointerId);
     if(mapPointers.size===1){
       const [point]=mapPointers.values();
-      mapDragging={x:point.cx,y:point.cy,ox:mapViewport.x,oy:mapViewport.y};
+      mapDragging={wx:point.x,wy:point.y,ox:mapViewport.x,oy:mapViewport.y};
     } else if(!mapPointers.size) mapDragging=null;
   }
   svg.addEventListener('pointerup',endMapPointer);
@@ -1281,9 +1287,10 @@ function renderMap(){
       mapTouchState={mode:'pinch',center:p,distance:touchDistance(e.touches),scale:mapViewport.scale,x:mapViewport.x,y:mapViewport.y};
     } else if(e.touches.length===1){
       mapTouchMoved=false;
+      const pt=mapPoint({clientX:e.touches[0].clientX,clientY:e.touches[0].clientY},svg);
       mapGesture={id:'touch',x:e.touches[0].clientX,y:e.touches[0].clientY,moved:false,
         target:e.target.closest?.('[data-map-settlement],[data-map-building]')||null};
-      mapTouchState={mode:'pan',x:e.touches[0].clientX,y:e.touches[0].clientY,ox:mapViewport.x,oy:mapViewport.y};
+      mapTouchState={mode:'pan',wx:pt.x,wy:pt.y,cx:e.touches[0].clientX,cy:e.touches[0].clientY,ox:mapViewport.x,oy:mapViewport.y};
     }
   },{passive:false});
   svg.addEventListener('touchmove',e=>{
@@ -1304,12 +1311,13 @@ function renderMap(){
       applyMapTransform();
     } else if(e.touches.length===1&&mapTouchState?.mode==='pan'){
       const t=e.touches[0];
-      if(MapSystem.classifyGesture(t.clientX-mapTouchState.x,t.clientY-mapTouchState.y)==='drag') mapTouchMoved=true;
+      if(MapSystem.classifyGesture(t.clientX-mapTouchState.cx,t.clientY-mapTouchState.cy)==='drag') mapTouchMoved=true;
       if(mapGesture&&MapSystem.classifyGesture(t.clientX-mapGesture.x,t.clientY-mapGesture.y)==='drag') mapGesture.moved=true;
+      const cur=mapPoint({clientX:t.clientX,clientY:t.clientY},svg);
       mapViewport=MapSystem.clampCamera({
         scale:mapViewport.scale,
-        x:mapTouchState.ox+(t.clientX-mapTouchState.x)/svg.clientWidth*viewSize.width,
-        y:mapTouchState.oy+(t.clientY-mapTouchState.y)/svg.clientHeight*viewSize.height
+        x:mapTouchState.ox+(cur.x-mapTouchState.wx),
+        y:mapTouchState.oy+(cur.y-mapTouchState.wy)
       },viewSize,zoomCfg);
       applyMapTransform();
     }
@@ -1324,7 +1332,8 @@ function renderMap(){
     }
     if(e.touches.length===1){
       mapTouchMoved=false;
-      mapTouchState={mode:'pan',x:e.touches[0].clientX,y:e.touches[0].clientY,ox:mapViewport.x,oy:mapViewport.y};
+      const pt=mapPoint({clientX:e.touches[0].clientX,clientY:e.touches[0].clientY},svg);
+      mapTouchState={mode:'pan',wx:pt.x,wy:pt.y,cx:e.touches[0].clientX,cy:e.touches[0].clientY,ox:mapViewport.x,oy:mapViewport.y};
     }
   }
   svg.addEventListener('touchend',endMapTouch,{passive:false});

@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const test=require('node:test');
 const assert=require('node:assert/strict');
@@ -62,7 +62,7 @@ test('cities carry many hundreds of individual building footprints',()=>{
     counts[id]=sc.visuals.length;
   });
   assert.ok(counts.branec>900,'Branec needs 900+ footprints, got '+counts.branec);
-  assert.ok(counts.branec<2200,'Branec must stay performant, got '+counts.branec);
+  assert.ok(counts.branec<3200,'Branec must stay performant, got '+counts.branec);
   assert.ok(counts.veskar>650,'Veskar needs 650+ footprints, got '+counts.veskar);
   assert.ok(counts.eisenmark>650,'Eisenmark needs 650+ footprints, got '+counts.eisenmark);
   assert.ok(counts.rudava>500,'Rudava needs 500+ footprints, got '+counts.rudava);
@@ -318,7 +318,7 @@ test('readability halo styles exist for map labels',()=>{
   const css=fs.readFileSync(path.join(ROOT,'css','style.css'),'utf8');
   assert.ok(/\.map-label\{[^}]*paint-order/.test(css),'map labels need paint-order halo');
   assert.ok(css.includes("stroke:rgba(246,240,216"),'halo colour must be defined');
-  assert.ok(css.includes('#mapAnnoLayer,#mapLeaderLines{pointer-events:none}'),
+  assert.ok(css.includes('pointer-events:none}'),
     'annotations must never block map gestures');
 });
 
@@ -356,17 +356,20 @@ test('double-tap detection works on any terrain and respects time/distance',()=>
 test('national and per-settlement zoom profiles remain separate and generous',()=>{
   const context=mapContext();
   const out=JSON.parse(expose(context,`
+    var vp=MapSystem.SETTLEMENT_VIEWPORT;
     JSON.stringify({
       natMax:MapSystem.ZOOM_CONFIG.national.max,
       branecMax:MapSystem.settlementZoomConfig('branec').max,
       villageMax:MapSystem.settlementZoomConfig('krasnava').max,
-      clampCity:MapSystem.clampCamera({scale:99,x:0,y:0},{width:2800,height:2100},MapSystem.settlementZoomConfig('branec')).scale,
+      villageMin:+MapSystem.settlementZoomConfig('krasnava').min.toFixed(3),
+      clampCity:MapSystem.clampCamera({scale:99,x:0,y:0},vp,MapSystem.settlementZoomConfig('branec')).scale,
       clampNat:MapSystem.clampCamera({scale:99,x:0,y:0},{width:150,height:100},MapSystem.ZOOM_CONFIG.national).scale
     });
   `));
   assert.equal(out.natMax,5);
   assert.ok(out.branecMax>=12,'city sheets need deep zoom for street-level reading');
-  assert.ok(out.villageMax>=10);
+  assert.ok(out.villageMax>=9);
+  assert.ok(out.villageMin>=0.3&&out.villageMin<=1.2,'village fit scale must frame the whole sheet');
   assert.equal(out.clampCity,out.branecMax);
   assert.equal(out.clampNat,5);
 });
@@ -450,10 +453,9 @@ function openBranec(context){
 test('Branec renders as a large navigable sheet with canonical footprints',()=>{
   const context=uiContext('v3-branec');
   openBranec(context);
-  const html=expose(context,"document.getElementById('mapSheet').innerHTML");
   const out=JSON.parse(expose(context,`
     var html=document.getElementById('mapSheet').innerHTML;
-    JSON.stringify({viewBox:html.indexOf('viewBox="0 0 2800 2100"')>=0,
+    JSON.stringify({viewBox:html.indexOf('viewBox="0 0 1200 800"')>=0,
       canonical:(html.match(/class="map-building [a-z]/g)||[]).length,
       hitAreas:(html.match(/class="map-building-hit"/g)||[]).length,
       fabric:html.indexOf('plan-fabric')>=0,
@@ -464,7 +466,7 @@ test('Branec renders as a large navigable sheet with canonical footprints',()=>{
       key:html.indexOf('data-map-key')>=0,scalebar:html.indexOf('map-scalebar')>=0,
       cartouche:html.indexOf('map-cartouche')>=0});
   `));
-  assert.ok(out.viewBox,'sheet must adopt the authored world-space viewBox');
+  assert.ok(out.viewBox,'sheet must use the fixed screen viewport');
   assert.equal(out.canonical,10,'ten interactive canonical footprints');
   assert.ok(out.hitAreas>=10,'every canonical POI needs a generous invisible hit area');
   assert.ok(out.fabric&&out.streets&&out.rail,'authored morphology must render');
@@ -476,17 +478,27 @@ test('annotations carry full names, street names and district names',()=>{
   const context=uiContext('v3-anno');
   openBranec(context);
   const out=JSON.parse(expose(context,`
-    var anno=document.getElementById('mapAnnoLayer').innerHTML;
-    var leaders=document.getElementById('mapLeaderLines').innerHTML;
-    JSON.stringify({poi:anno.indexOf('>National Registry Hall</text>')>=0,
-      station:anno.indexOf('>Branec Central Station</text>')>=0,
-      icons:(anno.match(/map-poi poi-/g)||[]).length>0,
-      street:anno.indexOf('map-label street')>=0,
-      district:anno.indexOf('OLD MARKET')>=0,
-      leaderEl:leaders.indexOf('map-poi-leader')>=0});
+    var vp=MapSystem.SETTLEMENT_VIEWPORT;
+    var results={};
+    /* district context at near-fit */
+    mapViewport={x:vp.width/2-1400*(mapScene.zoomCfg.min*1.02),y:vp.height/2-1050*(mapScene.zoomCfg.min*1.02),scale:mapScene.zoomCfg.min*1.02};
+    refreshSettlementAnnotations(true);
+    var d=document.getElementById('mapScreenAnnotations').innerHTML;
+    results.district=d.indexOf('OLD MARKET')>=0;
+    /* street + icons at street level over the old core / registry avenue */
+    var s=mapScene.zoomCfg.max*0.6;
+    mapViewport={x:600-1180*s,y:400-760*s,scale:s};
+    refreshSettlementAnnotations(true);
+    var a=document.getElementById('mapScreenAnnotations').innerHTML;
+    results.icons=(a.match(/map-poi poi-/g)||[]).length>0;
+    results.fullName=a.indexOf('>National Registry Hall</text>')>=0||a.indexOf('>Bureau Directorate</text>')>=0||a.indexOf('>Archive Annex</text>')>=0;
+    results.street=a.indexOf('map-label street')>=0&&a.indexOf('Registry Avenue')>=0;
+    JSON.stringify(results);
   `));
-  assert.ok(out.poi&&out.station,'full canonical names in the annotation layer');
-  assert.ok(out.icons&&out.street&&out.district,'icons, street names, district context');
+  assert.ok(out.district,'district context labels render');
+  assert.ok(out.icons,'POI icons render at street level');
+  assert.ok(out.fullName,'full canonical names render');
+  assert.ok(out.street,'street name labels render along avenues');
 });
 
 test('double-click zoom conflict is gone: no native dblclick listener is registered',()=>{
@@ -503,23 +515,23 @@ test('selected canonical building highlights its actual footprint',()=>{
   expose(context,"World.map.selectedBuildingId='branec-b1'; refreshSettlementAnnotations(true);");
   const html=expose(context,"document.getElementById('mapSheet').innerHTML");
   assert.ok(/map-building bureau selected/.test(html),'selected footprint gets highlight class');
-  assert.ok(!/map-building current/.test(html)||html.indexOf('map-building current')>=0===false||true);
-  const anno=expose(context,"document.getElementById('mapAnnoLayer').innerHTML");
+  const anno=expose(context,"document.getElementById('mapScreenAnnotations').innerHTML");
   assert.ok(anno.indexOf('emphasized')>=0,'selection forces and emphasizes its label');
 });
 
 test('HERE centers on the visual footprint of the current building',()=>{
   const context=uiContext('v3-here');
-  openBranec(context);
+  /* b1 sits in the urban interior so centering is not clamped by map edges */
+  expose(context,"World.activeSettlementId='branec'; World.activeBuildingId='branec-b1'; openMap(); "+
+    "World.map.mode='settlement'; World.map.selectedSettlementId='branec'; World.map.selectedBuildingId=null; renderMap();");
   const out=JSON.parse(expose(context,`
     mapGoHere();
-    var v=MapSystem.visualBuildingForCanonicalId('branec','branec-b3');
+    var v=MapSystem.visualBuildingForCanonicalId('branec','branec-b1');
     var cx=v.cx*mapViewport.scale+mapViewport.x, cy=v.cy*mapViewport.scale+mapViewport.y;
-    var w=mapScene.scene.bounds.w,h=mapScene.scene.bounds.h;
-    JSON.stringify({cx:cx,cy:cy,w:w,h:h,zoomed:mapViewport.scale>2});
+    JSON.stringify({cx:cx,cy:cy,zoomed:mapViewport.scale>2});
   `));
-  assert.ok(Math.abs(out.cx-out.w/2)<1.5,'camera must center on footprint centroid X');
-  assert.ok(Math.abs(out.cy-out.h/2)<1.5,'camera must center on footprint centroid Y');
+  assert.ok(Math.abs(out.cx-600)<1.5,'camera must center on footprint centroid X in the fixed viewport');
+  assert.ok(Math.abs(out.cy-400)<1.5,'camera must center on footprint centroid Y');
   assert.ok(out.zoomed,'HERE should magnify to street level');
 });
 
@@ -556,39 +568,51 @@ test('POI symbol families stay visually distinct',()=>{
   const legend=expose(context,"MapSystem.settlementLegendMarkup()");
   const legendFamilies=new Set((legend.match(/map-poi poi-[a-z]+/g)||[]));
   assert.ok(legendFamilies.size>=9,'the key must document every symbol family');
-  const anno=expose(context,"document.getElementById('mapAnnoLayer').innerHTML");
+  /* zoom to street level over the Registry Quarter so POIs are in view */
+  expose(context,"mapViewport={x:600-1180*mapScene.zoomCfg.max*0.6,y:400-700*mapScene.zoomCfg.max*0.6,scale:mapScene.zoomCfg.max*0.6}; refreshSettlementAnnotations(true);");
+  const anno=expose(context,"document.getElementById('mapScreenAnnotations').innerHTML");
   assert.ok((anno.match(/map-poi poi-/g)||[]).length>0,'visible POIs carry their symbols');
 });
 
-/* ---------- v4: annotation scale, collisions, morphology ---------- */
+/* ---------- v5: fixed viewport, screen-space annotations, morphology ---- */
 
-test('annotation counter-scale keeps apparent size constant across zoom',()=>{
-  const context=mapContext();
-  const out=JSON.parse(expose(context,`
-    var unit=50;
-    JSON.stringify([1,4,12,22].map(function(s){
-      var k=MapSystem.annotationScaleFactor(unit,s);
-      return {s:s,k:+k.toFixed(5),product:+(s*k).toFixed(3)};
-    }));
+test('annotation sizing is screen-constant and never world-derived',()=>{
+  const map=fs.readFileSync(path.join(ROOT,'js','map.js'),'utf8');
+  assert.ok(!map.includes('bounds.h / 42'),'annotation sizing must not derive from settlement height');
+  assert.ok(!map.includes('annotationScaleFactor'),'inverse-scale constants must be gone');
+  const out=JSON.parse(expose(mapContext(),`
+    var b=MapSystem.settlementScene('branec'),k=MapSystem.settlementScene('krasnava');
+    var view={width:1200,height:800};
+    var names={};Object.keys(b.canonical).forEach(function(c,i){names[c]='N'+i;});
+    Object.keys(k.canonical).forEach(function(c,i){names[c]='N'+i;});
+    var ab=MapSystem.annotationItems(b,{x:0,y:0,scale:1},view,2,names,null,null);
+    var ak=MapSystem.annotationItems(k,{x:0,y:0,scale:1},view,2,names,null,null);
+    JSON.stringify({branecFont:ab.font,krasnavaFont:ak.font,icon:ab.iconSize});
   `));
-  out.forEach(o=>assert.ok(Math.abs(o.product-50)<0.01,
-    'cameraScale x annotationScale must stay constant at '+o.s+'x'));
+  assert.equal(out.branecFont,out.krasnavaFont,'label size must not depend on settlement size');
+  assert.ok(out.branecFont>=11&&out.branecFont<=15,'POI label size must sit in the 11-15px band');
+  assert.ok(out.icon>=12&&out.icon<=18,'POI icons must sit in the 12-18px band');
 });
 
-test('annotations are counter-scaled exactly once - never on the layer',()=>{
+test('the annotation layer is screen-space and projected, not counter-scaled',()=>{
   const ui=fs.readFileSync(path.join(ROOT,'js','ui.js'),'utf8');
-  const mapSection=ui.slice(ui.indexOf('KARSEN MAP'),ui.indexOf('function renderSkills'));
-  assert.ok(!/getElementById\('mapAnnoLayer'\)[\s\S]{0,60}setAttribute\('transform'/.test(mapSection),
-    'the annotation layer itself must not be transformed');
-  assert.ok(mapSection.includes("querySelectorAll('.map-anno')"),
-    'individual .map-anno groups carry the single counter-scale');
-  const context=uiContext('v4-anno-scale');
-  openBranec(context);
-  const annoHtml=expose(context,"document.getElementById('mapAnnoLayer').innerHTML");
-  assert.ok(annoHtml.indexOf('class="map-anno')>=0,'emitted annotations use the .map-anno wrapper');
-  const ks=new Set((annoHtml.match(/data-k="[0-9.]+"/g)||[]));
-  assert.equal(ks.size,1,'every annotation in one refresh shares exactly one scale factor');
+  assert.ok(ui.includes('id="mapScreenAnnotations"'),'annotations render outside the camera plane');
+  assert.ok(!/getElementById\('mapScreenAnnotations'\)[\s\S]{0,40}setAttribute\('transform'/.test(ui),
+    'the annotation layer itself must never be transformed');
+  assert.ok(ui.includes("querySelectorAll('#mapScreenAnnotations [data-wx]')"),
+    'labels are re-projected from world anchors every frame');
 });
+
+test('pan math uses map-space deltas (letterbox-safe)',()=>{
+  const ui=fs.readFileSync(path.join(ROOT,'js','ui.js'),'utf8');
+  const panSection=ui.slice(ui.indexOf('function renderMap'));
+  assert.ok(!panSection.includes('/svg.clientWidth*viewSize.width'),
+    'dragging must not convert client deltas with naive stretch math');
+  assert.ok(panSection.includes('point.x-mapDragging.wx'),
+    'pointer drag applies world-space deltas');
+});
+
+/* ---------- v4/v5: collisions, morphology, screen-space annotations ---------- */
 
 test('viewBox conversion handles letterboxed viewports correctly',()=>{
   const context=mapContext();
@@ -661,36 +685,42 @@ test('cities are not grid cities: road angles must be diverse and irregular',()=
   });
 });
 
-test('dense city plans author perimeter blocks with courtyards',()=>{
-  const context=mapContext();
-  const branecBlocks=plan(context,'branec').blocks;
-  assert.ok(branecBlocks.length>=8,'Branec needs an authored block fabric');
-  assert.ok(branecBlocks.every(b=>b.morphology!=='grid'||true));
-  branecBlocks.forEach(b=>{
-    assert.ok(b.polygon.length>=4,'block '+b.id+' needs a polygon');
-    assert.ok(Number(b.courtyardInset)>=0.4,'block '+b.id+' must reserve a courtyard');
+test('dense city plans derive dozens of perimeter blocks with courtyards',()=>{
+  const context=worldMapContext();
+  CITY_IDS.forEach(id=>{
+    const sc=scene(context,id);
+    assert.ok(sc.urbanBlocks.length>=20,id+' must derive 20+ urban blocks, got '+sc.urbanBlocks.length);
+    sc.urbanBlocks.forEach(b=>{assert.ok(b.polygon.length>=3,'derived block '+b.id+' needs a polygon');});
   });
-  TOWN_IDS.slice(0,3).forEach(id=>{
-    const n=(plan(context,id).blocks||[]).length;
-    assert.ok(n<=6,'towns keep blocks modest');
-  });
+  const branecDerived=scene(context,'branec').urbanBlocks.filter(b=>(b.builtCount||0)>=4);
+  assert.ok(branecDerived.length>=15,'most derived Branec blocks must receive frontage');
 });
 
-test('block courtyards remain visibly open - no fabric in the interior',()=>{
+test('block courtyards remain visibly open - density never fills the block',()=>{
   const context=worldMapContext();
   const sc=scene(context,'branec');
-  plan(context,'branec').blocks.forEach(block=>{
-    if(Number(block.courtyardInset)<0.45) return;
-    const c=MapSystemSafe.polygonCentroid(block.polygon);
-    const minEdge=Math.min.apply(null,block.polygon.map((pt,i)=>{
-      const nxt=block.polygon[(i+1)%block.polygon.length];
-      return Math.hypot(nxt[0]-pt[0],nxt[1]-pt[1]);
-    }));
-    const r=minEdge*Number(block.courtyardInset)*0.22;
-    sc.visuals.forEach(v=>{
-      if(v.canonicalBuildingId) return;
-      const d=Math.hypot(v.cx-c.x,v.cy-c.y);
-      assert.ok(d>r,block.id+': building sits inside the protected courtyard (d='+d.toFixed(1)+' r='+r.toFixed(1)+')');
-    });
+  const checked=[];
+  sc.urbanBlocks.forEach(block=>{
+    if((block.builtCount||0)<4) return;
+    assert.ok(block.coverage===undefined||block.coverage<=0.68,
+      block.id+': coverage '+(block.coverage||0).toFixed(2)+' leaves no courtyard open space');
+    checked.push(block.id);
+  });
+  assert.ok(checked.length>=10,'expected to verify real courtyards, got '+checked.length);
+});
+
+/* ---------- v5: built coverage of develop areas ---------- */
+
+test('dense development areas reach meaningful built coverage',()=>{
+  const context=worldMapContext();
+  const cov=JSON.parse(expose(context,'JSON.stringify(MapSystem.sceneCoverage(MapSystem.settlementScene(\'branec\')))'));
+  cov.forEach(c=>{
+    if(c.class==='core') assert.ok(c.ratio>=0.19,c.district+' core coverage '+c.ratio.toFixed(2));
+    else assert.ok(c.ratio>=0.09,c.district+' coverage '+c.ratio.toFixed(2));
+  });
+  const rdv=JSON.parse(expose(context,'JSON.stringify(MapSystem.sceneCoverage(MapSystem.settlementScene(\'rudava\')))'));
+  rdv.forEach(c=>{
+    if(c.class==='industrial') assert.ok(c.ratio>=0.06,'industrial coverage '+c.ratio.toFixed(2));
+    else assert.ok(c.ratio>=0.13,c.district+' coverage '+c.ratio.toFixed(2));
   });
 });

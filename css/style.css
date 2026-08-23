@@ -1105,3 +1105,18 @@ body{background:var(--olive);color:var(--ink)}
 .plan-road{stroke-width:30}
 .plan-road.secondary{stroke-width:18}
 .plan-road.lane{stroke-width:9}
+
+/* ================= MAP v5: FIXED VIEWPORT + REALISTIC SCALE ============ */
+.settlement-canvas{aspect-ratio:1.5!important}
+.plan-road{stroke-width:12}
+.plan-road.secondary{stroke-width:8}
+.plan-road.lane{stroke-width:4.5}
+.plan-rail-casing{stroke-width:10}
+.plan-rail{stroke-width:4.5;stroke-dasharray:14 10}
+.plan-rail.spur{stroke-width:3;stroke-dasharray:8 8}
+.plan-river-line{stroke-width:14}
+.plan-stream-line{stroke-width:6}
+.plan-quay-line{stroke-width:4}
+.plan-steps-line{stroke-width:6;stroke-dasharray:9 7}
+.plan-bridge{stroke-width:2px;vector-effect:non-scaling-stroke}
+#mapScreenAnnotations text{paint-order:stroke fill;stroke:rgba(246,240,216,.95);stroke-linejoin:round}
