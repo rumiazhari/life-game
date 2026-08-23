@@ -920,7 +920,9 @@ $('#householdWrap').addEventListener('click',e=>{
   const carebd=e.target.closest('[data-childcare]'); if(carebd){ snd('stamp'); setLifestyle('childcare',carebd.dataset.childcare); return; }
 });
 /* ================= KARSEN MAP ================= */
-let mapViewport=MapSystem.createCamera(), mapDragging=null, mapPointers=new Map(), mapTouchState=null, mapLastMode=null;
+let mapViewport=MapSystem.createCamera(), mapDragging=null, mapPointers=new Map(), mapTouchState=null;
+let mapLastMode=null, mapLastKey=null, mapGesture=null, mapTouchMoved=false;
+let mapTapTimer=null, mapLastTap={time:0,target:null}, mapRefreshTimer=null;
 function applyMapTransform(){
   const plane=$('#mapPlane');
   if(plane) plane.setAttribute('transform','translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')');
@@ -947,30 +949,70 @@ function nationalMediaLayout(){
   return MapSystem.nationalLayout({tall,compact});
 }
 function nationalDotRadius(s){ return s.kind==='city'?2.65:s.kind==='town'?2.05:1.55; }
+function activeZoomConfig(){
+  return World&&World.map&&World.map.mode==='settlement'?MapSystem.ZOOM_CONFIG.settlement:MapSystem.ZOOM_CONFIG.national;
+}
+function mapTierKey(){
+  if(!World||!World.map) return '';
+  if(World.map.mode==='settlement'){
+    return 'settlement|'+(World.map.selectedSettlementId||'')+'|'+(World.map.selectedBuildingId||'')+'|'+MapSystem.settlementTier(mapViewport.scale);
+  }
+  return 'national|'+(World.activeSettlementId||'')+'|'+(World.map.selectedSettlementId||'')+'|'+MapSystem.nationalTier(mapViewport.scale)+'|'+nationalMediaLayout().height;
+}
+/* Labels are recomputed only when the meaningful zoom tier, the map or the
+   selection changes - never during pointermove. */
+function scheduleMapRefresh(){
+  if(mapRefreshTimer) clearTimeout(mapRefreshTimer);
+  mapRefreshTimer=setTimeout(()=>{
+    mapRefreshTimer=null;
+    const wrap=$('#mapWrap');
+    if(!wrap||wrap.classList.contains('hidden')) return;
+    if(mapTierKey()!==mapLastKey) renderMap();
+  },140);
+}
+function mapControlsMarkup(){
+  return '<div class="map-controls" role="group" aria-label="Map controls">'
+    +'<button class="map-ctl" data-map-zoom="in" title="Zoom in" aria-label="Zoom in">+</button>'
+    +'<button class="map-ctl" data-map-zoom="out" title="Zoom out" aria-label="Zoom out">&minus;</button>'
+    +'<button class="map-ctl ctl-wide" data-map-fit title="Fit the whole sheet" aria-label="Fit map">FIT</button>'
+    +'<button class="map-ctl ctl-wide" data-map-here title="Center on current location" aria-label="Current location">HERE</button>'
+    +'</div>';
+}
 function renderNationalMap(){
   const selected=settlementById(World.map.selectedSettlementId)||currentSettlement();
   World.map.discoveredSettlementIds=KARSEN_SETTLEMENTS.map(s=>s.id);
   // Phones receive a true portrait survey sheet: geography and routes spread
   // vertically, while settlement dots and type remain circular and readable.
   const layout=nationalMediaLayout();
+  const tier=MapSystem.nationalTier(mapViewport.scale);
   const points=KARSEN_SETTLEMENTS.map(s=>({id:s.id,x:s.x,y:MapSystem.transformY(layout,s.y),text:s.name,r:nationalDotRadius(s),priority:s.kind==='city'?3:s.kind==='town'?2:1}));
-  const labels=MapSystem.layoutLabels(points,{width:MapSystem.NATIONAL_VIEWBOX.width,height:layout.height,dots:points});
-  const labelLeaders=points.filter(p=>labels.placements[p.id].leader).map(p=>'<path class="map-label-leader" d="'+MapSystem.labelLeaderPath(p,labels.placements[p.id],p.r)+'"></path>').join('');
+  const labelled=points.filter(p=>MapSystem.nationalKindVisible(settlementById(p.id).kind,tier));
+  const labels=MapSystem.layoutLabels(labelled,{width:MapSystem.NATIONAL_VIEWBOX.width,height:layout.height,dots:points,fontSize:3});
+  const labelLeaders=labelled.filter(p=>labels.placements[p.id].leader).map(p=>'<path class="map-label-leader" d="'+MapSystem.labelLeaderPath(p,labels.placements[p.id],p.r)+'"></path>').join('');
   const nodes=KARSEN_SETTLEMENTS.map(s=>{
     const p=labels.placements[s.id], cy=MapSystem.transformY(layout,s.y), current=World.activeSettlementId===s.id;
-    return '<g class="map-node '+s.kind+(current?' current':'')+'" data-map-settlement="'+s.id+'" tabindex="0" role="button" aria-label="'+s.name+'"><circle class="map-node-hit" cx="'+s.x+'" cy="'+cy+'" r="5.2"></circle><circle class="map-node-dot" cx="'+s.x+'" cy="'+cy+'" r="'+nationalDotRadius(s)+'"></circle><text x="'+p.x+'" y="'+p.y+'" text-anchor="'+p.anchor+'">'+s.name+'</text></g>';
+    return '<g class="map-node '+s.kind+(current?' current':'')+'" data-map-settlement="'+s.id+'" tabindex="0" role="button" aria-label="'+s.name+'"><circle class="map-node-hit" cx="'+s.x+'" cy="'+cy+'" r="5.2"></circle><circle class="map-node-dot" cx="'+s.x+'" cy="'+cy+'" r="'+nationalDotRadius(s)+'"></circle>'+(p?'<text x="'+p.x.toFixed(1)+'" y="'+p.y.toFixed(1)+'" text-anchor="'+p.anchor+'">'+s.name+'</text>':'')+'</g>';
   }).join('');
-  const regionLabels=MapSystem.regionLabelsMarkup(layout);
+  const here=currentSettlement(), direct=here&&selected?routeBetween(here.id,selected.id):null;
+  const regionLabels=MapSystem.regionLabelsMarkup(layout,tier);
   const seaLabels=MapSystem.seaLabelsMarkup(layout);
-  const routes=KARSEN_ROUTES.map((r,i)=>{const a=settlementById(r.from),b=settlementById(r.to);return '<path class="map-route '+r.mode+'" d="'+MapSystem.routePath(a,b,i,layout)+'"></path>';}).join('');
+  const routes=KARSEN_ROUTES.map((r,i)=>{
+    const a=settlementById(r.from), b=settlementById(r.to);
+    const isDirect=direct&&((r.from===direct.from&&r.to===direct.to)||(r.from===direct.to&&r.to===direct.from));
+    let out='<path class="map-route '+r.mode+(isDirect?' route-selected':'')+'" d="'+MapSystem.routePath(a,b,i,layout)+'"></path>';
+    if(isDirect) out+='<path class="map-route-glow" d="'+MapSystem.routePath(a,b,i,layout)+'"></path>';
+    if(tier>=2){
+      const m=MapSystem.routeMidPoint(a,b,i,layout);
+      out+='<text class="map-route-distance" x="'+m.x.toFixed(1)+'" y="'+m.y.toFixed(1)+'">'+r.distance+'</text>';
+    }
+    return out;
+  }).join('');
+  const cartouche='<div class="map-cartouche"><b>COMMONWEALTH OF KARSEN</b><span>OFFICIAL SURVEY · '+currentYear()+'</span></div>';
   return '<div class="map-kicker"><span>COMMONWEALTH OF KARSEN</span><span>OFFICIAL SURVEY - '+currentYear()+'</span></div>'+
     '<div class="map-toolbar"><button class="map-tool active" data-map-mode="national">NATIONAL</button><span>'+KARSEN_SETTLEMENTS.length+' SETTLEMENTS - '+World.map.visitedSettlementIds.length+' VISITED</span></div>'+
-    '<div class="map-canvas national-map-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 150 '+layout.height+'" preserveAspectRatio="xMidYMid meet" aria-label="National map of Karsen"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')">'+MapSystem.nationalGeographyMarkup(layout)+(layout.tall?seaLabels:'')+regionLabels+routes+labelLeaders+nodes+'</g></svg><div class="map-compass">N</div></div>'+
-    '<div class="map-legend"><span><i class="legend-city"></i> city</span><span><i class="legend-town"></i> town</span><span><i class="legend-village"></i> village</span><span><i class="legend-road"></i> road</span><span><i class="legend-rail"></i> rail</span><span><i class="legend-river"></i> river</span><span><i class="legend-green"></i> terrain</span></div>'+
-    '<div class="map-selection"><div class="map-selection-copy"><b>'+selected.name+'</b><span>'+mapSettlementBadge(selected)+' - '+selected.region+' - population '+selected.population+'</span><em>'+selected.description+'</em></div><button class="btn small" data-map-open="'+selected.id+'">Open Settlement Map &gt;</button></div>';
-}
-function settlementRoadsSvg(){
-  return '<path class="settlement-road" d="M5 18 H95 M5 42 H95 M5 66 H95 M20 5 V77 M49 5 V77 M78 5 V77"></path><path class="settlement-road minor" d="M5 30 H95 M5 54 H95 M34 5 V77 M64 5 V77"></path>';
+    '<div class="map-canvas national-map-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 150 '+layout.height+'" preserveAspectRatio="xMidYMid meet" aria-label="National map of Karsen"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')">'+MapSystem.nationalGeographyMarkup(layout)+(layout.tall?seaLabels:'')+regionLabels+routes+labelLeaders+nodes+'</g></svg>'+cartouche+mapControlsMarkup()+MapSystem.scaleBarMarkup('national')+'<div class="map-compass" title="North">N</div></div>'+
+    MapSystem.nationalLegendMarkup()+
+    '<div class="map-selection"><div class="map-selection-copy"><b>'+selected.name+'</b><span>'+mapSettlementBadge(selected)+' - '+selected.region+' - population '+selected.population+(direct?' - direct '+direct.mode+' route':'')+'</span><em>'+selected.description+'</em></div><button class="btn small" data-map-open="'+selected.id+'">Open Settlement Map &gt;</button></div>';
 }
 function renderSettlementMap(){
   const s=settlementById(World.map.selectedSettlementId)||currentSettlement();
@@ -978,66 +1020,173 @@ function renderSettlementMap(){
   const plan=MapSystem.settlementPlan(s.id);
   const placed=MapSystem.placeBuildings(s.buildings,plan);
   const selectedId=World.map.selectedBuildingId||placed[0].id;
-  const buildings=placed.map(b=>'<g class="map-building '+b.type+(b.id===selectedId?' selected':'')+'" data-map-building="'+b.id+'" tabindex="0" role="button"><rect x="'+b.x+'" y="'+b.y+'" width="'+b.w+'" height="'+b.h+'" rx=".7"></rect><text x="'+(b.x+b.w/2)+'" y="'+(b.y+b.h/2+1)+'">'+b.name.split(' ')[0]+'</text></g>').join('');
-  const selected=buildingById(s.id,selectedId)||s.buildings[0], same=World.activeSettlementId===s.id;
-  const currentLabel=same?'CURRENT SETTLEMENT':'OFFICIAL LOCATION FILE';
+  const same=World.activeSettlementId===s.id;
+  const currentB=same?(buildingById(s.id,World.activeBuildingId)||placed[0]).id:null;
+  const tier=MapSystem.settlementTier(mapViewport.scale);
+  const items=MapSystem.poiLabelItems(placed,{tier,selectedId,currentId:currentB});
+  const labels=MapSystem.layoutLabels(items,{width:MapSystem.SETTLEMENT_VIEWBOX.width,height:MapSystem.SETTLEMENT_VIEWBOX.height,dots:items,fontSize:2.3,charW:1.3,margin:.8});
+  const base=MapSystem.settlementBaseMarkup(plan,s.id);
+  const buildings=placed.map(b=>{
+    const sel=b.id===selectedId?' selected':'', cur=b.id===currentB?' current':'';
+    const symbol=MapSystem.poiSymbolMarkup(b.type,b.x+b.w/2,b.y+b.h*0.3,Math.min(b.w,b.h)*0.24);
+    return '<g class="map-building '+b.type+sel+cur+'" data-map-building="'+b.id+'" tabindex="0" role="button" aria-label="'+b.name+'"><rect x="'+b.x+'" y="'+b.y+'" width="'+b.w+'" height="'+b.h+'" rx=".7"></rect>'+symbol+'</g>';
+  }).join('');
+  const labelTexts=items.map(it=>{
+    const p=labels.placements[it.id];
+    if(!p) return '';
+    const leader=p.leader?'<path class="map-poi-leader" d="'+MapSystem.labelLeaderPath(it,p,it.r)+'"></path>':'';
+    return leader+'<text class="map-poi-label" x="'+p.x.toFixed(1)+'" y="'+p.y.toFixed(1)+'" text-anchor="'+p.anchor+'">'+it.text+'</text>';
+  }).join('');
+  const selected=buildingById(s.id,selectedId)||s.buildings[0];
   const route=routeBetween(currentSettlement().id,s.id), cost=same?0:travelCost(currentSettlement(),s);
   const travelNote=S.traveling?'already travelling to '+settlementById(S.traveling.to).name:S.age<16?'independent travel begins at age 16':same?'already here':S.assets<cost?'needs '+money(cost):'fare '+money(cost)+' · arrives next year';
   const travelButton=!same?'<button class="btn small map-travel-btn" data-map-travel="'+s.id+'" '+(S.traveling||S.age<16||S.assets<cost?'disabled':'')+'>Travel Here ▸</button>':'';
+  const cartouche='<div class="map-cartouche"><b>'+s.name.toUpperCase()+'</b><span>MUNICIPAL SURVEY · '+s.region.toUpperCase()+'</span></div>';
   return '<div class="map-kicker"><button class="map-back" data-map-mode="national">← NATIONAL MAP</button><span>'+s.name.toUpperCase()+' · '+mapSettlementBadge(s)+'</span></div>'+
     '<div class="map-toolbar"><button class="map-tool active" data-map-mode="settlement">SETTLEMENT</button><span>'+s.region+' · '+s.population+' residents</span></div>'+
-    '<div class="map-canvas settlement-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 100 82" aria-label="Map of '+s.name+'"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')"><rect class="settlement-ground" x="1" y="1" width="98" height="80" rx="2"></rect>'+settlementRoadsSvg()+MapSystem.settlementWaterMarkup(plan)+buildings+'</g></svg><div class="map-compass">N</div></div>'+
-    '<div class="map-selection building-selection"><div class="map-selection-copy"><small>'+currentLabel+'</small><b>'+selected.name+'</b><span>'+selected.type.toUpperCase()+' · '+selected.district+'</span><em>'+selected.description+'</em></div><div class="map-actions">'+travelButton+'<span class="map-travel-note">'+travelNote+'</span></div></div>';
+    '<div class="map-canvas settlement-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 100 82" aria-label="Map of '+s.name+'"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')"><rect class="settlement-ground" x="1" y="1" width="98" height="80" rx="2"></rect>'+base+buildings+'<g class="plan-labels" aria-hidden="false">'+labelTexts+'</g></g></svg>'+cartouche+mapControlsMarkup()+MapSystem.scaleBarMarkup('settlement')+'<div class="map-compass" title="North">N</div></div>'+
+    MapSystem.settlementLegendMarkup()+
+    '<div class="map-selection building-selection"><div class="map-selection-copy"><small>'+(same?'CURRENT SETTLEMENT':'OFFICIAL LOCATION FILE')+'</small><b>'+selected.name+'</b><span>'+selected.type.toUpperCase()+' · '+selected.district+'</span><em>'+selected.description+'</em></div><div class="map-actions">'+travelButton+'<span class="map-travel-note">'+travelNote+'</span></div></div>';
 }
 function placedBounds(placed){
   let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
   placed.forEach(b=>{x0=Math.min(x0,b.x);y0=Math.min(y0,b.y);x1=Math.max(x1,b.x+b.w);y1=Math.max(y1,b.y+b.h);});
   return {x:x0,y:y0,w:Math.max(1,x1-x0),h:Math.max(1,y1-y0)};
 }
+function mapZoomStep(factor){
+  const svg=$('#mapSvg'); if(!svg) return;
+  const view=mapViewSize(svg), c=activeZoomConfig();
+  mapViewport=MapSystem.zoomAtPoint(mapViewport,view.width/2,view.height/2,mapViewport.scale*factor,view,c);
+  applyMapTransform(); scheduleMapRefresh();
+}
+function mapFitView(){
+  const svg=$('#mapSvg');
+  const view=svg?mapViewSize(svg):{width:100,height:82};
+  if(World.map.mode==='settlement'){
+    const s=settlementById(World.map.selectedSettlementId)||currentSettlement();
+    if(s) mapViewport=MapSystem.fitBounds(placedBounds(MapSystem.placeBuildings(s.buildings,MapSystem.settlementPlan(s.id))),view,4,MapSystem.ZOOM_CONFIG.settlement);
+  } else mapViewport=MapSystem.createCamera();
+  applyMapTransform(); scheduleMapRefresh();
+}
+function mapGoHere(){
+  if(World.map.mode==='settlement'&&World.map.selectedSettlementId===World.activeSettlementId){
+    const s=settlementById(World.map.selectedSettlementId);
+    const b=s?buildingById(s.id,World.activeBuildingId)||s.buildings[0]:null;
+    if(b){
+      const svg=$('#mapSvg'), view=svg?mapViewSize(svg):{width:100,height:82};
+      mapViewport=MapSystem.zoomAtPoint(mapViewport,b.x+b.w/2,b.y+b.h/2,Math.max(3,mapViewport.scale),view,MapSystem.ZOOM_CONFIG.settlement);
+      applyMapTransform(); scheduleMapRefresh(); return;
+    }
+  }
+  const s=settlementById(World.activeSettlementId);
+  if(!s) return;
+  const layout=nationalMediaLayout(), height=layout.tall?layout.height:MapSystem.NATIONAL_VIEWBOX.height;
+  const px=s.x, py=MapSystem.transformY(layout,s.y);
+  mapViewport=MapSystem.clampCamera({scale:2.6,x:MapSystem.NATIONAL_VIEWBOX.width/2-px*2.6,y:height/2-py*2.6},{width:MapSystem.NATIONAL_VIEWBOX.width,height},MapSystem.ZOOM_CONFIG.national);
+  World.map.mode='national'; World.map.selectedSettlementId=s.id; mapLastMode=null;
+  renderMap();
+}
+function activateMapTarget(el){
+  if(!el) return;
+  if(el.dataset.mapSettlement){
+    World.map.selectedSettlementId=el.dataset.mapSettlement;
+    World.map.mode='national';
+    renderMap();
+  } else if(el.dataset.mapBuilding){
+    World.map.selectedBuildingId=el.dataset.mapBuilding;
+    moveWithinSettlement(el.dataset.mapBuilding);
+  }
+}
+/* Tap pipeline: single taps select (after a short hold-off), a second quick
+   tap on the same target is a zoom instead, and any drag over ~5 screen px
+   suppresses selection entirely. Keyboard activation bypasses this via
+   detail===0 synthesized clicks. */
+function handleMapTap(el,pos){
+  if(!el) return;
+  const now=Date.now();
+  if(mapTapTimer){ /* second tap before the first resolved */
+    clearTimeout(mapTapTimer); mapTapTimer=null;
+    mapLastTap={time:0,target:null};
+    const svg=$('#mapSvg');
+    if(svg){
+      const view=mapViewSize(svg);
+      mapViewport=MapSystem.zoomAtPoint(mapViewport,mapPoint(pos,svg).x,mapPoint(pos,svg).y,mapViewport.scale*1.7,view,activeZoomConfig());
+      applyMapTransform(); scheduleMapRefresh();
+    }
+    return;
+  }
+  if(now-mapLastTap.time<350&&mapLastTap.target===el){
+    mapLastTap={time:0,target:null};
+    const svg=$('#mapSvg');
+    if(svg){
+      const view=mapViewSize(svg);
+      mapViewport=MapSystem.zoomAtPoint(mapViewport,mapPoint(pos,svg).x,mapPoint(pos,svg).y,mapViewport.scale*1.7,view,activeZoomConfig());
+      applyMapTransform(); scheduleMapRefresh();
+    }
+    return;
+  }
+  mapLastTap={time:now,target:el};
+  mapTapTimer=setTimeout(()=>{ mapTapTimer=null; activateMapTarget(el); },280);
+}
 function renderMap(){
   const sheet=$('#mapSheet'); if(!sheet||!World||!World.map) return;
   sheet.innerHTML=(World.map.mode==='settlement'?renderSettlementMap():renderNationalMap())+'<div class="ps-foot"><button class="btn" id="mapClose">Close the Map ▸</button></div>';
   const svg=$('#mapSvg'); if(!svg) return;
   const viewSize=mapViewSize(svg);
+  const zoomCfg=activeZoomConfig();
   if(World.map.mode!==mapLastMode){
     if(World.map.mode==='settlement'){
       const s=settlementById(World.map.selectedSettlementId)||currentSettlement();
-      if(s) mapViewport=MapSystem.fitBounds(placedBounds(MapSystem.placeBuildings(s.buildings,MapSystem.settlementPlan(s.id))),viewSize,4);
+      if(s) mapViewport=MapSystem.fitBounds(placedBounds(MapSystem.placeBuildings(s.buildings,MapSystem.settlementPlan(s.id))),viewSize,4,MapSystem.ZOOM_CONFIG.settlement);
     } else mapViewport=MapSystem.createCamera();
     mapLastMode=World.map.mode;
   }
-  mapViewport=MapSystem.clampCamera(mapViewport,viewSize);
+  mapViewport=MapSystem.clampCamera(mapViewport,viewSize,zoomCfg);
   applyMapTransform();
+  mapLastKey=mapTierKey();
   svg.addEventListener('wheel',e=>{
     e.preventDefault();
     const p=mapPoint(e,svg);
-    mapViewport=MapSystem.zoomAtPoint(mapViewport,p.x,p.y,mapViewport.scale+(e.deltaY<0?.12:-.12),viewSize);
-    applyMapTransform();
+    mapViewport=MapSystem.zoomAtPoint(mapViewport,p.x,p.y,mapViewport.scale+(e.deltaY<0?.12:-.12),viewSize,zoomCfg);
+    applyMapTransform(); scheduleMapRefresh();
   },{passive:false});
+  svg.addEventListener('dblclick',e=>{
+    e.preventDefault();
+    const p=mapPoint(e,svg);
+    mapViewport=MapSystem.zoomAtPoint(mapViewport,p.x,p.y,mapViewport.scale*1.7,viewSize,zoomCfg);
+    applyMapTransform(); scheduleMapRefresh();
+  });
   svg.addEventListener('pointerdown',e=>{
     if(e.pointerType==='touch') return;
     const interactive=!!e.target.closest?.('[data-map-settlement],[data-map-building]');
     const point=mapPoint(e,svg);
     mapPointers.set(e.pointerId,{x:point.x,y:point.y,cx:e.clientX,cy:e.clientY,interactive});
     svg.setPointerCapture?.(e.pointerId);
+    if(!mapGesture||mapGesture.done){
+      mapGesture={id:e.pointerId,x:e.clientX,y:e.clientY,moved:false,target:interactive?e.target.closest('[data-map-settlement],[data-map-building]'):null};
+    }
     if(mapPointers.size===1){ mapDragging=interactive?null:{x:e.clientX,y:e.clientY,ox:mapViewport.x,oy:mapViewport.y}; }
     else if(mapPointers.size===2){
       const pinch=mapPinchState();
       mapDragging={pinch,scale:mapViewport.scale,x:mapViewport.x,y:mapViewport.y};
+      if(mapGesture) mapGesture.moved=true;
     }
   });
   svg.addEventListener('pointermove',e=>{
     if(e.pointerType==='touch') return;
+    if(mapGesture&&mapGesture.id===e.pointerId){
+      if(Math.hypot(e.clientX-mapGesture.x,e.clientY-mapGesture.y)>5) mapGesture.moved=true;
+    }
     if(!mapPointers.has(e.pointerId)) return;
     e.preventDefault();
     const previous=mapPointers.get(e.pointerId), point=mapPoint(e,svg);
     mapPointers.set(e.pointerId,{x:point.x,y:point.y,cx:e.clientX,cy:e.clientY,interactive:previous?.interactive});
     if(mapPointers.size>=2){
       const pinch=mapPinchState(); if(!pinch||!mapDragging?.pinch) return;
-      const oldScale=mapDragging.scale, newScale=clamp(oldScale*(pinch.distance/mapDragging.pinch.distance),MapSystem.ZOOM_MIN,MapSystem.ZOOM_MAX);
+      const oldScale=mapDragging.scale, newScale=clamp(oldScale*(pinch.distance/mapDragging.pinch.distance),zoomCfg.min,zoomCfg.max);
       const focal=mapDragging.pinch.center, base={scale:oldScale,x:mapDragging.x,y:mapDragging.y};
-      const zoomed=MapSystem.zoomAtPoint(base,focal.x,focal.y,newScale);
-      mapViewport=MapSystem.clampCamera({scale:zoomed.scale,x:zoomed.x+(pinch.center.x-focal.x),y:zoomed.y+(pinch.center.y-focal.y)},viewSize);
+      const zoomed=MapSystem.zoomAtPoint(base,focal.x,focal.y,newScale,viewSize,zoomCfg);
+      mapViewport=MapSystem.clampCamera({scale:zoomed.scale,x:zoomed.x+(pinch.center.x-focal.x),y:zoomed.y+(pinch.center.y-focal.y)},viewSize,zoomCfg);
       applyMapTransform(); return;
     }
     if(!mapDragging) return;
@@ -1045,11 +1194,15 @@ function renderMap(){
       scale:mapViewport.scale,
       x:mapDragging.ox+(e.clientX-mapDragging.x)/svg.clientWidth*viewSize.width,
       y:mapDragging.oy+(e.clientY-mapDragging.y)/svg.clientHeight*viewSize.height
-    },viewSize);
+    },viewSize,zoomCfg);
     applyMapTransform();
   });
   function endMapPointer(e){
     if(e.pointerType==='touch') return;
+    if(mapGesture&&mapGesture.id===e.pointerId){
+      if(!mapGesture.moved&&mapGesture.target) handleMapTap(mapGesture.target,{clientX:e.clientX,clientY:e.clientY});
+      mapGesture.done=true;
+    }
     mapPointers.delete(e.pointerId);
     if(mapPointers.size===1){
       const [point]=mapPointers.values();
@@ -1067,45 +1220,59 @@ function renderMap(){
   }
   function touchDistance(touches){
     if(touches.length<2) return 1;
-    return Math.max(1,Math.hypot(touches[1].clientX-touches[0].clientX,touches[1].clientY-touches[0].clientY));
+    return Math.max(1,Math.hypot(touches[1].clientX-touches[0].clientX,touches[0].clientX?touches[1].clientY-touches[0].clientY:0));
   }
   svg.addEventListener('touchstart',e=>{
     const center=touchCenter(e.touches);
     if(e.touches.length>=2){
       e.preventDefault();
+      mapTouchMoved=true;
       const p=mapPoint({clientX:center.x,clientY:center.y},svg);
       mapTouchState={mode:'pinch',center:p,distance:touchDistance(e.touches),scale:mapViewport.scale,x:mapViewport.x,y:mapViewport.y};
     } else if(e.touches.length===1){
+      mapTouchMoved=false;
+      mapGesture={id:'touch',x:e.touches[0].clientX,y:e.touches[0].clientY,moved:false,target:e.target.closest?.('[data-map-settlement],[data-map-building]')||null};
       mapTouchState={mode:'pan',x:e.touches[0].clientX,y:e.touches[0].clientY,ox:mapViewport.x,oy:mapViewport.y};
     }
   },{passive:false});
   svg.addEventListener('touchmove',e=>{
     e.preventDefault();
     if(e.touches.length>=2){
+      mapTouchMoved=true;
+      if(mapGesture) mapGesture.moved=true;
       const center=touchCenter(e.touches), current=mapPoint({clientX:center.x,clientY:center.y},svg);
       if(!mapTouchState||mapTouchState.mode!=='pinch'){
         mapTouchState={mode:'pinch',center:current,distance:touchDistance(e.touches),scale:mapViewport.scale,x:mapViewport.x,y:mapViewport.y};
         return;
       }
       const oldScale=mapTouchState.scale;
-      const newScale=clamp(oldScale*(touchDistance(e.touches)/mapTouchState.distance),MapSystem.ZOOM_MIN,MapSystem.ZOOM_MAX);
+      const newScale=clamp(oldScale*(touchDistance(e.touches)/mapTouchState.distance),zoomCfg.min,zoomCfg.max);
       const focal=mapTouchState.center, base={scale:oldScale,x:mapTouchState.x,y:mapTouchState.y};
-      const zoomed=MapSystem.zoomAtPoint(base,focal.x,focal.y,newScale);
-      mapViewport=MapSystem.clampCamera({scale:zoomed.scale,x:zoomed.x+(current.x-focal.x),y:zoomed.y+(current.y-focal.y)},viewSize);
+      const zoomed=MapSystem.zoomAtPoint(base,focal.x,focal.y,newScale,viewSize,zoomCfg);
+      mapViewport=MapSystem.clampCamera({scale:zoomed.scale,x:zoomed.x+(current.x-focal.x),y:zoomed.y+(current.y-focal.y)},viewSize,zoomCfg);
       applyMapTransform();
     } else if(e.touches.length===1&&mapTouchState?.mode==='pan'){
       const t=e.touches[0];
+      if(Math.hypot(t.clientX-mapTouchState.x,t.clientY-mapTouchState.y)>5) mapTouchMoved=true;
+      if(mapGesture&&Math.hypot(t.clientX-mapGesture.x,t.clientY-mapGesture.y)>5) mapGesture.moved=true;
       mapViewport=MapSystem.clampCamera({
         scale:mapViewport.scale,
         x:mapTouchState.ox+(t.clientX-mapTouchState.x)/svg.clientWidth*viewSize.width,
         y:mapTouchState.oy+(t.clientY-mapTouchState.y)/svg.clientHeight*viewSize.height
-      },viewSize);
+      },viewSize,zoomCfg);
       applyMapTransform();
     }
   },{passive:false});
   function endMapTouch(e){
-    if(e.touches.length===0){ mapTouchState=null; return; }
+    if(e.touches.length===0){
+      if(mapGesture&&!mapGesture.moved&&mapGesture.target&&e.changedTouches&&e.changedTouches.length){
+        const t=e.changedTouches[0];
+        handleMapTap(mapGesture.target,{clientX:t.clientX,clientY:t.clientY});
+      }
+      mapGesture=null; mapTouchState=null; return;
+    }
     if(e.touches.length===1){
+      mapTouchMoved=false;
       mapTouchState={mode:'pan',x:e.touches[0].clientX,y:e.touches[0].clientY,ox:mapViewport.x,oy:mapViewport.y};
     }
   }
@@ -1114,14 +1281,28 @@ function renderMap(){
 }
 function openMap(){
   if(!S||!World) return; if(!World.map) World.map={discoveredSettlementIds:[World.activeSettlementId],visitedSettlementIds:[World.activeSettlementId],selectedSettlementId:World.activeSettlementId,selectedBuildingId:World.activeBuildingId,mode:'national'};
-  World.map.mode='national'; World.map.selectedSettlementId=World.activeSettlementId; mapViewport=MapSystem.createCamera(); renderMap(); $('#mapWrap').classList.remove('hidden');
+  World.map.mode='national'; World.map.selectedSettlementId=World.activeSettlementId; mapViewport=MapSystem.createCamera(); mapLastMode=null; mapLastKey=null; renderMap(); $('#mapWrap').classList.remove('hidden');
 }
 $('#mapWrap').addEventListener('click',e=>{
   if(e.target.id==='mapWrap'||e.target.id==='mapClose'){ $('#mapWrap').classList.add('hidden'); return; }
-  const mode=e.target.closest('[data-map-mode]'); if(mode){ World.map.mode=mode.dataset.mapMode; mapViewport=MapSystem.createCamera(); renderMap(); return; }
-  const settlement=e.target.closest('[data-map-settlement]'); if(settlement){ World.map.selectedSettlementId=settlement.dataset.mapSettlement; World.map.mode='national'; renderMap(); return; }
-  const building=e.target.closest('[data-map-building]'); if(building){ World.map.selectedBuildingId=building.dataset.mapBuilding; moveWithinSettlement(building.dataset.mapBuilding); return; }
-  const open=e.target.closest('[data-map-open]'); if(open){ World.map.selectedSettlementId=open.dataset.mapOpen; World.map.mode='settlement'; const s=settlementById(open.dataset.mapOpen); World.map.selectedBuildingId=s.buildings[0].id; mapViewport=MapSystem.createCamera(); renderMap(); return; }
+  const keyToggle=e.target.closest('[data-map-key-toggle]');
+  if(keyToggle){
+    const box=keyToggle.closest('[data-map-key]');
+    if(box){ const open=box.classList.toggle('open'); keyToggle.setAttribute('aria-expanded',open?'true':'false'); }
+    return;
+  }
+  const zbtn=e.target.closest('[data-map-zoom]');
+  if(zbtn){ mapZoomStep(zbtn.dataset.mapZoom==='in'?1.45:1/1.45); return; }
+  if(e.target.closest('[data-map-fit]')){ mapFitView(); return; }
+  if(e.target.closest('[data-map-here]')){ mapGoHere(); return; }
+  const mode=e.target.closest('[data-map-mode]'); if(mode){ World.map.mode=mode.dataset.mapMode; mapViewport=MapSystem.createCamera(); mapLastMode=null; mapLastKey=null; renderMap(); return; }
+  /* Node/building selection is owned by the tap pipeline for pointer input;
+     detail===0 marks keyboard-synthesized clicks. */
+  const settlement=e.target.closest('[data-map-settlement]');
+  if(settlement){ if(!e.detail) activateMapTarget(settlement); return; }
+  const building=e.target.closest('[data-map-building]');
+  if(building){ if(!e.detail) activateMapTarget(building); return; }
+  const open=e.target.closest('[data-map-open]'); if(open){ World.map.selectedSettlementId=open.dataset.mapOpen; World.map.mode='settlement'; const s=settlementById(open.dataset.mapOpen); World.map.selectedBuildingId=s.buildings[0].id; mapViewport=MapSystem.createCamera(); mapLastMode=null; mapLastKey=null; renderMap(); return; }
   const travel=e.target.closest('[data-map-travel]'); if(travel){ const result=scheduleTravel(travel.dataset.mapTravel); if(!result.ok) openNotice({title:'Travel Denied',body:result.reason+'. The map remains open; the route does not.'}); else renderMap(); return; }
 });
 $('#mapWrap').addEventListener('keydown',e=>{
