@@ -2641,7 +2641,7 @@ function runEconomy(){
     logEv('Subject fell in love with '+S.partner+', unlooked-for. It was, initially, reciprocated.',{happiness:8,relations:8}); }
   if(S.married&&S.kids<4&&S.age>=20&&S.age<=42&&chance(0.025)){ S.kids++; S.familyMood=70; bearChild();
     logEv('A child was born to the subject. The Bureau congratulates the subject, cautiously.',{happiness:6,assets:-300,relations:6,health:-2}); }
-  if(S.married&&S.age>=55&&chance(0.02+(S.age-55)*0.002)){
+  if(S.married&&S.age>=62&&chance(0.012+(S.age-62)*0.0012)){
     logEv('Subject’s spouse, '+S.partner+', passed away. The Bureau extends its formal condolences.',{happiness:-12,relations:-10});
     markSpouseDeath(S,'natural causes'); }
   if(S.married){ const p=activePartnerContact(); if(p){ p.mood=clamp(p.mood-3,0,100); syncPartnerMirror(); } }
@@ -2807,13 +2807,13 @@ function runPersonalStandingYearTick(){
 }
 function checkMortality(){
   let dead=false, cause='';
+  const MT=(typeof SurvivalSystem==='object'&&SurvivalSystem&&SurvivalSystem.MORTALITY_TUNING)||{povertyBaseHouseNone:.012,povertyMeagerFood:.003,povertyBoth:.01,povertyInsecurity:.006,desperationFloor:.4,desperationScale:1.2,childGuardFactor:1.6,elderFactor:1.6,povertyHardCap:.05,despairChance:.04,criticalYearsToDie:1,criticalFloorHealth:8,guaranteedDeathAge:104};
   if(S.jailUntil<=S.age){
     const house=currentHousing(), food=currentFood();
     // Desperation Index scales poverty mortality: the deeper the spiral,
     // the more lethal each year on the bottom rung becomes. A mission meal
     // suppresses the hunger bump for the year it was eaten.
     const desperation=(typeof SurvivalSystem==='object'&&SurvivalSystem&&typeof World!=='undefined'&&World)?SurvivalSystem.desperationOf(World,S):0;
-    const MT=(typeof SurvivalSystem==='object'&&SurvivalSystem&&SurvivalSystem.MORTALITY_TUNING)||{povertyBaseHouseNone:.012,povertyMeagerFood:.003,povertyBoth:.01,povertyInsecurity:.006,desperationFloor:.4,desperationScale:1.2,childGuardFactor:1.6,elderFactor:1.6};
     const fedAtMission=S.soupKitchenYear===currentYear();
     let povRisk=0;
     if(house.id==='none') povRisk+=MT.povertyBaseHouseNone;
@@ -2823,6 +2823,8 @@ function checkMortality(){
     povRisk*=(MT.desperationFloor+MT.desperationScale*desperation);
     if(S.age<16||S.livingAtHome) povRisk*=MT.childGuardFactor*(GUARD_MORT[guardTier()]||1);
     else if(S.age>65) povRisk*=MT.elderFactor;
+    // Hard cap: even street-and-scraps years cannot exceed this annual odds.
+    povRisk=Math.min(povRisk,MT.povertyHardCap);
     if(povRisk>0&&chance(povRisk)){ dead=true;
       cause = house.id==='none'
         ? pick(['exposure, found behind the depot at first light','a fever no shelter was there to catch','the kind of winter the streets do not forgive'])
@@ -2831,10 +2833,23 @@ function checkMortality(){
   }
   const medicalMortality=typeof medicalMortalityRoll==='function'?medicalMortalityRoll(S):null;
   if(!dead&&medicalMortality&&medicalMortality.died){dead=true;cause=medicalMortality.cause||'complications from a long illness';}
-  if(!dead&&S.health<=0){dead=true;cause=pick(['heart failure','a long illness, patiently endured','sudden collapse at the kitchen table']);}
-  else if(!dead&&S.happiness<=0&&chance(0.04)){dead=true;cause='a despair the file does not fully document';}
-  else if(!dead&&S.age>=56){const p=0.0042*(S.age-55)+Math.max(0,70-S.health)*0.0008; if(chance(p)){dead=true;cause=S.age>=84?'natural causes, in sleep':'heart failure';}}
-  if(!dead&&S.age>=104){dead=true;cause='the extreme and improbable age of '+S.age;}
+  // A collapsed body is a CRISIS, not a verdict: health<=0 starts a
+  // multi-year critical countdown with a rescue in between.
+  if(!dead&&S.health<=0){
+    S.__criticalYears=(Number(S.__criticalYears)||0)+1;
+    if(S.__criticalYears>=MT.criticalYearsToDie){
+      dead=true;cause=pick(['heart failure','a long illness, patiently endured','sudden collapse at the kitchen table']);
+    }else{
+      S.health=clamp(MT.criticalFloorHealth,0,S.healthCap||100);
+      logEv('CRISIS. The body gave out and the file held its breath. Rest, medicine, stubbornness — something dragged the subject back from the margin.',{health:4,happiness:-4},'crisis','MEDICAL FILE · YEAR '+S.age);
+    }
+  } else if(!dead&&S.health>25){ S.__criticalYears=0; }
+  if(!dead&&S.happiness<=0&&(Number(S.relations)||0)<35&&chance(MT.despairChance)){dead=true;cause='a despair the file does not fully document';}
+  else if(!dead&&S.age>=56){
+    const p=(typeof SurvivalSystem==='object'&&SurvivalSystem&&SurvivalSystem.playerOldAgeRiskOf)?SurvivalSystem.playerOldAgeRiskOf(S.age,S.health):(0.004*(S.age-55)+Math.max(0,70-S.health)*0.0008);
+    if(chance(p)){dead=true;cause=S.age>=84?'natural causes, in sleep':'heart failure';}
+  }
+  if(!dead&&S.age>=MT.guaranteedDeathAge){dead=true;cause='the extreme and improbable age of '+S.age;}
   if(dead){S.alive=false;S.cause=cause; logEv('ENTRY TERMINATED. Subject deceased — '+cause+'. The record ends mid-sentence, as these things do.',{},'final','FINAL ENTRY · YEAR '+S.age);}
 }
 let pendingSlips=[];

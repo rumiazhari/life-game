@@ -156,6 +156,16 @@
           }catch(e){}
           break;
         }
+        case 'skill': {
+          if(op.skill){
+            if(!S.skills||typeof S.skills!=='object') S.skills={};
+            const before=finite(S.skills[op.skill],0);
+            const after=clamp(before+clamp(finite(op.delta,1),1,3),0,10);
+            S.skills[op.skill]=after;
+            chips.push({txt:'+'+(after-before)+' '+String(op.skill).toUpperCase(),plus:true});
+          }
+          break;
+        }
         case 'memory': {
           if(root.RelationshipMemory&&typeof root.RelationshipMemory.add==='function'){
             const participants=[...new Set([String(S.npcId||'subject')].concat((op.participants||[]).filter(Boolean).map(String)))];
@@ -218,8 +228,12 @@
 
   /* ================= RUN LIFECYCLE ================= */
 
-  function startRun(world,selection,year){
-    const body=selection.def.build(selection.bind);
+  function startRun(world,selection,year,rng){
+    // Scripts address their cast by key (bind.spouse, bind.fixer ...);
+    // convert the resolver's ordered list into that map here.
+    const bindMap={};
+    (selection.bind||[]).forEach(b=>{ if(b&&b.key!=null) bindMap[b.key]=b; });
+    const body=selection.def.build(bindMap,rng||null);
     const id='story:'+String(++world.storyCounter).padStart(5,'0');
     const castMap={};
     (selection.bind||[]).forEach(b=>{castMap[b.key]={label:b.label,bind:b.bind,npcId:b.npcId};});
@@ -432,7 +446,7 @@
         :root.Random.create([world.seed,year,'story-spawn','story'].join('|'));
       if(rng.chance(SPAWN_CHANCE)){
         const sel=selectEpisode(world,S,lineage,year,rng);
-        if(sel){ const run=startRun(world,sel,year); result.spawned=run.id; }
+        if(sel){ const run=startRun(world,sel,year,rng); result.spawned=run.id; }
       }
     }
 

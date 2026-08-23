@@ -19,7 +19,8 @@ function storyContext(seed){
 }
 // A dominant test episode so selection is fully deterministic.
 function installTestEpisode(context){
-  expose(context,`StoryEpisodes.push({
+  expose(context,`StoryEpisodes.forEach(function(e){if(e.id!=='ep_zztest')e.eligible=(function(){return false;});});
+  StoryEpisodes.push({
     id:'ep_zztest',domain:'test',
     cast:function(){return [{key:'x',label:'Xander Quill'}];},
     eligible:function(){return true;}, weight:function(){return 100;},
@@ -27,7 +28,7 @@ function installTestEpisode(context){
       title:'THE TEST EPISODE', bg:'office',
       scenes:{
         a:{lines:[
-             {sp:'narrator',t:'A room. A man named '+bind[0].label+'. A decision.'},
+             {sp:'narrator',t:'A room. A man named '+bind.x.label+'. A decision.'},
              {sp:'x',t:'"Choose wisely," he said.'}],
            choice:{prompt:'Pick one.',options:[
              {t:'The greedy door',note:'greedy note',tone:'greedy',flag:'took_greedy',goto:'end1',effects:[{kind:'money',delta:-999999},{kind:'scrutiny',delta:500}]},

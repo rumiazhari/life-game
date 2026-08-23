@@ -163,9 +163,19 @@
 
   /* ---- Desperation Index (pure; never stored) ---- */
 
-  // Tuning table for player-facing poverty mortality (ui.js checkMortality
-  // reads this). Exported so the "deaths should be rare" dial has one
-  // documented, testable home instead of magic numbers in UI code.
+  // Tuning table for player-facing mortality (ui.js checkMortality reads
+  // this). Exported so the "deaths should be rare" dial has one documented,
+  // testable home instead of magic numbers in UI code.
+  //
+  // WHY CHARACTERS WERE DYING SO FAST (the audit, in one place):
+  //   1) The old-age curve was LINEAR from 56 with no cap: at 80 with worn
+  //      health it reached ~13%/year, compounding across a whole retirement.
+  //   2) health<=0 was INSTANT death -- one bad flu event at low health
+  //      ended a life without any roll or recourse.
+  //   3) Despair (happiness<=0) killed at 4%/year even amid friends.
+  //   4) Untreated medical mortality compounded per year of sickness.
+  // Every dial below now caps each pathway separately, and health<=0
+  // becomes a two-year crisis rather than a coin flip.
   const MORTALITY_TUNING={
     povertyBaseHouseNone:0.009,
     povertyMeagerFood:0.002,
@@ -174,8 +184,31 @@
     desperationFloor:0.30,
     desperationScale:0.70,
     childGuardFactor:1.35,
-    elderFactor:1.30
+    elderFactor:1.30,
+    povertyHardCap:0.04,
+    despairChance:0.02,
+    despairNeedsIsolation:true,
+    oldAgeStart:56,
+    oldAgeBase:0.0018,
+    oldAgeExp:1.0,
+    oldAgeHealthCoeff:0.0005,
+    oldAgeCap:0.05,
+    oldAgeLateStart:85,
+    oldAgeLateCap:0.085,
+    criticalYearsToDie:2,
+    criticalFloorHealth:8,
+    guaranteedDeathAge:112
   };
+
+  // Pure helper: the annual old-age risk for a subject of given age/health.
+  function playerOldAgeRiskOf(age,health){
+    const T=MORTALITY_TUNING;
+    if(age<T.oldAgeStart) return 0;
+    let risk=T.oldAgeBase*Math.pow(age-T.oldAgeStart+1,T.oldAgeExp);
+    risk+=Math.max(0,70-(Number(health)||0))*T.oldAgeHealthCoeff;
+    if(age>=T.oldAgeLateStart) return Math.min(T.oldAgeLateCap,risk);
+    return Math.min(T.oldAgeCap,risk);
+  }
 
   function desperationOf(world,S){
     if(!S||typeof S!=='object') return 0;
@@ -607,6 +640,7 @@
     MAX_FIXERS_PER_SETTLEMENT,
     FIXER_HEAT_BURN,
     MORTALITY_TUNING,
+    playerOldAgeRiskOf,
     ensure,
     migrate,
     desperationOf,

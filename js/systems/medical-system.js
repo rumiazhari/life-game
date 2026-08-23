@@ -298,7 +298,7 @@
   // Untreated-condition mortality weight. Tuned on the rare side: a severe
   // untreated condition should loom over the story, not end it within a year
   // or two of onset. Exported so tests can pin the dial.
-  const MORTALITY_CONTRIBUTION={perSeverityAboveThree:.0042,perActiveYear:.0009,cap:.10};
+  const MORTALITY_CONTRIBUTION={perSeverityAboveThree:.0042,perActiveYear:.0006,cap:.06};
   function mortalityContribution(condition){
     if(condition.severity<4)return 0;
     if(condition.state==='treated'||condition.state==='remission')return 0;
