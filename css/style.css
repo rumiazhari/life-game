@@ -1052,3 +1052,49 @@ body{background:var(--olive);color:var(--ink)}
 .lg-district{fill:rgba(120,105,70,.06);stroke:#9c8b64;stroke-dasharray:3 2}
 #mapWrap .map-controls{top:auto;bottom:52px;left:8px;flex-direction:row}
 #mapWrap .map-key{flex:0 0 auto}
+
+/* ================= MAP v3: LARGE NAVIGABLE SHEETS ================= */
+/* geometry line work at map-unit scale */
+.plan-road{fill:none;stroke:#c9b184;stroke-width:26;opacity:.95;stroke-linecap:round;stroke-linejoin:round}
+.plan-road.secondary{stroke-width:16;stroke:#cdb890}
+.plan-road.lane{stroke-width:9;stroke:#d6c7a2}
+.plan-rail-casing{stroke-width:15;stroke:#e8e2cc;opacity:.9}
+.plan-rail{stroke-width:6.5;stroke-dasharray:18 14}
+.plan-rail.spur{stroke-width:4;stroke-dasharray:10 10;opacity:.85}
+.plan-river-line{stroke-width:20}.plan-stream-line{stroke-width:9}
+.plan-coast-line{stroke-width:5;stroke:#5f93a3}
+.plan-quay-line{stroke-width:7;stroke:#6f5f42}
+.plan-steps-line{stroke-width:9;stroke:#6f5f42;stroke-dasharray:12 9}
+.plan-water-area{stroke:#7fa9b5;stroke-width:4}
+.plan-contour{stroke-width:3.5;stroke-dasharray:none}
+.plan-bridge{stroke:#6f5a3e;stroke-width:4}
+.lu-texture{vector-effect:non-scaling-stroke;stroke-width:1px!important}
+.plan-district-boundary{stroke-width:1.6px;vector-effect:non-scaling-stroke;stroke-dasharray:7 4}
+/* generated urban fabric: one path per morphology class */
+.plan-fabric path{fill:#d8cba6;stroke:#9d8867;stroke-width:1px;vector-effect:non-scaling-stroke;opacity:.92}
+.fabric-core{fill:#d5c194}
+.fabric-expansion{fill:#dbcda9}
+.fabric-ring{fill:#d9caa2}
+.fabric-village{fill:#ddcfa6}
+.fabric-industrial{fill:#cdc7b6}
+.fabric-military{fill:#cfc4ad}
+.fabric-rural{fill:#dfd2ab}
+.fabric-landmark{fill:#cdb98f}
+/* canonical gameplay buildings are real footprints in the fabric */
+.plan-canonical{pointer-events:all}
+.plan-canonical .map-building{cursor:pointer;fill:#c9b285;stroke:#66513a;stroke-width:2.5px;vector-effect:non-scaling-stroke}
+.plan-canonical .map-building.selected{fill:#e7cc73;stroke:#b23327;stroke-width:4px}
+.plan-canonical .map-building.current{fill:#c7d5ea;stroke:#2c63b5;stroke-width:4px}
+/* annotation layer: screen-space readable labels and icons */
+#mapAnnoLayer,#mapLeaderLines{pointer-events:none}
+.map-poi-leader{stroke:#67757f;stroke-width:1.6px;vector-effect:non-scaling-stroke;opacity:.85}
+.map-anno text{paint-order:stroke fill;stroke:rgba(246,240,216,.95);stroke-linejoin:round}
+.map-label{font:700 11px 'Archivo';letter-spacing:.02em;fill:#33280f;paint-order:stroke fill;stroke:rgba(246,240,216,.95);stroke-width:3.2px;stroke-linejoin:round}
+.map-label.street{font-size:9.5px;font-style:italic;fill:#53646e;letter-spacing:.16em;stroke-width:2.6px}
+.map-label.emphasized{font-size:13px;fill:#7a1f16;stroke-width:4.2px}
+.map-district-label{font:700 15px 'Archivo';letter-spacing:.38em;fill:#8d7d58;opacity:.55;text-anchor:middle;paint-order:stroke fill;stroke:rgba(246,240,216,.75);stroke-width:2.4px}
+.poi-icon .sym-fill{fill:#59472c}.poi-icon .sym-core{fill:#f2e7c7}
+.poi-icon .sym-line{stroke:#59472c;fill:none;stroke-width:1.6}
+.poi-icon .sym-heavy{stroke:#59472c;fill:none;stroke-width:2.6;stroke-linecap:round}
+.poi-icon.emphasized .sym-fill{fill:#8b3027}
+.poi-icon.emphasized .sym-heavy,.poi-icon.emphasized .sym-line{stroke:#8b3027}

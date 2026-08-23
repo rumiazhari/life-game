@@ -135,6 +135,27 @@ const KARSEN_BUILDING_NAMES={
  kamenor:['Bridge Customs House','Mill Bank Home','Old Quays Warehouse','Kamenor Clinic','River School','Stone Mill','Ferry Office','Quayside Chapel','Registry Kiosk','The Bent Nail'],
  svetlin:['Monastery Close','Clinic Road House','East Gardens Farm','Svetlin Clinic','Parish School','Monastery Store','Pilgrim House','Bureau Health Desk','Old Shrine','The White Lantern'],
 };
+/* Explicit canonical building -> district assignment. Replaces the old
+   artificial round-robin district allocation so every gameplay building
+   belongs to a geographically coherent district (the survey sheets in
+   js/map.js place each building inside its listed district). Indexed by
+   building order within each settlement. */
+const KARSEN_BUILDING_DISTRICTS={
+ branec:['Registry Quarter','North Offices','Workers\u2019 Ring','Workers\u2019 Ring','Old Market','Old Market','Old Market','Registry Quarter','Old Market','Workers\u2019 Ring'],
+ veskar:['Customs Ward','Old Docks','Fishermen\u2019s Row','Fishermen\u2019s Row','Customs Ward','Salt Market','Fishermen\u2019s Row','Customs Ward','Customs Ward','Old Docks'],
+ eisenmark:['Foundry Ward','Foundry Ward','Ash Market','Company Row','Foundry Ward','Ash Market','Company Row','Barracks','Company Row','Ash Market'],
+ kostrin:['College Hill','Chapel District','South Gardens','Chapel District','Hospital Ward','South Gardens','College Hill','Hospital Ward','Chapel District','Hospital Ward'],
+ rudava:['Junction Ward','Junction Ward','Freight Yards','Railway Homes','Freight Yards','Railway Homes','East Barracks','Junction Ward','Railway Homes','Freight Yards'],
+ dobraven:['County Square','Old Estates','River Road','Lower Town','County Square','County Square','Lower Town','County Square','Old Estates','Lower Town'],
+ lindava:['Market Row','Bell Quarter','West Fields','Market Row','Market Row','Market Row','Bell Quarter','Market Row','Bell Quarter','West Fields'],
+ marec:['County Offices','Grain Market','Low Road','Grain Market','County Offices','County Offices','County Offices','Grain Market','County Offices','Low Road'],
+ kamenor:['Bridge Ward','Mill Bank','Old Quays','Mill Bank','Mill Bank','Mill Bank','Old Quays','Old Quays','Bridge Ward','Bridge Ward'],
+ sundervik:['Harbor Steps','Netmakers\u2019 Row','Signal Hill','Netmakers\u2019 Row','Netmakers\u2019 Row','Harbor Steps','Signal Hill','Netmakers\u2019 Row','Harbor Steps','Signal Hill'],
+ krasnava:['Village Green','North Fields','Mill Road','Village Green','Village Green','Village Green','Mill Road','Village Green','Village Green','Mill Road'],
+ brezin:['Lower Road','Timber Yard','Hill Houses','Lower Road','Lower Road','Timber Yard','Hill Houses','Timber Yard','Lower Road','Hill Houses'],
+ svetlin:['Monastery Close','Clinic Road','East Gardens','Clinic Road','Clinic Road','Monastery Close','Monastery Close','Clinic Road','Monastery Close','East Gardens'],
+ oberhain:['Upper Hain','Chapel Lane','South Yards','South Yards','South Yards','South Yards','Chapel Lane','Chapel Lane','South Yards','Upper Hain']
+};
 function inferBuildingType(name){
   const n=name.toLowerCase();
   if(/bureau|registry|customs|courthouse|county|office|hall|archive/.test(n)) return n.includes('bureau')||n.includes('registry')||n.includes('archive')?'bureau':'civic';
@@ -149,7 +170,8 @@ function inferBuildingType(name){
 }
 function buildSettlementBuildings(s){
   const names=KARSEN_BUILDING_NAMES[s.id]||[];
-  s.buildings=names.map((name,i)=>{const type=inferBuildingType(name);return {id:s.id+'-b'+(i+1),name,type,district:s.districts[i%s.districts.length],x:12+(i%5)*18+(Math.floor(i/5)%2)*4,y:15+Math.floor(i/5)*31,w:10+(i%3)*2,h:8+(i%2)*2,surveillance:clamp(s.surveillance+(type==='bureau'?14:-8)+((i*7)%12),0,100),description:buildingDescription(name,type,s)};});
+  const districtTable=KARSEN_BUILDING_DISTRICTS[s.id]||[];
+  s.buildings=names.map((name,i)=>{const type=inferBuildingType(name);return {id:s.id+'-b'+(i+1),name,type,district:districtTable[i]||s.districts[0],x:12+(i%5)*18+(Math.floor(i/5)%2)*4,y:15+Math.floor(i/5)*31,w:10+(i%3)*2,h:8+(i%2)*2,surveillance:clamp(s.surveillance+(type==='bureau'?14:-8)+((i*7)%12),0,100),description:buildingDescription(name,type,s)};});
   return s;
 }
 function buildingDescription(name,type,s){

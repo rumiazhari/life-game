@@ -3,48 +3,46 @@
    DOM-free module behind the Karsen map screens. Pure data and math only:
    no document/window/$ access, no random, no World/S coupling.
 
-   Contents:
-   - camera math        createCamera / zoomAtPoint / clampCamera / panBy /
-                        fitBounds, with per-scale zoom profiles
-                        (NATIONAL_ZOOM / SETTLEMENT_ZOOM - never one global cap)
-   - zoom tiers         nationalTier / settlementTier / poiPriority /
-                        poiLabelItems - label detail is a function of tier;
-                        callers recompute only when the tier or map changes,
-                        never on pointermove
-   - portrait layout    nationalLayout / transformY / geoTransform
-   - national terrain   TERRAIN data + SVG string builders
-   - label layout       layoutLabels collision engine (deterministic,
-                        priority-ordered, leader-line fallback)
-   - settlement plans   SETTLEMENT_PLANS: fourteen authored municipal survey
-                        sheets. Every settlement owns its own road topology,
-                        railways, waterways, districts, land-use parcels,
-                        relief line work and background-fabric zones. There is
-                        no shared generic street grid anywhere in this module.
-   - cartography        POI symbols, illustrated legends, scale bars,
-                        non-scaling-stroke line work
+   NATIONAL MAP
+   - single 150x100 survey sheet, camera profile NATIONAL_ZOOM (1..5)
+   - authored terrain data, deterministic label collision engine
 
-   Presentation-only: nothing here owns persistent state; canonical gameplay
-   authority stays in js/state.js (KARSEN_SETTLEMENTS, KARSEN_ROUTES,
-   travelCost, routeBetween, World.map). Geometry produced here is derived on
-   demand and never mutates game records.
+   SETTLEMENT MAPS (large navigable world space)
+   - every settlement owns an authored plan with explicit bounds in map
+     units: villages roughly 900x720, towns 1500x1150, cities up to
+     3000x2200. Nothing is stretched from a smaller diagram.
+   - morphology is Central-European inspired and street-driven: authored
+     road skeletons carry corridor recipes and deterministic generators
+     derive individual building footprints along the streets (frontage
+     rows, courtyard infill, village plots with barns, industrial sheds).
+     Same inputs always produce byte-identical output (seeded PRNG).
+   - canonical gameplay buildings are NOT abstract gameplay rectangles:
+     each plan authors ten landmark footprints which the scene binds to
+     the canonical records (${id}-b1..b10) via visualBuildingForCanonicalId.
+     Ordinary fabric is presentation-only.
+   - districts are authored polygons; canonical landmarks must lie inside
+     their canonical district (tested via ray-casting).
+   - annotations (labels/icons/street names) belong to their entities:
+     anchors come from entity geometry, positions from the deterministic
+     declutter engine, rendering is counter-scaled so text and icons keep
+     approximately constant screen size while the map itself scales.
+
+   Canonical gameplay authority remains in js/state.js (KARSEN_SETTLEMENTS,
+   KARSEN_ROUTES, travelCost, routeBetween, World.map). This module owns
+   presentation geometry only and never mutates game records.
    ========================================================================= */
 const MapSystem=(function(){
-  const VERSION='map-2';
+  const VERSION='map-3';
   const NATIONAL_VIEWBOX={width:150,height:100};
-  const SETTLEMENT_VIEWBOX={width:100,height:82};
 
   const NATIONAL_ZOOM={min:1,max:5};
-  const SETTLEMENT_ZOOM={min:1,max:8};
-  const ZOOM_CONFIG={national:NATIONAL_ZOOM,settlement:SETTLEMENT_ZOOM};
+  const ZOOM_CONFIG={national:NATIONAL_ZOOM};
 
+  /* ---- small numeric helpers ---- */
   function clamp(v,a,b){ return v<a?a:v>b?b:v; }
   function num(v,fallback){ const n=typeof v==='number'?v:parseFloat(v); return isFinite(n)?n:fallback; }
-  function limits(zoom){
-    const z=zoom||NATIONAL_ZOOM;
-    return {min:num(z.min,1),max:num(z.max,NATIONAL_ZOOM.max)};
-  }
 
-  /* ---- deterministic PRNG for decorative fabric (never Math.random) ---- */
+  /* ---- deterministic PRNG (no Math.random anywhere) ---- */
   function hashSeed(str){
     let h=2166136261;
     String(str).split('').forEach(ch=>{ h^=ch.charCodeAt(0); h=Math.imul(h,16777619); });
@@ -60,62 +58,159 @@ const MapSystem=(function(){
     };
   }
 
+  /* ---- gesture decision helpers (pure; UI owns event plumbing) ---- */
+  const GESTURE={DRAG_PX:5,DOUBLE_MS:340,DOUBLE_DIST:30};
+  function classifyGesture(dx,dy){
+    return Math.hypot(num(dx,0),num(dy,0))<=GESTURE.DRAG_PX?'tap':'drag';
+  }
+  function isDoubleTap(now,pos,last){
+    if(!last) return false;
+    if(now-num(last.t,0)>GESTURE.DOUBLE_MS) return false;
+    return Math.hypot(num(pos.x,0)-num(last.x,0),num(pos.y,0)-num(last.y,0))<=GESTURE.DOUBLE_DIST;
+  }
+
   /* ======================= CAMERA MATH ================================ */
   function createCamera(){ return {x:0,y:0,scale:1}; }
   function axisLimits(extent,scale){
     return {lo:Math.min(0,extent-extent*scale),hi:Math.max(0,extent-extent*scale)};
   }
   function clampCamera(camera,view,zoom){
-    const lim=limits(zoom);
-    const scale=clamp(num(camera.scale,lim.min),lim.min,lim.max);
+    const lim=zoom||NATIONAL_ZOOM;
+    const min=num(lim.min,1), max=num(lim.max,NATIONAL_ZOOM.max);
+    const scale=clamp(num(camera.scale,min),min,max);
     const width=num(view&&view.width,NATIONAL_VIEWBOX.width);
     const height=num(view&&view.height,NATIONAL_VIEWBOX.height);
     const lx=axisLimits(width,scale), ly=axisLimits(height,scale);
     return {scale,x:clamp(num(camera.x,0),lx.lo,lx.hi),y:clamp(num(camera.y,0),ly.lo,ly.hi)};
   }
   function zoomAtPoint(camera,px,py,targetScale,view,zoom){
-    const lim=limits(zoom);
-    const scale=clamp(num(targetScale,camera.scale),lim.min,lim.max);
+    const lim=zoom||NATIONAL_ZOOM;
+    const scale=clamp(num(targetScale,camera.scale),num(lim.min,1),num(lim.max,NATIONAL_ZOOM.max));
     const k=scale/(num(camera.scale,1)||1);
     const next={scale,x:px-(px-num(camera.x,0))*k,y:py-(py-num(camera.y,0))*k};
     return view?clampCamera(next,view,zoom):next;
   }
   function panBy(camera,dx,dy,view,zoom){
-    const next={scale:num(camera.scale,limits(zoom).min),x:num(camera.x,0)+num(dx,0),y:num(camera.y,0)+num(dy,0)};
+    const next={scale:num(camera.scale,(zoom||NATIONAL_ZOOM).min),x:num(camera.x,0)+num(dx,0),y:num(camera.y,0)+num(dy,0)};
     return view?clampCamera(next,view,zoom):next;
   }
   function fitBounds(bounds,view,pad,zoom){
-    const lim=limits(zoom);
+    const lim=zoom||NATIONAL_ZOOM;
     const width=num(view&&view.width,NATIONAL_VIEWBOX.width);
     const height=num(view&&view.height,NATIONAL_VIEWBOX.height);
     const m=num(pad,0);
     const bw=Math.max(num(bounds&&bounds.w,0)+m*2,0.001), bh=Math.max(num(bounds&&bounds.h,0)+m*2,0.001);
-    const scale=clamp(Math.min(width/bw,height/bh),lim.min,lim.max);
+    const scale=clamp(Math.min(width/bw,height/bh),num(lim.min,1),num(lim.max,NATIONAL_ZOOM.max));
     const cx=num(bounds&&bounds.x,0)+num(bounds&&bounds.w,0)/2, cy=num(bounds&&bounds.y,0)+num(bounds&&bounds.h,0)/2;
     return clampCamera({scale,x:width/2-cx*scale,y:height/2-cy*scale},view,zoom);
   }
-
-  /* ======================= ZOOM TIERS ==================================
-     Label detail is decided by discrete tiers so collision layout runs only
-     when the tier, map or selection changes - never on pointermove.
-     --------------------------------------------------------------------- */
-  function nationalTier(scale){ return num(scale,1)>=3.2?2:num(scale,1)>=1.7?1:0; }
-  function nationalKindVisible(kind,tier){ return kind==='city'?true:kind==='town'?tier>=1:tier>=2; }
-  function settlementTier(scale){ return num(scale,1)>=3.4?2:num(scale,1)>=1.8?1:0; }
-  const POI_PRIORITY={transport:9,bureau:8,civic:8,clinic:7,market:6,school:5,worship:4,workplace:3,residence:2,public:1};
-  const POI_TIER_FLOOR=[6,3,1];
-  function poiPriority(type){ return POI_PRIORITY[type]||1; }
-  function poiVisible(type,tier){ return poiPriority(type)>=POI_TIER_FLOOR[clamp(num(tier,2),0,2)]; }
-  function poiLabelItems(placed,opts){
-    const tier=clamp(num(opts&&opts.tier,2),0,2);
-    return placed.map(b=>{
-      const pr=poiPriority(b.type);
-      const forced=b.id===(opts&&opts.selectedId)||b.id===(opts&&opts.currentId);
-      return {id:b.id,x:b.x+b.w/2,y:b.y+b.h/2,text:b.name,r:Math.max(b.w,b.h)*0.16+0.3,priority:pr,forced};
-    }).filter(item=>item.forced||item.priority>=POI_TIER_FLOOR[tier]);
+  function centerOn(camera,px,py,targetScale,view,zoom){
+    const lim=zoom||NATIONAL_ZOOM;
+    const scale=clamp(num(targetScale,camera.scale),num(lim.min,1),num(lim.max,NATIONAL_ZOOM.max));
+    return clampCamera({scale,x:num(view&&view.width,100)/2-px*scale,y:num(view&&view.height,100)/2-py*scale},view,zoom);
+  }
+  function viewCenterWorld(camera,view){
+    return {x:(num(view&&view.width,100)/2-camera.x)/camera.scale,y:(num(view&&view.height,100)/2-camera.y)/camera.scale};
+  }
+  function viewRectWorld(camera,view,margin){
+    const m=num(margin,0);
+    const w=num(view&&view.width,100),h=num(view&&view.height,100);
+    const x0=(0-camera.x)/camera.scale, y0=(0-camera.y)/camera.scale;
+    const x1=(w-camera.x)/camera.scale, y1=(h-camera.y)/camera.scale;
+    const mx=(x1-x0)*m, my=(y1-y0)*m;
+    return {x:x0-mx,y:y0-my,w:(x1-x0)+mx*2,h:(y1-y0)+my*2};
   }
 
-  /* ======================= PORTRAIT LAYOUT ============================ */
+  /* ======================= GEOMETRY UTILITIES ========================= */
+  function rectPoly(cx,cy,w,h,angle){
+    const a=num(angle,0), ca=Math.cos(a), sa=Math.sin(a), hw=w/2, hh=h/2;
+    return [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]].map(p=>[
+      +(cx+p[0]*ca-p[1]*sa).toFixed(1),+(cy+p[0]*sa+p[1]*ca).toFixed(1)]);
+  }
+  function polyCentroid(poly){
+    let x=0,y=0;
+    poly.forEach(p=>{x+=p[0];y+=p[1];});
+    return {x:x/poly.length,y:y/poly.length};
+  }
+  function pointInPolygon(px,py,poly){
+    let inside=false;
+    for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+      const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];
+      if(((yi>py)!==(yj>py))&&(px<(xj-xi)*(py-yi)/(yj-yi)+xi)) inside=!inside;
+    }
+    return inside;
+  }
+  function polysIntersect(a,b){
+    return a.some(p=>pointInPolygon(p[0],p[1],b))||b.some(p=>pointInPolygon(p[0],p[1],a));
+  }
+  function polyPath(poly){
+    return 'M '+poly.map(p=>p[0]+' '+p[1]).join(' L ')+' Z';
+  }
+  function linePath(pts){
+    return 'M '+pts.map(p=>p[0]+' '+p[1]).join(' L ');
+  }
+  function segmentsOf(pts){
+    const out=[];
+    for(let i=0;i<pts.length-1;i++){
+      const ax=pts[i][0],ay=pts[i][1],bx=pts[i+1][0],by=pts[i+1][1];
+      const dx=bx-ax,dy=by-ay,len=Math.hypot(dx,dy);
+      if(len>1) out.push({ax,ay,bx,by,len,angle:Math.atan2(dy,dx)});
+    }
+    return out;
+  }
+
+  /* ======================= MORPHOLOGY GENERATORS ======================
+     Deterministic street-driven building generation. Corridor recipes are
+     attached to authored roads so footprints face the streets; villages use
+     wide frontage with deeper barn rows; industrial corridors produce long
+     halls aligned to service roads and spurs.
+     --------------------------------------------------------------------- */
+  function generateCorridor(seg,params,rnd,out,idBase){
+    const dirX=Math.cos(seg.angle), dirY=Math.sin(seg.angle);
+    const perpX=-dirY, perpY=dirX;
+    const interval=num(params.interval,26), setback=num(params.setback,5);
+    const depth=num(params.depth,9), density=clamp(num(params.density,.9),0,1);
+    const wMin=num(params.wMin,7), wMax=num(params.wMax,13);
+    const cls=params.class||'urban';
+    let d=interval*(0.35+rnd()*0.4);
+    const sides=params.sides==='both'?['left','right']:[params.sides||'both'];
+    let guard=0;
+    while(d<seg.len&&guard++<400){
+      const w=Math.min(wMin+rnd()*(wMax-wMin),seg.len-d+interval);
+      if(rnd()<density){
+        sides.forEach(side=>{
+          const sign=side==='left'?1:-1;
+          const off=setback+depth/2;
+          const cx=seg.ax+dirX*d+perpX*sign*off;
+          const cy=seg.ay+dirY*d+perpY*sign*off;
+          out.push({poly:rectPoly(cx,cy,w,depth,seg.angle),kind:cls,minor:false});
+          if(params.back&&rnd()<params.back){
+            const off2=setback+depth+num(params.backGap,7)+(params.backDepth||depth*0.8)/2;
+            out.push({poly:rectPoly(
+              seg.ax+dirX*d+w*rnd()*0.4+perpX*sign*off2,
+              seg.ay+dirY*d+w*rnd()*0.4+perpY*sign*off2,
+              w*0.55+rnd()*w*0.3,(params.backDepth||depth*0.8),seg.angle+rnd()*0.5-0.25),kind:cls,minor:true});
+          }
+        });
+        d+=w+interval*(0.5+rnd()*0.9);
+      } else {
+        d+=interval*(0.5+rnd());
+      }
+    }
+    void idBase;
+  }
+  function generateShedGrid(spec,rnd,out){
+    const cols=num(spec.cols,3), rows=num(spec.rows,2);
+    const w=num(spec.w,22), h=num(spec.h,11), gap=num(spec.gap,7);
+    const a=num(spec.angle,0);
+    for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+      const cx=spec.x+c*(w+gap)*Math.cos(a)-r*(h+gap)*Math.sin(a)+rnd()*2;
+      const cy=spec.y+c*(w+gap)*Math.sin(a)+r*(h+gap)*Math.cos(a)+rnd()*2;
+      out.push({poly:rectPoly(cx,cy,w*(0.85+rnd()*0.3),h,a),kind:spec.class||'industrial',minor:false});
+    }
+  }
+
+  /* ======================= PORTRAIT LAYOUT (national) ================= */
   function nationalLayout(flags){
     const tall=!!(flags&&flags.tall), compact=tall&&!!(flags&&flags.compact);
     const stretch=tall?(compact?2.32:3.15):1;
@@ -127,65 +222,10 @@ const MapSystem=(function(){
     return layout&&layout.tall?'translate(0 '+layout.offsetY+') scale(1 '+layout.stretch+')':'';
   }
 
-  /* ======================= NATIONAL TERRAIN DATA ====================== */
-  const TERRAIN={
-    border:'M 18 49 C 14 41 22 31 38 29 C 52 27 58 18 75 20 C 91 21 99 30 111 27 C 125 23 138 28 145 38 C 150 46 147 55 139 60 C 147 68 141 78 130 82 C 116 86 105 78 93 84 C 81 91 69 82 56 86 C 43 91 30 86 24 78 C 16 74 20 66 14 61 C 9 57 11 52 18 49 Z',
-    shore:'M 18 49 C 14 41 22 31 38 29',
-    rivers:{
-      main:'M 56 28 C 61 36 68 43 76 48 C 83 53 91 58 102 60 C 112 62 121 59 132 54',
-      branches:['M 43 58 C 53 54 62 51 76 48','M 68 68 C 73 60 77 54 76 48','M 117 29 C 111 37 106 45 102 60','M 108 69 C 113 66 119 62 124 58'],
-      small:['M 24 62 C 31 61 37 59 43 58','M 78 81 C 84 73 91 67 102 60','M 126 78 C 123 71 123 64 124 58']
-    },
-    minorRoads:[
-      'M 18 49 C 24 45 30 42 38 40 C 43 38 45 38 48 37',
-      'M 22 59 C 29 58 36 57 43 58 C 54 57 68 53 82 52',
-      'M 43 58 C 53 64 64 73 78 81',
-      'M 82 52 C 77 45 70 37 68 31 C 64 28 60 28 56 28',
-      'M 68 31 C 81 28 98 28 117 29',
-      'M 108 69 C 115 70 122 74 128 78',
-      'M 122 57 C 127 52 131 47 134 43',
-      'M 122 57 C 122 47 119 37 117 29'
-    ],
-    forests:[
-      'M 35 27 C 41 20 52 19 62 23 C 67 28 64 37 56 41 C 47 42 38 38 35 32 Z',
-      'M 99 31 C 107 26 119 27 126 34 C 128 41 123 48 114 50 C 105 48 100 42 99 31 Z'
-    ],
-    meadows:[
-      'M 55 45 C 64 40 75 41 84 46 C 87 52 79 58 69 59 C 60 57 54 52 55 45 Z',
-      'M 60 68 C 70 62 83 64 91 70 C 91 77 82 81 72 80 C 64 78 59 74 60 68 Z'
-    ],
-    wetlands:['M 112 52 C 120 49 129 51 134 57 C 133 64 125 68 117 66 C 112 63 110 58 112 52 Z'],
-    industrial:['M 97 61 C 104 58 114 60 119 66 C 118 73 110 76 102 73 C 98 70 96 66 97 61 Z'],
-    sea:{
-      lines:[
-        'M 3 12 C 22 7 39 13 57 9 S 92 6 110 11 S 137 8 148 14',
-        'M 1 88 C 20 83 35 91 53 88 S 91 88 108 93 S 136 91 149 86',
-        'M 6 23 C 14 19 22 20 29 17 M 5 28 C 14 24 21 25 28 22',
-        'M 122 15 C 132 12 140 15 147 20 M 124 19 C 133 16 141 19 147 24'
-      ],
-      islands:[
-        'M 8 73 C 11 69 17 69 19 73 C 18 77 13 79 9 77 Z',
-        'M 136 72 C 139 68 145 69 146 73 C 144 77 139 78 136 76 Z'
-      ],
-      labels:[
-        {text:'WESTERN SEA',x:8,y:17,anchor:'start'},
-        {text:'SOUTHERN SEA',x:107,y:96,anchor:'middle'}
-      ]
-    },
-    regions:[
-      {text:'WESTERN COAST',x:30,y:69},
-      {text:'NORTH WOODS',x:52,y:22},
-      {text:'CENTRAL LOWLAND',x:82,y:46},
-      {text:'IRON COUNTRY',x:111,y:61},
-      {text:'SOUTHERN FARMLAND',x:75,y:77},
-      {text:'EASTERN GRAIN PLAIN',x:126,y:49}
-    ]
-  };
-
   const NS='vector-effect="non-scaling-stroke"';
   function nsAttr(){ return ' '+NS; }
-  function paths(cls,list,scaled){
-    return list.map(d=>'<path class="'+cls+'" d="'+d+'"'+(scaled?'':nsAttr())+'></path>').join('');
+  function paths(cls,list){
+    return list.map(d=>'<path class="'+cls+'" d="'+d+'"'+nsAttr()+'></path>').join('');
   }
   function patternDefs(){
     return '<defs aria-hidden="true">'
@@ -196,63 +236,11 @@ const MapSystem=(function(){
       +'</defs>';
   }
 
-  /* ---- national SVG builders (string output only) ---- */
-  function seaDetailsMarkup(includeLabels){
-    const labels=includeLabels
-      ?TERRAIN.sea.labels.map(l=>'<text class="map-sea-label" x="'+l.x+'" y="'+transformY(null,l.y)+'" text-anchor="'+l.anchor+'">'+l.text+'</text>').join('')
-      :'';
-    return '<g class="map-sea-details" aria-hidden="true"><path class="map-shore" d="'+TERRAIN.shore+'"'+nsAttr()+'></path>'+paths('map-sea-line',TERRAIN.sea.lines)+paths('map-sea-island',TERRAIN.sea.islands)+labels+'</g>';
-  }
-  function greeneryMarkup(){
-    return '<g class="map-greenery" aria-hidden="true">'+paths('map-forest',TERRAIN.forests)+paths('map-meadow',TERRAIN.meadows)+paths('map-wetland',TERRAIN.wetlands)+paths('map-industrial',TERRAIN.industrial)+'</g>';
-  }
-  function nationalGeographyMarkup(layout){
-    const inner='<path class="map-border" d="'+TERRAIN.border+'"'+nsAttr()+'></path>'
-      +seaDetailsMarkup(!(layout&&layout.tall))
-      +greeneryMarkup()
-      +'<path class="map-river-main" d="'+TERRAIN.rivers.main+'"'+nsAttr()+'></path>'
-      +paths('map-river',TERRAIN.rivers.branches)
-      +paths('map-river-small',TERRAIN.rivers.small)
-      +paths('map-minor-road',TERRAIN.minorRoads);
-    const transform=geoTransform(layout);
-    return patternDefs()+'<g'+(transform?' transform="'+transform+'"':'')+'>'+inner+'</g>';
-  }
-  function regionLabelsMarkup(layout,tier){
-    const y=v=>transformY(layout,v);
-    const all=TERRAIN.regions;
-    const list=(tier>=1)?all:all.slice(1,4);
-    return '<g class="map-region-labels" aria-hidden="true">'
-      +list.map(r=>'<text x="'+r.x+'" y="'+y(r.y)+'">'+r.text+'</text>').join('')+'</g>';
-  }
-  function seaLabelsMarkup(layout){
-    if(!(layout&&layout.tall)) return '';
-    const y=v=>transformY(layout,v);
-    return '<g class="map-sea-details" aria-hidden="true">'
-      +TERRAIN.sea.labels.map(l=>'<text class="map-sea-label" x="'+l.x+'" y="'+y(l.y)+'" text-anchor="'+l.anchor+'">'+l.text+'</text>').join('')+'</g>';
-  }
-  function routePath(a,b,index,layout){
-    const ay=transformY(layout,a.y), by=transformY(layout,b.y);
-    const dx=b.x-a.x, dy=by-ay, len=Math.max(1,Math.sqrt(dx*dx+dy*dy));
-    const bend=(index%2?2.4:-2.4);
-    const cx=(a.x+b.x)/2+(-dy/len*bend), cy=(ay+by)/2+(dx/len*bend);
-    return 'M '+a.x+' '+ay+' Q '+cx+' '+cy+' '+b.x+' '+by;
-  }
-  function routeMidPoint(a,b,index,layout){
-    const ay=transformY(layout,a.y), by=transformY(layout,b.y);
-    const dx=b.x-a.x, dy=by-ay, len=Math.max(1,Math.sqrt(dx*dx+dy*dy));
-    const bend=(index%2?2.4:-2.4);
-    return {x:(a.x+b.x)/2+(-dy/len*bend),y:(ay+by)/2+(dx/len*bend)};
-  }
-
   /* ======================= LABEL LAYOUT ENGINE ========================
-     Deterministic collision-aware placement. Items are processed highest
-     priority first (ties broken by id ascending); each tries a fixed
-     sequence of anchor offsets around its anchor circle, then leader-line
-     offsets, and commits the first rectangle that neither leaves the
-     viewport nor intersects an occupied rectangle (previously placed labels
-     plus the reserved circles). If every candidate collides, the candidate
-     with the fewest overlapping rectangles wins (earliest index on ties)
-     and the placement is flagged overlap:true.
+     Unchanged deterministic collision-aware placement. Anchors always come
+     from entity geometry; candidates are offsets around the anchor circle
+     with leader-line fallback; occupied rectangles start from reserved
+     entities (dots) plus previously committed labels.
      --------------------------------------------------------------------- */
   function estimateTextSize(text,options){
     const fontSize=num(options&&options.fontSize,3);
@@ -282,7 +270,11 @@ const MapSystem=(function(){
       {anchor:'start',dx:off+f*2.2,dy:f*0.35,leader:true},
       {anchor:'end',dx:-(off+f*2.2),dy:f*0.35,leader:true},
       {anchor:'middle',dx:0,dy:-(off+f*2.4),leader:true},
-      {anchor:'middle',dx:0,dy:off+f*3,leader:true}
+      {anchor:'middle',dx:0,dy:off+f*3,leader:true},
+      {anchor:'start',dx:off+f*1.4,dy:-f*1.6,leader:true},
+      {anchor:'end',dx:-(off+f*1.4),dy:-f*1.6,leader:true},
+      {anchor:'start',dx:off+f*1.4,dy:f*2.2,leader:true},
+      {anchor:'end',dx:-(off+f*1.4),dy:f*2.2,leader:true}
     ];
   }
   function layoutLabels(items,options){
@@ -339,893 +331,1090 @@ const MapSystem=(function(){
     return 'M '+(item.x+dx/len*r)+' '+(item.y+dy/len*r)+' L '+ex+' '+ey;
   }
 
-  /* ======================= SETTLEMENT PLANS ===========================
-     Fourteen authored municipal survey sheets. Each plan carries:
-       slots/default  canonical POI footprints keyed by building-type anchor
-                      (same type vocabulary as inferBuildingType in state.js)
-       districts      named district rectangles matching the canonical
-                      district list in state.js
-       landUse        filled parcels: urban/farmland/meadow/gardens/estate/
-                      industrial/yard/institutional/orchard/harbor/forest,
-                      optional texture ('hatch'|'furrow'|'trees'|'orchard')
-       waterways      open-water polygons (kind:'water') and line work
-                      ('river'|'stream'|'coast'|'quay')
-       roads          this settlement's own primary streets
-       minorRoads     lanes and service ways
-       railways       {d, spur} - main lines and sidings
-       bridges        crossing structures over water/rail corridors
-       relief         contour/elevation line work
-       fabric         non-interactive background footprint zones
-                      ({x,y,w,h,density,gap,size}) generated deterministically
+  /* ======================= NATIONAL TIERS & TERRAIN =================== */
+  function nationalTier(scale){ return num(scale,1)>=3.2?2:num(scale,1)>=1.7?1:0; }
+  function nationalKindVisible(kind,tier){ return kind==='city'?true:kind==='town'?tier>=1:tier>=2; }
+  /* Settlement tiers are relative to each sheet's own zoom range: tier 2
+     only near maximum magnification, tier 1 once meaningfully zoomed in. */
+  function settlementTier(scale,zoom){
+    const max=num(zoom&&zoom.max,14), s=num(scale,1);
+    return s>=max*0.45?2:s>=max*0.16?1:0;
+  }
+  const TERRAIN={
+    border:'M 18 49 C 14 41 22 31 38 29 C 52 27 58 18 75 20 C 91 21 99 30 111 27 C 125 23 138 28 145 38 C 150 46 147 55 139 60 C 147 68 141 78 130 82 C 116 86 105 78 93 84 C 81 91 69 82 56 86 C 43 91 30 86 24 78 C 16 74 20 66 14 61 C 9 57 11 52 18 49 Z',
+    shore:'M 18 49 C 14 41 22 31 38 29',
+    rivers:{
+      main:'M 56 28 C 61 36 68 43 76 48 C 83 53 91 58 102 60 C 112 62 121 59 132 54',
+      branches:['M 43 58 C 53 54 62 51 76 48','M 68 68 C 73 60 77 54 76 48','M 117 29 C 111 37 106 45 102 60','M 108 69 C 113 66 119 62 124 58'],
+      small:['M 24 62 C 31 61 37 59 43 58','M 78 81 C 84 73 91 67 102 60','M 126 78 C 123 71 123 64 124 58']
+    },
+    minorRoads:[
+      'M 18 49 C 24 45 30 42 38 40 C 43 38 45 38 48 37',
+      'M 22 59 C 29 58 36 57 43 58 C 54 57 68 53 82 52',
+      'M 43 58 C 53 64 64 73 78 81',
+      'M 82 52 C 77 45 70 37 68 31 C 64 28 60 28 56 28',
+      'M 68 31 C 81 28 98 28 117 29',
+      'M 108 69 C 115 70 122 74 128 78',
+      'M 122 57 C 127 52 131 47 134 43',
+      'M 122 57 C 122 47 119 37 117 29'
+    ],
+    forests:[
+      'M 35 27 C 41 20 52 19 62 23 C 67 28 64 37 56 41 C 47 42 38 38 35 32 Z',
+      'M 99 31 C 107 26 119 27 126 34 C 128 41 123 48 114 50 C 105 48 100 42 99 31 Z'
+    ],
+    meadows:[
+      'M 55 45 C 64 40 75 41 84 46 C 87 52 79 58 69 59 C 60 57 54 52 55 45 Z',
+      'M 60 68 C 70 62 83 64 91 70 C 91 77 82 81 72 80 C 64 78 59 74 60 68 Z'
+    ],
+    wetlands:['M 112 52 C 120 49 129 51 134 57 C 133 64 125 68 117 66 C 112 63 110 58 112 52 Z'],
+    industrial:['M 97 61 C 104 58 114 60 119 66 C 118 73 110 76 102 73 C 98 70 96 66 97 61 Z'],
+    sea:{
+      lines:[
+        'M 3 12 C 22 7 39 13 57 9 S 92 6 110 11 S 137 8 148 14',
+        'M 1 88 C 20 83 35 91 53 88 S 91 88 108 93 S 136 91 149 86',
+        'M 6 23 C 14 19 22 20 29 17 M 5 28 C 14 24 21 25 28 22',
+        'M 122 15 C 132 12 140 15 147 20 M 124 19 C 133 16 141 19 147 24'
+      ],
+      islands:[
+        'M 8 73 C 11 69 17 69 19 73 C 18 77 13 79 9 77 Z',
+        'M 136 72 C 139 68 145 69 146 73 C 144 77 139 78 136 76 Z'
+      ],
+      labels:[
+        {text:'WESTERN SEA',x:8,y:17,anchor:'start'},
+        {text:'SOUTHERN SEA',x:107,y:96,anchor:'middle'}
+      ]
+    },
+    regions:[
+      {text:'WESTERN COAST',x:30,y:69},
+      {text:'NORTH WOODS',x:52,y:22},
+      {text:'CENTRAL LOWLAND',x:82,y:46},
+      {text:'IRON COUNTRY',x:111,y:61},
+      {text:'SOUTHERN FARMLAND',x:75,y:77},
+      {text:'EASTERN GRAIN PLAIN',x:126,y:49}
+    ]
+  };
+  function seaDetailsMarkup(includeLabels){
+    const labels=includeLabels
+      ?TERRAIN.sea.labels.map(l=>'<text class="map-sea-label" x="'+l.x+'" y="'+transformY(null,l.y)+'" text-anchor="'+l.anchor+'">'+l.text+'</text>').join('')
+      :'';
+    return '<g class="map-sea-details" aria-hidden="true"><path class="map-shore" d="'+TERRAIN.shore+'"'+nsAttr()+'></path>'+paths('map-sea-line',TERRAIN.sea.lines)+paths('map-sea-island',TERRAIN.sea.islands)+labels+'</g>';
+  }
+  function greeneryMarkup(){
+    return '<g class="map-greenery" aria-hidden="true">'+paths('map-forest',TERRAIN.forests)+paths('map-meadow',TERRAIN.meadows)+paths('map-wetland',TERRAIN.wetlands)+paths('map-industrial',TERRAIN.industrial)+'</g>';
+  }
+  function nationalGeographyMarkup(layout){
+    const inner='<path class="map-border" d="'+TERRAIN.border+'"'+nsAttr()+'></path>'
+      +seaDetailsMarkup(!(layout&&layout.tall))
+      +greeneryMarkup()
+      +'<path class="map-river-main" d="'+TERRAIN.rivers.main+'"'+nsAttr()+'></path>'
+      +paths('map-river',TERRAIN.rivers.branches)
+      +paths('map-river-small',TERRAIN.rivers.small)
+      +paths('map-minor-road',TERRAIN.minorRoads);
+    const transform=geoTransform(layout);
+    return patternDefs()+'<g'+(transform?' transform="'+transform+'"':'')+'>'+inner+'</g>';
+  }
+  function regionLabelsMarkup(layout,tier){
+    const y=v=>transformY(layout,v);
+    const all=TERRAIN.regions;
+    const list=(tier>=1)?all:all.slice(1,4);
+    return '<g class="map-region-labels" aria-hidden="true">'
+      +list.map(r=>'<text x="'+r.x+'" y="'+y(r.y)+'">'+r.text+'</text>').join('')+'</g>';
+  }
+  function seaLabelsMarkup(layout){
+    if(!(layout&&layout.tall)) return '';
+    const y=v=>transformY(layout,v);
+    return '<g class="map-sea-details" aria-hidden="true">'
+      +TERRAIN.sea.labels.map(l=>'<text class="map-sea-label" x="'+l.x+'" y="'+y(l.y)+'" text-anchor="'+l.anchor+'">'+l.text+'</text>').join('')+'</g>';
+  }
+  function routePath(a,b,index,layout){
+    const ay=transformY(layout,a.y), by=transformY(layout,b.y);
+    const dx=b.x-a.x, dy=by-ay, len=Math.max(1,Math.sqrt(dx*dx+dy*dy));
+    const bend=(index%2?2.4:-2.4);
+    const cx=(a.x+b.x)/2+(-dy/len*bend), cy=(ay+by)/2+(dx/len*bend);
+    return 'M '+a.x+' '+ay+' Q '+cx+' '+cy+' '+b.x+' '+by;
+  }
+  function routeMidPoint(a,b,index,layout){
+    const ay=transformY(layout,a.y), by=transformY(layout,b.y);
+    const dx=b.x-a.x, dy=by-ay, len=Math.max(1,Math.sqrt(dx*dx+dy*dy));
+    const bend=(index%2?2.4:-2.4);
+    return {x:(a.x+b.x)/2+(-dy/len*bend),y:(ay+by)/2+(dx/len*bend)};
+  }
 
-     All geometry lives on the 100x82 sheet. Canonical slots are identical to
-     the reviewed map-1 layouts; everything else is new presentation layer.
+
+  /* ======================= SETTLEMENT PLANS ===========================
+     Authored large-scale municipal sheets in map units (villages ~900x720,
+     towns ~1500x1150, cities up to 2800x2100). Morphology is Central-
+     European and street-driven:
+
+       roads      named skeleton polylines; the city exists BETWEEN them
+       corridors  per-road generation recipes -> individual street-facing
+                  footprints (+ optional courtyard/back rows)
+       yards      aligned shed/factory/granary grids (rail, industry)
+       landmarks  the ten canonical gameplay buildings as real footprints,
+                  each bound to ${id}-${ref} and its canonical district
+       districts  named polygons matching the canonical district list
+       railways / waterways / landUse  dividing geography
+
+     Ordinary fabric never spawns inside landmark footprints (exclusion
+     zones) and is clipped to the sheet bounds. All generation is seeded
+     and deterministic per settlement id.
      --------------------------------------------------------------------- */
-  const TYPE_ORDER=['bureau','civic','transport','clinic','school','market','worship','residence','workplace','public'];
   const SETTLEMENT_PLANS={
     branec:{
-      motif:'dense capital: administrative core, broad avenues, Workers Ring, central terminus',
-      slots:{
-        bureau:[{x:36,y:8,w:14,h:10},{x:52,y:8,w:13,h:9},{x:44,y:20,w:12,h:9}],
-        transport:[{x:8,y:34,w:16,h:10}],
-        residence:[{x:70,y:56,w:15,h:10},{x:33,y:62,w:14,h:9}],
-        clinic:[{x:70,y:8,w:12,h:9}],
-        market:[{x:8,y:8,w:14,h:10}],
-        school:[{x:8,y:56,w:13,h:9}],
-        public:[{x:55,y:36,w:11,h:8}]
-      },
-      default:[{x:74,y:34,w:12,h:9},{x:24,y:44,w:12,h:9}],
+      motif:'dense Austro-Hungarian capital: irregular old market core, government avenues, perimeter-block expansion, workers\u2019 ring, rail terminus',
+      bounds:{w:2800,h:2100},
+      zoomMax:22,
       districts:[
-        {name:'Registry Quarter',x:30,y:4,w:38,h:30},
-        {name:'Old Market',x:3,y:4,w:26,h:40},
-        {name:'Workers\u2019 Ring',x:58,y:46,w:39,h:32},
-        {name:'North Offices',x:62,y:4,w:35,h:34}
-      ],
-      landUse:[
-        {kind:'urban',d:'M30 34 H66 V44 H30 Z'},
-        {kind:'urban',d:'M4 46 H28 V54 H4 Z'},
-        {kind:'gardens',texture:'trees',d:'M31 50 C38 47 47 48 51 51 C50 56 42 59 35 58 C31 56 30 53 31 50 Z'},
-        {kind:'urban',d:'M70 21 H95 V30 H70 Z'}
-      ],
-      waterways:[],
-      railways:[
-        {d:'M 2 58 C 10 57 16 53 16 46'},
-        {d:'M 98 74 C 84 71 74 62 72 50 C 71 44 75 38 81 34'},
-        {d:'M 16 46 V 42',spur:true}
+        {name:'Old Market',pts:[[240,500],[830,420],[910,1010],[770,1530],[320,1490],[230,960]]},
+        {name:'Registry Quarter',pts:[[900,420],[1660,550],[1730,1190],[980,1250],[900,1010]]},
+        {name:'North Offices',pts:[[1660,310],[2570,470],[2510,1160],[1770,1190],[1730,560]]},
+        {name:'Workers\u2019 Ring',pts:[[290,1490],[1090,1370],[1910,1410],[2570,1510],[2490,2030],[370,2070]]}
       ],
       roads:[
-        'M 2 40 H 98',
-        'M 50 2 V 78',
-        'M 30 2 V 44',
-        'M 68 2 V 46',
-        'M 2 68 C 14 66 22 63 33 62',
-        'M 85 2 V 78'
+        {id:'registry-avenue',name:'Registry Avenue',cls:'primary',pts:[[800,760],[1360,820],[1980,860],[2600,900]]},
+        {id:'old-market-st',name:'Old Market Street',cls:'secondary',pts:[[430,330],[520,760],[470,1130],[560,1570]]},
+        {id:'north-avenue',name:'North Offices Avenue',cls:'primary',pts:[[1730,420],[2150,570],[2540,720]]},
+        {id:'workers-ring-road',name:'Workers\u2019 Ring Road',cls:'primary',pts:[[350,1670],[1010,1580],[1710,1630],[2390,1710],[2670,1650]]},
+        {id:'station-road',name:'Station Road',cls:'primary',pts:[[1290,2050],[1330,1560],[1370,1120],[1400,880]]},
+        {id:'cross-street',name:'Cross Street',cls:'secondary',pts:[[230,1070],[900,1010],[1770,1050],[2570,1090]]},
+        {id:'chandler-lane',name:'Chandler Lane',cls:'lane',pts:[[610,530],[870,600]]},
+        {id:'parchment-row',name:'Parchment Row',cls:'lane',pts:[[1480,590],[1750,650]]},
+        {id:'ring-cross',name:'Ring Crossing',cls:'secondary',pts:[[1000,1590],[1035,1170]]},
+        {id:'east-ring',name:'East Ring Street',cls:'secondary',pts:[[2390,1700],[2410,1180]]},
+        {id:'west-steps',name:'West Steps',cls:'lane',pts:[[290,900],[430,1190]]},
+        {id:'north-lane',name:'North Lane',cls:'lane',pts:[[2010,290],[2040,830]]},
+        {id:'mint-street',name:'Mint Street',cls:'secondary',pts:[[950,460],[980,1000]]},
+        {id:'terminus-forecourt',name:'Terminus Forecourt',cls:'secondary',pts:[[1140,1830],[1500,1840]]}
       ],
-      minorRoads:[
-        'M 6 14 H 26','M 6 22 H 26','M 6 30 H 26',
-        'M 34 12 H 62','M 34 26 H 62','M 72 12 H 94','M 72 26 H 94',
-        'M 60 52 H 94','M 60 62 H 94','M 60 72 H 94',
-        'M 36 68 H 58'
+      railways:[
+        {pts:[[0,1800],[520,1860],[1010,1930],[1225,1980]]},
+        {pts:[[1225,1980],[1275,1988]],spur:true},
+        {pts:[[2800,1540],[2310,1580],[1810,1630]]},
+        {pts:[[1810,1630],[1775,1790]],spur:true}
       ],
-      bridges:[],
-      relief:[],
-      fabric:[
-        {x:31,y:35,w:34,h:9,density:.92,gap:2.4,size:1.7},
-        {x:5,y:47,w:22,h:7,density:.85,gap:2.4,size:1.6},
-        {x:61,y:47,w:34,h:29,density:.88,gap:2.6,size:1.8},
-        {x:71,y:31,w:23,h:8,density:.82,gap:2.6,size:1.6},
-        {x:34,y:47,w:22,h:13,density:.78,gap:2.8,size:1.7},
-        {x:5,y:5,w:24,h:8,density:.7,gap:3,size:1.5}
+      waterways:[],
+      landUse:[
+        {kind:'gardens',texture:'trees',pts:[[1560,1180],[1800,1210],[1790,1400],[1570,1380]]},
+        {kind:'urban',pts:[[1120,1180],[1320,1200],[1310,1500],[1130,1480]]},
+        {kind:'industrial',texture:'hatch',pts:[[1850,1650],[2280,1690],[2250,1950],[1830,1910]]},
+        {kind:'urban',pts:[[420,1180],[640,1150],[660,1440],[450,1460]]}
+      ],
+      landmarks:[
+        {ref:'b1',kind:'bureau',x:1180,y:700,w:48,h:26,district:'Registry Quarter'},
+        {ref:'b2',kind:'bureau',x:2060,y:770,w:42,h:24,a:0.09,district:'North Offices'},
+        {ref:'b3',kind:'transport',x:1200,y:1898,w:96,h:30,district:'Workers\u2019 Ring'},
+        {ref:'b4',kind:'residence',x:830,y:1740,w:36,h:20,district:'Workers\u2019 Ring'},
+        {ref:'b5',kind:'clinic',x:650,y:870,w:32,h:20,district:'Old Market'},
+        {ref:'b6',kind:'market',x:565,y:700,w:46,h:26,district:'Old Market'},
+        {ref:'b7',kind:'school',x:710,y:1290,w:36,h:22,district:'Old Market'},
+        {ref:'b8',kind:'bureau',x:1470,y:910,w:38,h:22,district:'Registry Quarter'},
+        {ref:'b9',kind:'worship',x:865,y:1090,w:30,h:26,district:'Old Market'},
+        {ref:'b10',kind:'public',x:1565,y:1690,w:26,h:18,district:'Workers\u2019 Ring'}
+      ],
+      corridors:[
+        {road:'registry-avenue',sides:'both',interval:29,setback:8,depth:11,wMin:9,wMax:15,density:.93,back:.32,class:'expansion'},
+        {road:'old-market-st',sides:'both',interval:23,setback:5,depth:10,wMin:8,wMax:13,density:.96,back:.45,class:'core'},
+        {road:'north-avenue',sides:'both',interval:31,setback:8,depth:11,wMin:10,wMax:16,density:.9,back:.3,class:'expansion'},
+        {road:'workers-ring-road',sides:'both',interval:26,setback:6,depth:10,wMin:9,wMax:14,density:.9,back:.5,class:'ring'},
+        {road:'station-road',sides:'both',interval:27,setback:6,depth:10,wMin:8,wMax:13,density:.92,back:.35,class:'expansion'},
+        {road:'cross-street',sides:'both',interval:27,setback:6,depth:10,wMin:8,wMax:13,density:.9,back:.3,class:'expansion'},
+        {road:'mint-street',sides:'both',interval:24,setback:5,depth:9,wMin:8,wMax:12,density:.94,back:.4,class:'core'},
+        {road:'chandler-lane',sides:'both',interval:30,setback:4,depth:8,wMin:6,wMax:10,density:.8,back:.2,class:'core'},
+        {road:'parchment-row',sides:'both',interval:30,setback:4,depth:8,wMin:6,wMax:10,density:.8,back:.2,class:'core'},
+        {road:'ring-cross',sides:'both',interval:28,setback:5,depth:9,wMin:7,wMax:11,density:.86,back:.3,class:'ring'},
+        {road:'east-ring',sides:'both',interval:28,setback:5,depth:9,wMin:7,wMax:11,density:.84,back:.3,class:'ring'},
+        {road:'west-steps',sides:'left',interval:32,setback:4,depth:8,wMin:6,wMax:9,density:.75,back:.2,class:'core'},
+        {road:'north-lane',sides:'both',interval:33,setback:5,depth:9,wMin:7,wMax:10,density:.78,back:.25,class:'expansion'},
+        {road:'terminus-forecourt',sides:'right',interval:30,setback:5,depth:9,wMin:7,wMax:11,density:.85,back:.2,class:'ring'}
+      ],
+      yards:[
+        {x:1950,y:1760,w:52,h:16,rows:2,cols:3,gap:12,class:'industrial',angle:.04},
+        {x:1180,y:1560,w:30,h:12,rows:1,cols:3,gap:10,class:'urban',angle:-.06}
       ]
     },
     veskar:{
-      motif:'salt-wet port: harbor basin and quays beneath terraced waterfront streets',
-      slots:{
-        civic:[{x:40,y:8,w:14,h:10}],
-        workplace:[{x:30,y:56,w:18,h:8}],
-        transport:[{x:8,y:34,w:15,h:9}],
-        residence:[{x:8,y:8,w:13,h:9},{x:60,y:34,w:14,h:9},{x:74,y:8,w:12,h:9}],
-        clinic:[{x:58,y:8,w:12,h:9}],
-        market:[{x:74,y:34,w:13,h:9}],
-        school:[{x:24,y:20,w:12,h:9}],
-        bureau:[{x:42,y:34,w:13,h:9}],
-        public:[{x:56,y:20,w:11,h:8}]
-      },
-      default:[{x:8,y:52,w:12,h:9},{x:74,y:52,w:12,h:9}],
+      motif:'historic salt port: harbor basin and quays, warehouse rows, narrow waterfront streets climbing to the customs ward',
+      bounds:{w:2400,h:1900},
+      zoomMax:22,
       districts:[
-        {name:'Old Docks',x:20,y:44,w:40,h:22},
-        {name:'Customs Ward',x:34,y:4,w:40,h:28},
-        {name:'Fishermen\u2019s Row',x:3,y:4,w:26,h:42},
-        {name:'Salt Market',x:56,y:28,w:41,h:26}
+        {name:'Fishermen\u2019s Row',pts:[[80,180],[700,140],[760,900],[620,1300],[160,1260]]},
+        {name:'Customs Ward',pts:[[760,140],[1620,180],[1660,820],[800,860],[760,900]]},
+        {name:'Salt Market',pts:[[1660,240],[2320,300],[2280,1000],[1700,940],[1660,820]]},
+        {name:'Old Docks',pts:[[160,1280],[1500,1240],[1960,1300],[1900,1560],[240,1580]]}
       ],
-      landUse:[
-        {kind:'harbor',d:'M2 66 H98 V80 H2 Z'},
-        {kind:'yard',texture:'hatch',d:'M22 48 H58 V64 H22 Z'},
-        {kind:'urban',d:'M60 44 H86 V52 H60 Z'}
-      ],
-      waterways:[
-        {kind:'water',d:'M2 66 H98 V80 H2 Z'},
-        {kind:'coast',d:'M 2 66 C 20 65 40 67 60 66 S 88 65 98 66'},
-        {kind:'quay',d:'M 2 65.2 H 98'},
-        {kind:'quay',d:'M 27 66 V 76 M 40 66 V 79 M 53 66 V 75 M 84 66 V 77'}
+      roads:[
+        {id:'customs-street',name:'Customs Street',cls:'primary',pts:[[180,880],[900,840],[1700,860],[2300,900]]},
+        {id:'harbor-terrace',name:'Harbor Terrace',cls:'primary',pts:[[200,1240],[1000,1200],[1900,1260]]},
+        {id:'quay-road',name:'Customs Quay',cls:'primary',pts:[[220,1520],[900,1490],[1600,1510],[1880,1500]]},
+        {id:'salt-market-st',name:'Salt Market Street',cls:'primary',pts:[[1700,300],[1780,700],[1740,1180]]},
+        {id:'fishermen-row',name:'Fishermen\u2019s Row',cls:'secondary',pts:[[240,320],[420,700],[380,1180]]},
+        {id:'netwalk',name:'Netwalk',cls:'lane',pts:[[520,340],[600,760],[560,1180]]},
+        {id:'ward-cross',name:'Ward Cross',cls:'secondary',pts:[[820,300],[880,800]]},
+        {id:'warehouse-row',name:'Warehouse Row',cls:'secondary',pts:[[980,1240],[1020,1500]]},
+        {id:'signal-stairs',name:'Signal Stairs',cls:'lane',pts:[[1900,900],[1930,1240]]},
+        {id:'north-cliff',name:'North Cliff Road',cls:'secondary',pts:[[200,220],[900,180],[1650,220],[2300,260]]}
       ],
       railways:[],
-      roads:[
-        'M 2 30 H 98',
-        'M 20 2 V 64',
-        'M 40 18 V 64',
-        'M 58 2 V 64',
-        'M 78 2 V 64',
-        'M 2 46 C 12 44 20 42 30 40',
-        'M 90 32 V 64'
+      waterways:[
+        {kind:'water',pts:[[0,1560],[2400,1500],[2400,1900],[0,1900]]},
+        {kind:'coast',pts:[[0,1560],[600,1545],[1200,1520],[1800,1505],[2400,1500]]},
+        {kind:'quay',pts:[[220,1500],[900,1470],[1600,1490],[1900,1480]]},
+        {kind:'basin',pts:[[980,1500],[1380,1490],[1400,1720],[1000,1730]]},
+        {kind:'quay',pts:[[1010,1610],[1180,1608],[1340,1612]]},
+        {kind:'pier',pts:[[1080,1500],[1088,1700]]},
+        {kind:'pier',pts:[[1260,1496],[1268,1706]]}
       ],
-      minorRoads:[
-        'M 8 14 H 18','M 8 22 H 18','M 8 40 H 18',
-        'M 44 24 H 54','M 62 12 H 70','M 78 20 H 86',
-        'M 24 50 H 56','M 24 58 H 56',
-        'M 62 44 H 84'
+      landUse:[
+        {kind:'yard',texture:'hatch',pts:[[1020,1280],[1360,1260],[1380,1460],[1040,1470]]},
+        {kind:'urban',pts:[[820,940],[1300,900],[1330,1180],[850,1200]]},
+        {kind:'urban',pts:[[300,760],[560,730],[580,1140],[330,1160]]}
       ],
-      bridges:[],
-      relief:[],
-      fabric:[
-        {x:23,y:47,w:34,h:16,density:.8,gap:3,size:2},
-        {x:61,y:44,w:24,h:7,density:.75,gap:3,size:1.8},
-        {x:5,y:6,w:12,h:36,density:.6,gap:3,size:1.5},
-        {x:60,y:6,w:34,h:8,density:.6,gap:3.2,size:1.6}
+      landmarks:[
+        {ref:'b1',kind:'civic',x:1060,y:660,w:52,h:28,district:'Customs Ward'},
+        {ref:'b2',kind:'workplace',x:1120,y:1350,w:76,h:24,district:'Old Docks'},
+        {ref:'b3',kind:'transport',x:420,y:1010,w:56,h:24,a:.05,district:'Fishermen\u2019s Row'},
+        {ref:'b4',kind:'residence',x:330,y:520,w:30,h:18,district:'Fishermen\u2019s Row'},
+        {ref:'b5',kind:'clinic',x:1240,y:420,w:30,h:20,district:'Customs Ward'},
+        {ref:'b6',kind:'market',x:1880,y:560,w:42,h:24,district:'Salt Market'},
+        {ref:'b7',kind:'school',x:600,y:880,w:30,h:20,district:'Fishermen\u2019s Row'},
+        {ref:'b8',kind:'bureau',x:1420,y:700,w:36,h:22,district:'Customs Ward'},
+        {ref:'b9',kind:'public',x:860,y:740,w:26,h:18,district:'Customs Ward'},
+        {ref:'b10',kind:'residence',x:1500,y:1330,w:34,h:20,district:'Old Docks'}
+      ],
+      corridors:[
+        {road:'customs-street',sides:'both',interval:27,setback:7,depth:11,wMin:9,wMax:15,density:.92,back:.35,class:'expansion'},
+        {road:'harbor-terrace',sides:'both',interval:26,setback:6,depth:10,wMin:9,wMax:14,density:.92,back:.3,class:'expansion'},
+        {road:'quay-road',sides:'right',interval:34,setback:5,depth:12,wMin:12,wMax:20,density:.9,back:0,class:'industrial'},
+        {road:'salt-market-st',sides:'both',interval:28,setback:6,depth:10,wMin:9,wMax:13,density:.9,back:.3,class:'expansion'},
+        {road:'fishermen-row',sides:'both',interval:24,setback:5,depth:9,wMin:7,wMax:11,density:.95,back:.5,class:'core'},
+        {road:'netwalk',sides:'left',interval:26,setback:4,depth:8,wMin:6,wMax:9,density:.85,back:.3,class:'core'},
+        {road:'ward-cross',sides:'both',interval:28,setback:5,depth:9,wMin:7,wMax:11,density:.88,back:.3,class:'core'},
+        {road:'warehouse-row',sides:'both',interval:30,setback:4,depth:10,wMin:9,wMax:13,density:.85,back:.2,class:'industrial'},
+        {road:'north-cliff',sides:'both',interval:30,setback:6,depth:10,wMin:9,wMax:14,density:.88,back:.3,class:'expansion'},
+        {road:'signal-stairs',sides:'right',interval:34,setback:4,depth:8,wMin:6,wMax:9,density:.7,back:0,class:'expansion'}
+      ],
+      yards:[
+        {x:1080,y:1300,w:44,h:14,rows:2,cols:3,gap:9,class:'industrial',angle:-.01},
+        {x:300,y:1330,w:36,h:13,rows:1,cols:3,gap:11,class:'industrial',angle:.02}
       ]
     },
     eisenmark:{
-      motif:'iron city: foundry complex, rail sidings, barracks and company rows',
-      slots:{
-        workplace:[{x:64,y:8,w:20,h:12}],
-        civic:[{x:36,y:8,w:14,h:10},{x:36,y:34,w:13,h:9}],
-        transport:[{x:8,y:34,w:15,h:9}],
-        residence:[{x:8,y:8,w:14,h:10}],
-        clinic:[{x:64,y:36,w:12,h:9}],
-        market:[{x:52,y:56,w:13,h:9},{x:68,y:56,w:12,h:9}],
-        school:[{x:22,y:56,w:13,h:9}],
-        public:[{x:36,y:56,w:11,h:8}]
-      },
-      default:[{x:8,y:72,w:13,h:8}],
+      motif:'iron city: vast foundry complexes and sidings east, worker perimeter blocks and company rows west',
+      bounds:{w:2500,h:1950},
+      zoomMax:22,
       districts:[
-        {name:'Foundry Ward',x:54,y:4,w:43,h:30},
-        {name:'Barracks',x:54,y:46,w:43,h:32},
-        {name:'Company Row',x:3,y:4,w:30,h:28},
-        {name:'Ash Market',x:30,y:46,w:38,h:32}
-      ],
-      landUse:[
-        {kind:'industrial',texture:'hatch',d:'M56 4 H97 V22 H56 Z'},
-        {kind:'industrial',texture:'hatch',d:'M56 25 H78 V32 H56 Z'},
-        {kind:'yard',texture:'hatch',d:'M6 44 H30 V54 H6 Z'},
-        {kind:'industrial',texture:'hatch',d:'M80 41 H97 V52 H80 Z'},
-        {kind:'urban',d:'M6 61 H30 V76 H6 Z'}
-      ],
-      waterways:[],
-      railways:[
-        {d:'M 2 40 C 20 39 40 38 98 36'},
-        {d:'M 40 37 C 52 34 60 29 64 21'},
-        {d:'M 56 12 H 97',spur:true},
-        {d:'M 56 17 H 92',spur:true},
-        {d:'M 60 37 V 52',spur:true}
+        {name:'Company Row',pts:[[90,160],[820,140],[860,900],[700,1240],[140,1200]]},
+        {name:'Foundry Ward',pts:[[1300,120],[2380,180],[2340,1000],[1360,960],[1300,600]]},
+        {name:'Ash Market',pts:[[700,1280],[1560,1240],[1620,1820],[760,1860]]},
+        {name:'Barracks',pts:[[1620,1100],[2380,1140],[2340,1820],[1660,1840]]}
       ],
       roads:[
-        'M 2 30 H 98',
-        'M 32 2 V 78',
-        'M 52 2 V 78',
-        'M 2 52 H 52',
-        'M 8 2 V 30',
-        'M 62 44 V 78'
+        {id:'iron-avenue',name:'Iron Avenue',cls:'primary',pts:[[160,1180],[900,1120],[1600,1080],[2360,1060]]},
+        {id:'company-row',name:'Company Row',cls:'secondary',pts:[[300,240],[380,700],[340,1150]]},
+        {id:'foundry-road',name:'Foundry Road',cls:'primary',pts:[[900,420],[1500,380],[2100,420],[2360,460]]},
+        {id:'smelter-street',name:'Smelter Street',cls:'secondary',pts:[[1420,300],[1460,700],[1420,1060]]},
+        {id:'barracks-road',name:'Barracks Road',cls:'primary',pts:[[1700,1180],[1780,1500],[1740,1820]]},
+        {id:'ash-market-st',name:'Ash Market Street',cls:'secondary',pts:[[820,1300],[880,1600],[840,1840]]},
+        {id:'station-road',name:'Station Road',cls:'primary',pts:[[420,1560],[700,1300],[980,1180],[1240,1120]]},
+        {id:'slag-lane',name:'Slag Lane',cls:'lane',pts:[[1120,600],[1360,640]]},
+        {id:'colliers-row',name:'Colliers Row',cls:'secondary',pts:[[520,520],[760,560]]},
+        {id:'gate-street',name:'Foundry Gate Street',cls:'secondary',pts:[[1300,180],[1340,600],[1310,1000]]},
+        {id:'east-service',name:'East Service Road',cls:'lane',pts:[[2100,500],[2160,1000]]}
       ],
-      minorRoads:[
-        'M 10 14 H 28','M 10 22 H 28',
-        'M 56 27 H 94','M 80 27 V 40',
-        'M 36 62 H 50','M 54 62 H 94','M 54 70 H 94',
-        'M 24 56 H 34'
+      railways:[
+        {pts:[[0,1380],[600,1330],[1300,1290],[2500,1240]]},
+        {pts:[[1300,1290],[1560,1240],[1700,1100]],spur:true},
+        {pts:[[1700,1100],[1980,1060],[2200,1020]],spur:true},
+        {pts:[[1560,500],[1900,540],[2300,600]],spur:true},
+        {pts:[[600,1330],[560,1480]],spur:true}
       ],
-      bridges:[],
-      relief:[],
-      fabric:[
-        {x:57,y:5,w:39,h:15,density:.85,gap:3.4,size:2.4},
-        {x:57,y:26,w:19,h:5,density:.8,gap:3,size:2},
-        {x:7,y:62,w:22,h:13,density:.85,gap:2.6,size:1.7},
-        {x:55,y:64,w:37,h:12,density:.72,gap:3,size:1.8},
-        {x:81,y:42,w:15,h:9,density:.8,gap:2.8,size:2}
+      waterways:[],
+      landUse:[
+        {kind:'industrial',texture:'hatch',pts:[[1560,240],[2320,300],[2280,940],[1540,900]]},
+        {kind:'industrial',texture:'hatch',pts:[[1840,1160],[2300,1200],[2270,1560],[1820,1520]]},
+        {kind:'yard',texture:'hatch',pts:[[380,1240],[700,1210],[720,1400],[400,1430]]},
+        {kind:'urban',pts:[[180,600],[620,570],[640,1100],[200,1130]]},
+        {kind:'urban',pts:[[940,1300],[1400,1270],[1420,1760],[960,1790]]}
+      ],
+      landmarks:[
+        {ref:'b1',kind:'workplace',x:1700,y:420,w:96,h:34,district:'Foundry Ward'},
+        {ref:'b2',kind:'civic',x:1420,y:280,w:42,h:24,district:'Foundry Ward'},
+        {ref:'b3',kind:'transport',x:750,y:1310,w:60,h:26,district:'Ash Market'},
+        {ref:'b4',kind:'residence',x:420,y:420,w:34,h:20,district:'Company Row'},
+        {ref:'b5',kind:'clinic',x:1800,y:820,w:34,h:22,district:'Foundry Ward'},
+        {ref:'b6',kind:'market',x:1160,y:1420,w:40,h:24,district:'Ash Market'},
+        {ref:'b7',kind:'school',x:560,y:880,w:32,h:20,district:'Company Row'},
+        {ref:'b8',kind:'market',x:1960,y:1320,w:38,h:22,district:'Barracks'},
+        {ref:'b9',kind:'civic',x:720,y:960,w:38,h:24,district:'Company Row'},
+        {ref:'b10',kind:'public',x:1020,y:1560,w:26,h:18,district:'Ash Market'}
+      ],
+      corridors:[
+        {road:'iron-avenue',sides:'both',interval:29,setback:8,depth:11,wMin:9,wMax:15,density:.92,back:.35,class:'expansion'},
+        {road:'company-row',sides:'both',interval:26,setback:6,depth:10,wMin:9,wMax:13,density:.93,back:.5,class:'ring'},
+        {road:'foundry-road',sides:'both',interval:34,setback:9,depth:13,wMin:12,wMax:20,density:.88,back:.15,class:'industrial'},
+        {road:'smelter-street',sides:'both',interval:29,setback:6,depth:10,wMin:8,wMax:13,density:.9,back:.3,class:'expansion'},
+        {road:'barracks-road',sides:'both',interval:28,setback:7,depth:10,wMin:9,wMax:14,density:.9,back:.35,class:'ring'},
+        {road:'ash-market-st',sides:'both',interval:27,setback:6,depth:10,wMin:8,wMax:13,density:.9,back:.4,class:'ring'},
+        {road:'station-road',sides:'both',interval:28,setback:6,depth:10,wMin:8,wMax:13,density:.9,back:.3,class:'expansion'},
+        {road:'colliers-row',sides:'both',interval:27,setback:5,depth:9,wMin:8,wMax:11,density:.9,back:.4,class:'ring'},
+        {road:'gate-street',sides:'both',interval:30,setback:6,depth:10,wMin:8,wMax:12,density:.88,back:.3,class:'expansion'},
+        {road:'slag-lane',sides:'both',interval:32,setback:4,depth:8,wMin:6,wMax:9,density:.75,back:.2,class:'core'},
+        {road:'east-service',sides:'left',interval:36,setback:5,depth:10,wMin:9,wMax:13,density:.8,back:0,class:'industrial'}
+      ],
+      yards:[
+        {x:1620,y:560,w:64,h:18,rows:3,cols:4,gap:14,class:'industrial',angle:.03},
+        {x:1880,y:1220,w:54,h:16,rows:2,cols:3,gap:13,class:'military',angle:-.02},
+        {x:420,y:1300,w:40,h:14,rows:2,cols:2,gap:11,class:'industrial',angle:.02}
       ]
     },
     kostrin:{
-      motif:'colleges and chapels on the hill above the hospital ward, gardens to the south',
-      slots:{
-        school:[{x:8,y:8,w:17,h:11},{x:8,y:24,w:13,h:9}],
-        bureau:[{x:56,y:8,w:13,h:9},{x:72,y:24,w:12,h:9}],
-        transport:[{x:8,y:60,w:15,h:9}],
-        residence:[{x:72,y:8,w:13,h:9}],
-        clinic:[{x:32,y:32,w:18,h:12}],
-        market:[{x:56,y:48,w:12,h:9}],
-        worship:[{x:30,y:8,w:12,h:9}],
-        public:[{x:56,y:24,w:11,h:8}]
-      },
-      default:[{x:72,y:60,w:12,h:9},{x:30,y:60,w:12,h:9}],
+      motif:'institutional city: college hill and chapels above, hospital ward at the crossing, gardens to the south',
+      bounds:{w:2200,h:1750},
+      zoomMax:21,
       districts:[
-        {name:'College Hill',x:3,y:4,w:26,h:34},
-        {name:'Hospital Ward',x:26,y:26,w:30,h:24},
-        {name:'Chapel District',x:26,y:4,w:24,h:22},
-        {name:'South Gardens',x:48,y:40,w:49,h:38}
+        {name:'College Hill',pts:[[80,140],[700,120],[760,760],[620,1080],[140,1040]]},
+        {name:'Chapel District',pts:[[760,120],[1420,140],[1460,620],[820,640],[760,760]]},
+        {name:'Hospital Ward',pts:[[640,760],[1480,720],[1540,1180],[700,1220],[620,1080]]},
+        {name:'South Gardens',pts:[[240,1240],[1900,1200],[1960,1660],[300,1690]]}
       ],
-      landUse:[
-        {kind:'institutional',texture:'trees',d:'M4 4 H26 V38 H4 Z'},
-        {kind:'gardens',texture:'trees',d:'M50 42 H94 V60 H50 Z'},
-        {kind:'gardens',texture:'trees',d:'M52 62 H76 V78 H52 Z'},
-        {kind:'gardens',d:'M32 6 H48 V22 H32 Z'}
-      ],
-      waterways:[],
-      railways:[],
       roads:[
-        'M 2 44 H 98',
-        'M 28 2 V 78',
-        'M 54 2 V 78',
-        'M 78 2 V 44',
-        'M 2 64 H 26',
-        'M 28 52 C 40 50 48 50 56 52'
+        {id:'college-hill',name:'College Hill Road',cls:'secondary',pts:[[220,240],[400,560],[360,980]]},
+        {id:'processional',name:'Processional Avenue',cls:'primary',pts:[[120,1140],[800,1100],[1500,1120],[2080,1140]]},
+        {id:'chapels-walk',name:'Chapels Walk',cls:'secondary',pts:[[840,220],[900,480],[860,760]]},
+        {id:'hospital-way',name:'Hospital Way',cls:'primary',pts:[[700,860],[1120,880],[1520,900]]},
+        {id:'garden-road',name:'Garden Road',cls:'secondary',pts:[[300,1400],[900,1370],[1500,1390],[1980,1410]]},
+        {id:'south-lane',name:'South Lane',cls:'lane',pts:[[500,1660],[1100,1630],[1700,1650]]},
+        {id:'station-branch',name:'Station Branch',cls:'secondary',pts:[[260,1420],[300,1240],[380,1120]]},
+        {id:'chapter-street',name:'Chapter Street',cls:'secondary',pts:[[1180,200],[1220,560],[1180,840]]},
+        {id:'cloister-lane',name:'Cloister Lane',cls:'lane',pts:[[420,700],[640,730]]},
+        {id:'ward-lane',name:'Ward Lane',cls:'lane',pts:[[940,900],[960,1120]]}
       ],
-      minorRoads:[
-        'M 6 16 H 26','M 6 30 H 26',
-        'M 32 12 H 48','M 32 20 H 48',
-        'M 60 12 H 86','M 60 30 H 84',
-        'M 60 44 H 94','M 60 68 H 90',
-        'M 32 66 H 48'
+      railways:[],
+      waterways:[],
+      landUse:[
+        {kind:'institutional',texture:'trees',pts:[[120,160],[620,140],[660,700],[180,740]]},
+        {kind:'gardens',texture:'trees',pts:[[1560,760],[2020,780],[2000,1120],[1580,1100]]},
+        {kind:'gardens',texture:'trees',pts:[[820,1240],[1240,1220],[1260,1560],[840,1580]]},
+        {kind:'gardens',pts:[[880,180],[1380,200],[1400,540],[900,560]]}
       ],
-      bridges:[],
-      relief:['M 4 40 C 12 36 20 37 26 41'],
-      fabric:[
-        {x:6,y:6,w:18,h:28,density:.55,gap:3.4,size:1.9},
-        {x:33,y:8,w:14,h:10,density:.5,gap:3.4,size:1.7},
-        {x:62,y:8,w:22,h:6,density:.5,gap:3.4,size:1.7},
-        {x:33,y:46,w:18,h:12,density:.5,gap:3.2,size:1.8},
-        {x:62,y:64,w:28,h:12,density:.45,gap:3.6,size:1.7}
+      landmarks:[
+        {ref:'b1',kind:'school',x:280,y:340,w:58,h:32,a:.04,district:'College Hill'},
+        {ref:'b2',kind:'bureau',x:1260,y:300,w:38,h:24,district:'Chapel District'},
+        {ref:'b3',kind:'transport',x:330,y:1300,w:56,h:26,a:-.07,district:'South Gardens'},
+        {ref:'b4',kind:'residence',x:1320,y:430,w:34,h:20,district:'Chapel District'},
+        {ref:'b5',kind:'clinic',x:900,y:940,w:74,h:34,district:'Hospital Ward'},
+        {ref:'b6',kind:'market',x:1300,y:1240,w:36,h:22,district:'South Gardens'},
+        {ref:'b7',kind:'school',x:480,y:800,w:34,h:22,district:'College Hill'},
+        {ref:'b8',kind:'bureau',x:1400,y:800,w:34,h:22,district:'Hospital Ward'},
+        {ref:'b9',kind:'worship',x:1000,y:340,w:30,h:26,district:'Chapel District'},
+        {ref:'b10',kind:'public',x:1420,y:1000,w:26,h:18,district:'Hospital Ward'}
+      ],
+      corridors:[
+        {road:'processional',sides:'both',interval:31,setback:8,depth:11,wMin:9,wMax:15,density:.88,back:.3,class:'expansion'},
+        {road:'college-hill',sides:'both',interval:33,setback:7,depth:10,wMin:8,wMax:12,density:.82,back:.35,class:'core'},
+        {road:'chapels-walk',sides:'both',interval:32,setback:6,depth:9,wMin:8,wMax:12,density:.85,back:.3,class:'core'},
+        {road:'hospital-way',sides:'both',interval:30,setback:7,depth:10,wMin:9,wMax:13,density:.88,back:.25,class:'expansion'},
+        {road:'garden-road',sides:'both',interval:34,setback:7,depth:10,wMin:8,wMax:12,density:.8,back:.25,class:'expansion'},
+        {road:'chapter-street',sides:'both',interval:31,setback:6,depth:9,wMin:8,wMax:11,density:.85,back:.3,class:'core'},
+        {road:'station-branch',sides:'both',interval:33,setback:6,depth:9,wMin:7,wMax:11,density:.8,back:.3,class:'expansion'},
+        {road:'cloister-lane',sides:'both',interval:34,setback:4,depth:8,wMin:6,wMax:9,density:.72,back:.2,class:'core'},
+        {road:'ward-lane',sides:'both',interval:34,setback:4,depth:8,wMin:6,wMax:9,density:.75,back:.2,class:'expansion'},
+        {road:'south-lane',sides:'both',interval:38,setback:6,depth:9,wMin:7,wMax:10,density:.6,back:.15,class:'rural'}
       ]
     },
     rudava:{
-      motif:'the timetable city: junction, freight yards, platforms and railway rows',
-      slots:{
-        transport:[{x:28,y:8,w:18,h:11},{x:8,y:24,w:22,h:12},{x:52,y:24,w:14,h:9},{x:52,y:8,w:14,h:9},{x:8,y:42,w:14,h:9}],
-        civic:[{x:52,y:40,w:13,h:9}],
-        market:[{x:70,y:8,w:13,h:9}],
-        school:[{x:70,y:24,w:12,h:9}],
-        bureau:[{x:70,y:40,w:13,h:9}],
-        public:[{x:30,y:60,w:12,h:9}]
-      },
-      default:[{x:52,y:60,w:13,h:9},{x:70,y:60,w:12,h:9}],
+      motif:'railway city: twin main lines and a great freight yard carve the districts apart',
+      bounds:{w:2300,h:1800},
+      zoomMax:22,
       districts:[
-        {name:'Junction Ward',x:44,y:4,w:30,h:30},
-        {name:'Freight Yards',x:3,y:20,w:30,h:22},
-        {name:'Railway Homes',x:48,y:36,w:24,h:22},
-        {name:'East Barracks',x:66,y:4,w:31,h:30}
-      ],
-      landUse:[
-        {kind:'yard',texture:'hatch',d:'M4 22 H32 V40 H4 Z'},
-        {kind:'yard',texture:'hatch',d:'M46 4 H64 V20 H46 Z'},
-        {kind:'urban',d:'M48 50 H70 V62 H48 Z'},
-        {kind:'urban',d:'M4 55 H26 V76 H4 Z'}
-      ],
-      waterways:[],
-      railways:[
-        {d:'M 2 16 C 24 15 44 13 98 11'},
-        {d:'M 2 32 C 20 31 36 28 52 26 C 70 24 84 22 98 20'},
-        {d:'M 50 12 C 50 17 50 21 50 26'},
-        {d:'M 6 25 H 30',spur:true},
-        {d:'M 6 28 H 30',spur:true},
-        {d:'M 6 31 H 30',spur:true},
-        {d:'M 6 34 H 30',spur:true},
-        {d:'M 46 8 H 64',spur:true},
-        {d:'M 46 11 H 64',spur:true},
-        {d:'M 50 26 C 58 34 60 45 58 58',spur:true}
+        {name:'Junction Ward',pts:[[980,140],[1720,120],[1780,820],[1060,860],[980,600]]},
+        {name:'Freight Yards',pts:[[80,420],[900,380],[960,900],[140,940]]},
+        {name:'Railway Homes',pts:[[980,900],[1660,880],[1720,1420],[1040,1460],[980,1200]]},
+        {name:'East Barracks',pts:[[1760,200],[2220,240],[2180,900],[1800,860]]}
       ],
       roads:[
-        'M 2 47 C 24 45 44 45 98 43',
-        'M 24 2 C 26 20 26 40 24 78',
-        'M 66 2 V 78',
-        'M 2 68 H 98',
-        'M 46 2 V 20'
+        {id:'platform-road',name:'Platform Road',cls:'primary',pts:[[140,300],[700,270],[1000,280],[1300,320]]},
+        {id:'junction-avenue',name:'Junction Avenue',cls:'primary',pts:[[1060,180],[1140,560],[1180,900],[1220,1300],[1260,1680]]},
+        {id:'freight-road',name:'Freight Road',cls:'secondary',pts:[[120,760],[500,720],[880,700]]},
+        {id:'homes-street',name:'Railway Homes Street',cls:'secondary',pts:[[1040,1020],[1400,1000],[1680,1020]]},
+        {id:'barracks-avenue',name:'Barracks Avenue',cls:'secondary',pts:[[1820,300],[1900,600],[1860,880]]},
+        {id:'crossing-road',name:'Crossing Road',cls:'primary',pts:[[100,1180],[700,1140],[1300,1160],[2200,1200]]},
+        {id:'station-approach',name:'Station Approach',cls:'secondary',pts:[[640,270],[680,120],[720,60]]},
+        {id:'yard-lane',name:'Yard Lane',cls:'lane',pts:[[200,520],[420,500],[660,480]]},
+        {id:'east-lane',name:'East Lane',cls:'lane',pts:[[1960,340],[1990,820]]},
+        {id:'homes-cross',name:'Homes Crossing',cls:'lane',pts:[[1300,1000],[1330,1400]]}
       ],
-      minorRoads:[
-        'M 30 14 H 44','M 52 15 H 64','M 72 14 H 82',
-        'M 34 29 H 44','M 68 28 H 82',
-        'M 52 46 H 64','M 52 55 H 64',
-        'M 8 51 H 20',
-        'M 30 69 H 44','M 74 68 H 84'
+      railways:[
+        {pts:[[0,420],[500,395],[1050,360],[1600,320],[2300,280]]},
+        {pts:[[0,880],[450,850],[950,820],[1500,780],[2300,740]]},
+        {pts:[[1050,360],[1080,560],[1105,800]],spur:true},
+        {pts:[[150,470],[760,440]],spur:true},
+        {pts:[[150,520],[700,495]],spur:true},
+        {pts:[[150,570],[660,548]],spur:true},
+        {pts:[[150,620],[620,600]],spur:true},
+        {pts:[[1180,900],[1400,880],[1650,860]],spur:true},
+        {pts:[[1900,600],[2050,560],[2150,540]],spur:true}
+      ],
+      waterways:[],
+      landUse:[
+        {kind:'yard',texture:'hatch',pts:[[120,440],[880,410],[920,860],[160,890]]},
+        {kind:'yard',texture:'hatch',pts:[[1080,180],[1420,170],[1450,330],[1110,340]]},
+        {kind:'urban',pts:[[1080,940],[1620,920],[1650,1380],[1110,1400]]},
+        {kind:'urban',pts:[[140,980],[620,960],[640,1420],[160,1440]]},
+        {kind:'institutional',pts:[[1800,260],[2160,280],[2130,760],[1820,740]]}
       ],
       bridges:[
-        {x:22,y:12,w:4,h:7},{x:22,y:29,w:4,h:5},{x:64,y:8,w:4,h:6}
+        {x:560,y:398,w:26,h:34},{x:600,y:842,w:26,h:26},{x:1180,y:842,w:26,h:30},{x:1870,y:742,w:26,h:30}
       ],
-      relief:[],
-      fabric:[
-        {x:6,y:56,w:18,h:17,density:.85,gap:2.6,size:1.7},
-        {x:49,y:51,w:20,h:10,density:.8,gap:2.8,size:1.7},
-        {x:68,y:46,w:26,h:14,density:.6,gap:3,size:1.8},
-        {x:74,y:6,w:8,h:16,density:.6,gap:3,size:1.6}
+      landmarks:[
+        {ref:'b1',kind:'civic',x:1180,y:640,w:40,h:24,district:'Junction Ward'},
+        {ref:'b2',kind:'transport',x:1100,y:390,w:76,h:28,district:'Junction Ward'},
+        {ref:'b3',kind:'transport',x:300,y:760,w:88,h:30,a:-.03,district:'Freight Yards'},
+        {ref:'b4',kind:'transport',x:1240,y:960,w:40,h:22,district:'Railway Homes'},
+        {ref:'b5',kind:'transport',x:760,y:790,w:42,h:22,a:.04,district:'Freight Yards'},
+        {ref:'b6',kind:'market',x:1520,y:1120,w:36,h:22,district:'Railway Homes'},
+        {ref:'b7',kind:'school',x:1900,y:420,w:34,h:22,district:'East Barracks'},
+        {ref:'b8',kind:'bureau',x:1600,y:760,w:38,h:22,district:'Junction Ward'},
+        {ref:'b9',kind:'transport',x:1055,y:1235,w:40,h:20,a:.03,district:'Railway Homes'},
+        {ref:'b10',kind:'public',x:690,y:850,w:26,h:18,district:'Freight Yards'}
+      ],
+      corridors:[
+        {road:'junction-avenue',sides:'both',interval:28,setback:7,depth:10,wMin:9,wMax:14,density:.9,back:.35,class:'expansion'},
+        {road:'platform-road',sides:'both',interval:29,setback:7,depth:10,wMin:9,wMax:14,density:.88,back:.3,class:'expansion'},
+        {road:'crossing-road',sides:'both',interval:29,setback:7,depth:10,wMin:9,wMax:14,density:.88,back:.3,class:'expansion'},
+        {road:'homes-street',sides:'both',interval:26,setback:6,depth:9,wMin:8,wMax:12,density:.92,back:.5,class:'ring'},
+        {road:'freight-road',sides:'left',interval:32,setback:6,depth:10,wMin:9,wMax:13,density:.85,back:.2,class:'industrial'},
+        {road:'barracks-avenue',sides:'both',interval:30,setback:7,depth:10,wMin:9,wMax:13,density:.87,back:.3,class:'ring'},
+        {road:'station-approach',sides:'both',interval:30,setback:5,depth:9,wMin:7,wMax:11,density:.85,back:.2,class:'core'},
+        {road:'yard-lane',sides:'right',interval:34,setback:4,depth:9,wMin:7,wMax:10,density:.75,back:0,class:'industrial'},
+        {road:'east-lane',sides:'both',interval:33,setback:5,depth:9,wMin:7,wMax:10,density:.78,back:.25,class:'expansion'},
+        {road:'homes-cross',sides:'both',interval:31,setback:5,depth:9,wMin:7,wMax:10,density:.85,back:.35,class:'ring'}
+      ],
+      yards:[
+        {x:220,y:640,w:58,h:16,rows:2,cols:4,gap:12,class:'industrial',angle:-.03},
+        {x:1420,y:940,w:44,h:14,rows:2,cols:3,gap:11,class:'industrial',angle:.02},
+        {x:1920,y:660,w:44,h:15,rows:2,cols:3,gap:12,class:'military',angle:0}
       ]
     },
     dobraven:{
-      motif:'old county town: crooked lanes around the square, river road below, estates east',
-      slots:{
-        civic:[{x:38,y:26,w:16,h:12},{x:8,y:8,w:13,h:9},{x:56,y:8,w:12,h:9}],
-        bureau:[{x:38,y:8,w:14,h:10}],
-        transport:[{x:8,y:42,w:15,h:9}],
-        residence:[{x:60,y:60,w:14,h:9}],
-        market:[{x:20,y:26,w:13,h:9}],
-        school:[{x:8,y:60,w:13,h:9}],
-        worship:[{x:38,y:60,w:12,h:9}],
-        public:[{x:58,y:26,w:11,h:8}]
-      },
-      default:[{x:56,y:42,w:12,h:9},{x:74,y:26,w:10,h:8}],
+      motif:'old county town: crooked lanes around the county square, river road west, estates east',
+      bounds:{w:1500,h:1150},
+      zoomMax:16,
       districts:[
-        {name:'County Square',x:18,y:20,w:40,h:24},
-        {name:'Old Estates',x:52,y:48,w:45,h:30},
-        {name:'River Road',x:3,y:28,w:22,h:32},
-        {name:'Lower Town',x:3,y:52,w:48,h:26}
+        {name:'County Square',pts:[[420,380],[900,340],[960,700],[480,740]]},
+        {name:'River Road',pts:[[80,300],[360,280],[400,720],[340,1020],[90,1000]]},
+        {name:'Old Estates',pts:[[980,640],[1440,600],[1480,1080],[1020,1100]]},
+        {name:'Lower Town',pts:[[160,740],[940,720],[980,1080],[200,1100]]}
       ],
-      landUse:[
-        {kind:'estate',texture:'trees',d:'M54 50 H96 V78 H54 Z'},
-        {kind:'water',d:'M0 30 C 4 40 4 52 0 64 L0 30 Z'},
-        {kind:'urban',d:'M20 22 C 30 20 44 20 52 22 L52 42 C 40 44 28 44 20 42 Z'}
+      roads:[
+        {id:'square-west',name:'County Square West',cls:'primary',pts:[[380,520],[700,500],[940,520]]},
+        {id:'square-east',name:'County Square East',cls:'primary',pts:[[960,560],[1180,580],[1420,570]]},
+        {id:'river-road',name:'River Road',cls:'secondary',pts:[[220,120],[260,480],[240,840],[270,1120]]},
+        {id:'lower-street',name:'Lower Street',cls:'secondary',pts:[[220,860],[560,840],[900,850],[1240,870]]},
+        {id:'estate-lane',name:'Estate Lane',cls:'lane',pts:[[1040,720],[1100,900],[1140,1060]]},
+        {id:'chapel-walk',name:'Chapel Walk',cls:'lane',pts:[[700,740],[730,900]]},
+        {id:'north-gate',name:'North Gate Street',cls:'secondary',pts:[[560,120],[600,360],[640,500]]},
+        {id:'mill-bridge',name:'Mill Bridge Lane',cls:'lane',pts:[[120,560],[320,540]]},
+        {id:'old-row',name:'Old Row',cls:'lane',pts:[[430,600],[700,615]]}
       ],
+      railways:[],
       waterways:[
-        {kind:'river',d:'M 3 2 C 7 14 6 24 4 34 C 2 44 3 56 5 66 C 6 73 5 77 4 80'}
-      ],
-      railways:[],
-      roads:[
-        'M 10 2 C 16 14 20 22 26 30 C 34 40 44 46 56 50',
-        'M 8 47 C 20 45 34 45 50 47 C 66 49 82 47 98 45',
-        'M 27 30 C 31 40 31 52 27 62 C 25 70 25 76 27 80',
-        'M 56 50 C 62 58 66 66 66 78',
-        'M 50 12 C 60 14 72 14 84 12',
-        'M 8 24 C 12 30 14 36 15 44'
-      ],
-      minorRoads:[
-        'M 20 31 H 34','M 22 39 H 36',
-        'M 38 45 H 52','M 60 22 H 74',
-        'M 8 62 H 22','M 40 67 H 52',
-        'M 72 57 H 88'
-      ],
-      bridges:[],
-      relief:[],
-      fabric:[
-        {x:22,y:44,w:24,h:12,density:.7,gap:2.8,size:1.6},
-        {x:56,y:52,w:36,h:8,density:.5,gap:3.4,size:1.9},
-        {x:6,y:8,w:16,h:18,density:.55,gap:3,size:1.5},
-        {x:58,y:8,w:26,h:8,density:.5,gap:3.2,size:1.6}
-      ]
-    },
-    krasnava:{
-      motif:'village green at the crossroads, strip fields beyond, mill on the stream',
-      slots:{
-        civic:[{x:40,y:10,w:14,h:9}],
-        residence:[{x:8,y:26,w:14,h:9},{x:64,y:26,w:13,h:9}],
-        clinic:[{x:60,y:10,w:11,h:8}],
-        school:[{x:8,y:10,w:13,h:9}],
-        market:[{x:26,y:26,w:12,h:9}],
-        workplace:[{x:26,y:44,w:13,h:9}],
-        worship:[{x:44,y:44,w:11,h:8}],
-        bureau:[{x:62,y:44,w:10,h:8}],
-        public:[{x:8,y:44,w:11,h:8}]
-      },
-      default:[{x:62,y:58,w:11,h:7},{x:8,y:58,w:11,h:7}],
-      districts:[
-        {name:'Village Green',x:22,y:8,w:36,h:32},
-        {name:'North Fields',x:3,y:4,w:94,h:34},
-        {name:'Mill Road',x:20,y:38,w:40,h:26}
+        {kind:'water',pts:[[0,180],[130,200],[170,520],[140,840],[170,1050],[0,1070]]},
+        {kind:'river',pts:[[60,140],[110,400],[95,700],[115,980],[85,1130]]},
+        {kind:'quay',pts:[[175,300],[165,560],[180,820]]}
       ],
       landUse:[
-        {kind:'farmland',texture:'furrow',d:'M3 4 H21 V38 H3 Z'},
-        {kind:'farmland',texture:'furrow',d:'M60 4 H97 V19 H60 Z'},
-        {kind:'farmland',texture:'furrow',d:'M77 21 H97 V37 H77 Z'},
-        {kind:'farmland',texture:'furrow',d:'M3 42 H19 V78 H3 Z'},
-        {kind:'farmland',texture:'furrow',d:'M60 56 H97 V78 H60 Z'},
-        {kind:'meadow',d:'M25 41 H55 V53 H25 Z'},
-        {kind:'orchard',texture:'orchard',d:'M44 58 H58 V70 H44 Z'}
+        {kind:'estate',texture:'trees',pts:[[1000,740],[1460,700],[1490,1060],[1040,1080]]},
+        {kind:'urban',pts:[[440,540],[900,520],[930,700],[460,720]]},
+        {kind:'meadow',pts:[[380,880],[620,870],[630,1060],[400,1070]]}
       ],
-      waterways:[
-        {kind:'stream',d:'M 2 70 C 20 68 36 72 52 70 S 84 68 98 70'}
+      landmarks:[
+        {ref:'b1',kind:'civic',x:600,y:430,w:52,h:28,district:'County Square'},
+        {ref:'b2',kind:'bureau',x:1160,y:800,w:38,h:22,district:'Old Estates'},
+        {ref:'b3',kind:'transport',x:330,y:600,w:44,h:22,district:'River Road'},
+        {ref:'b4',kind:'residence',x:520,y:930,w:34,h:19,district:'Lower Town'},
+        {ref:'b5',kind:'clinic',x:820,y:600,w:32,h:20,district:'County Square'},
+        {ref:'b6',kind:'market',x:760,y:470,w:42,h:24,district:'County Square'},
+        {ref:'b7',kind:'school',x:340,y:940,w:34,h:20,district:'Lower Town'},
+        {ref:'b8',kind:'civic',x:850,y:465,w:36,h:21,district:'County Square'},
+        {ref:'b9',kind:'worship',x:1240,y:920,w:30,h:26,district:'Old Estates'},
+        {ref:'b10',kind:'public',x:760,y:920,w:26,h:18,district:'Lower Town'}
       ],
-      railways:[],
-      roads:[
-        'M 2 20 C 20 19 40 18 98 16',
-        'M 24 2 C 26 20 26 40 24 62 C 23 70 23 76 24 80',
-        'M 58 2 C 60 18 60 34 58 52 C 57 64 57 72 58 80',
-        'M 24 62 C 36 60 46 60 58 62'
-      ],
-      minorRoads:[
-        'M 8 33 H 20','M 65 33 H 75',
-        'M 30 49 H 42','M 8 49 H 18','M 62 49 H 70',
-        'M 34 12 H 52'
-      ],
-      bridges:[],
-      relief:[],
-      fabric:[
-        {x:27,y:22,w:26,h:13,density:.35,gap:3.8,size:1.3},
-        {x:8,y:6,w:13,h:16,density:.3,gap:4,size:1.2},
-        {x:62,y:6,w:14,h:12,density:.3,gap:4,size:1.2},
-        {x:62,y:59,w:30,h:14,density:.25,gap:4.4,size:1.4}
-      ]
-    },
-    brezin:{
-      motif:'forest village: clearings strung along the timber road under broad woodland',
-      slots:{
-        residence:[{x:8,y:8,w:13,h:9},{x:70,y:44,w:12,h:9}],
-        civic:[{x:26,y:8,w:14,h:10}],
-        clinic:[{x:8,y:24,w:12,h:9}],
-        school:[{x:44,y:8,w:12,h:9}],
-        workplace:[{x:26,y:24,w:18,h:11}],
-        transport:[{x:62,y:8,w:13,h:9}],
-        market:[{x:48,y:42,w:12,h:9}],
-        bureau:[{x:26,y:44,w:11,h:8}],
-        public:[{x:8,y:44,w:11,h:8}]
-      },
-      default:[{x:62,y:60,w:12,h:9},{x:8,y:60,w:12,h:8}],
-      districts:[
-        {name:'Lower Road',x:3,y:38,w:30,h:32},
-        {name:'Timber Yard',x:20,y:18,w:32,h:22},
-        {name:'Hill Houses',x:58,y:34,w:39,h:32}
-      ],
-      landUse:[
-        {kind:'forest',texture:'trees',d:'M3 3 H21 V21 H3 Z'},
-        {kind:'forest',texture:'trees',d:'M42 3 H74 V20 H42 Z'},
-        {kind:'forest',texture:'trees',d:'M80 3 H97 V30 H80 Z'},
-        {kind:'forest',texture:'trees',d:'M3 56 H20 V79 H3 Z'},
-        {kind:'forest',texture:'trees',d:'M44 56 H66 V79 H44 Z'},
-        {kind:'forest',texture:'trees',d:'M84 56 H97 V79 H84 Z'},
-        {kind:'meadow',d:'M24 54 H42 V64 H24 Z'}
-      ],
-      waterways:[],
-      railways:[],
-      roads:[
-        'M 2 50 C 18 48 34 46 52 42 C 68 39 84 36 98 33',
-        'M 33 2 C 31 12 30 20 33 30 C 35 38 34 46 32 54',
-        'M 68 2 C 67 14 67 26 69 38',
-        'M 32 62 C 44 60 56 60 68 62'
-      ],
-      minorRoads:[
-        'M 8 18 H 20','M 48 14 H 56','M 66 12 H 73',
-        'M 12 28 H 20','M 48 46 H 58','M 72 48 H 82',
-        'M 12 62 H 20'
-      ],
-      bridges:[],
-      relief:[
-        'M 60 76 C 66 70 74 66 82 66 C 90 66 95 70 96 74',
-        'M 64 72 C 70 67 77 64 83 65 C 89 66 93 69 94 72',
-        'M 68 68 C 73 65 78 63 83 64'
-      ],
-      fabric:[
-        {x:9,y:9,w:10,h:6,density:.45,gap:3.4,size:1.2},
-        {x:28,y:37,w:14,h:5,density:.5,gap:3.4,size:1.3},
-        {x:72,y:55,w:8,h:14,density:.35,gap:3.8,size:1.2},
-        {x:46,y:57,w:16,h:8,density:.3,gap:4,size:1.2}
+      corridors:[
+        {road:'square-west',sides:'both',interval:25,setback:6,depth:10,wMin:8,wMax:13,density:.94,back:.4,class:'core'},
+        {road:'square-east',sides:'both',interval:31,setback:8,depth:11,wMin:9,wMax:14,density:.82,back:.2,class:'rural'},
+        {road:'river-road',sides:'right',interval:27,setback:6,depth:10,wMin:8,wMax:12,density:.88,back:.35,class:'core'},
+        {road:'lower-street',sides:'both',interval:26,setback:6,depth:9,wMin:8,wMax:12,density:.92,back:.45,class:'ring'},
+        {road:'estate-lane',sides:'both',interval:44,setback:9,depth:11,wMin:11,wMax:16,density:.55,back:.1,class:'rural'},
+        {road:'north-gate',sides:'both',interval:28,setback:6,depth:10,wMin:8,wMax:12,density:.88,back:.35,class:'core'},
+        {road:'chapel-walk',sides:'left',interval:33,setback:4,depth:8,wMin:6,wMax:9,density:.75,back:.2,class:'core'},
+        {road:'old-row',sides:'both',interval:29,setback:4,depth:8,wMin:6,wMax:10,density:.85,back:.25,class:'core'}
       ]
     },
     lindava:{
-      motif:'market town: hall square and Bell Quarter inside, grain fields without',
-      slots:{
-        civic:[{x:34,y:22,w:18,h:12},{x:8,y:8,w:13,h:9}],
-        residence:[{x:60,y:8,w:14,h:9},{x:60,y:26,w:14,h:9}],
-        clinic:[{x:8,y:26,w:12,h:9}],
-        school:[{x:8,y:44,w:13,h:9}],
-        market:[{x:36,y:44,w:14,h:9}],
-        worship:[{x:36,y:8,w:13,h:9}],
-        public:[{x:60,y:44,w:11,h:8}],
-        transport:[{x:8,y:62,w:15,h:9}]
-      },
-      default:[{x:36,y:62,w:12,h:8},{x:60,y:60,w:12,h:8}],
+      motif:'market town: hall square with radiating streets, tight Bell Quarter, open west fields',
+      bounds:{w:1550,h:1200},
+      zoomMax:16,
       districts:[
-        {name:'Market Row',x:28,y:18,w:34,h:30},
-        {name:'Bell Quarter',x:28,y:4,w:34,h:18},
-        {name:'West Fields',x:3,y:4,w:22,h:56}
+        {name:'Market Row',pts:[[480,420],[1080,380],[1140,860],[520,900]]},
+        {name:'Bell Quarter',pts:[[500,140],[1120,120],[1160,400],[540,420]]},
+        {name:'West Fields',pts:[[90,160],[420,140],[460,1000],[120,1040]]}
       ],
-      landUse:[
-        {kind:'urban',d:'M30 36 H56 V44 H30 Z'},
-        {kind:'farmland',texture:'furrow',d:'M3 4 H21 V60 H3 Z'},
-        {kind:'farmland',texture:'furrow',d:'M62 62 H97 V79 H62 Z'},
-        {kind:'meadow',d:'M62 44 H96 V60 H62 Z'},
-        {kind:'gardens',texture:'trees',d:'M30 4 H56 V18 H30 Z'}
+      roads:[
+        {id:'market-square-n',name:'Market Row North',cls:'primary',pts:[[520,520],[820,500],[1120,520]]},
+        {id:'market-square-s',name:'Market Row South',cls:'primary',pts:[[540,760],[840,740],[1140,760]]},
+        {id:'high-street',name:'High Street',cls:'primary',pts:[[820,180],[840,520],[830,900],[850,1140]]},
+        {id:'bell-lane',name:'Bell Lane',cls:'secondary',pts:[[560,220],[740,260],[940,240],[1100,280]]},
+        {id:'fields-road',name:'West Fields Road',cls:'secondary',pts:[[200,240],[260,600],[230,980]]},
+        {id:'coach-yard-rd',name:'Coach Yard Road',cls:'secondary',pts:[[300,1020],[620,1000],[940,1010]]},
+        {id:'grain-lane',name:'Grain Lane',cls:'lane',pts:[[980,560],[1010,740]]},
+        {id:'kiosk-row',name:'Kiosk Row',cls:'lane',pts:[[540,620],[760,610]]}
       ],
+      railways:[],
       waterways:[],
-      railways:[],
-      roads:[
-        'M 2 40 H 98',
-        'M 26 2 V 78',
-        'M 58 2 V 78',
-        'M 30 22 C 38 20 48 20 56 22',
-        'M 2 68 H 26',
-        'M 58 56 C 70 54 82 54 98 56'
-      ],
-      minorRoads:[
-        'M 30 12 H 56','M 30 30 H 56','M 62 12 H 92','M 62 30 H 92',
-        'M 8 14 H 21','M 8 32 H 21','M 8 50 H 21',
-        'M 36 48 H 50','M 62 48 H 92','M 30 62 H 56'
-      ],
-      bridges:[],
-      relief:[],
-      fabric:[
-        {x:31,y:37,w:23,h:6,density:.75,gap:2.6,size:1.5},
-        {x:32,y:6,w:22,h:10,density:.7,gap:2.8,size:1.4},
-        {x:63,y:6,w:26,h:18,density:.65,gap:3,size:1.5},
-        {x:5,y:6,w:13,h:50,density:.4,gap:3.6,size:1.3},
-        {x:64,y:64,w:28,h:12,density:.35,gap:4,size:1.4}
-      ]
-    },
-    sundervik:{
-      motif:'fishing town: harbor steps on the northern sea, nets ashore, signal hill above',
-      slots:{
-        residence:[{x:8,y:18,w:14,h:9}],
-        transport:[{x:26,y:16,w:16,h:10},{x:70,y:16,w:13,h:9}],
-        clinic:[{x:8,y:34,w:12,h:9}],
-        school:[{x:26,y:34,w:13,h:9}],
-        market:[{x:46,y:34,w:11,h:9}],
-        civic:[{x:64,y:34,w:12,h:9}],
-        worship:[{x:8,y:52,w:12,h:9}],
-        bureau:[{x:46,y:16,w:11,h:8}],
-        public:[{x:46,y:52,w:11,h:8}]
-      },
-      default:[{x:64,y:52,w:12,h:9},{x:26,y:52,w:12,h:9}],
-      districts:[
-        {name:'Harbor Steps',x:4,y:4,w:38,h:22},
-        {name:'Netmakers\u2019 Row',x:22,y:26,w:38,h:20},
-        {name:'Signal Hill',x:60,y:4,w:37,h:34}
-      ],
       landUse:[
-        {kind:'harbor',d:'M2 2 H98 V13 H2 Z'},
-        {kind:'yard',texture:'hatch',d:'M24 27 H44 V36 H24 Z'},
-        {kind:'meadow',d:'M62 42 H96 V60 H62 Z'},
-        {kind:'urban',d:'M24 44 H42 V52 H24 Z'}
+        {kind:'farmland',texture:'furrow',pts:[[100,180],[400,160],[440,980],[130,1000]]},
+        {kind:'farmland',texture:'furrow',pts:[[1180,880],[1500,860],[1510,1160],[1200,1170]]},
+        {kind:'meadow',pts:[[1180,440],[1500,420],[1510,840],[1200,860]]},
+        {kind:'urban',pts:[[520,540],[1120,520],[1140,840],[540,860]]},
+        {kind:'gardens',texture:'trees',pts:[[540,160],[1100,140],[1130,380],[560,400]]}
       ],
-      waterways:[
-        {kind:'water',d:'M2 2 H98 V13 H2 Z'},
-        {kind:'coast',d:'M 2 13 C 20 12 40 14 60 13 S 88 12 98 13'},
-        {kind:'quay',d:'M 2 13.6 H 98'},
-        {kind:'quay',d:'M 10 13.6 V 17 M 13 13.6 V 17.6 M 16 13.6 V 18.2 M 19 13.6 V 17.6 M 22 13.6 V 17'}
+      landmarks:[
+        {ref:'b1',kind:'civic',x:680,y:600,w:54,h:30,district:'Market Row'},
+        {ref:'b2',kind:'residence',x:900,y:290,w:34,h:20,district:'Bell Quarter'},
+        {ref:'b3',kind:'residence',x:250,y:520,w:34,h:20,a:.05,district:'West Fields'},
+        {ref:'b4',kind:'clinic',x:960,y:620,w:32,h:20,district:'Market Row'},
+        {ref:'b5',kind:'school',x:600,y:800,w:34,h:21,district:'Market Row'},
+        {ref:'b6',kind:'market',x:980,y:760,w:40,h:24,district:'Market Row'},
+        {ref:'b7',kind:'worship',x:800,y:330,w:30,h:26,district:'Bell Quarter'},
+        {ref:'b8',kind:'civic',x:520,y:690,w:30,h:18,district:'Market Row'},
+        {ref:'b9',kind:'public',x:1040,y:340,w:26,h:18,district:'Bell Quarter'},
+        {ref:'b10',kind:'transport',x:300,y:900,w:48,h:22,a:-.03,district:'West Fields'}
       ],
-      railways:[],
-      roads:[
-        'M 2 30 H 98',
-        'M 24 13 C 25 26 25 44 24 78',
-        'M 60 13 C 61 24 61 34 60 46',
-        'M 2 46 H 98',
-        'M 84 13 V 46'
-      ],
-      minorRoads:[
-        'M 8 22 H 20','M 28 20 H 40','M 48 20 H 56','M 72 20 H 81',
-        'M 8 40 H 20','M 28 41 H 38','M 48 41 H 56','M 64 40 H 76',
-        'M 28 52 H 42','M 48 52 H 56','M 64 52 H 76'
-      ],
-      bridges:[],
-      relief:[
-        'M 62 44 C 68 38 76 34 84 34 C 91 34 96 38 97 43',
-        'M 66 41 C 71 37 78 35 84 36 C 89 37 93 40 94 43'
-      ],
-      fabric:[
-        {x:25,y:28,w:18,h:8,density:.7,gap:2.6,size:1.4},
-        {x:25,y:45,w:16,h:6,density:.6,gap:3,size:1.4},
-        {x:49,y:45,w:6,h:6,density:.6,gap:3,size:1.3},
-        {x:65,y:53,w:26,h:8,density:.4,gap:3.6,size:1.4},
-        {x:5,y:20,w:16,h:8,density:.5,gap:3.2,size:1.3}
-      ]
-    },
-    oberhain:{
-      motif:'former estate village: lawns and chapel lane cut by the military road',
-      slots:{
-        residence:[{x:38,y:10,w:20,h:14}],
-        worship:[{x:8,y:10,w:13,h:9},{x:8,y:28,w:12,h:9}],
-        civic:[{x:64,y:10,w:12,h:9}],
-        clinic:[{x:64,y:28,w:11,h:8}],
-        school:[{x:26,y:34,w:13,h:9}],
-        market:[{x:44,y:34,w:12,h:9}],
-        transport:[{x:8,y:48,w:14,h:9}],
-        bureau:[{x:64,y:48,w:10,h:8}],
-        public:[{x:30,y:60,w:12,h:9}]
-      },
-      default:[{x:64,y:64,w:12,h:8},{x:48,y:60,w:11,h:8}],
-      districts:[
-        {name:'Upper Hain',x:30,y:4,w:36,h:26},
-        {name:'Chapel Lane',x:3,y:4,w:24,h:36},
-        {name:'South Yards',x:56,y:4,w:41,h:26}
-      ],
-      landUse:[
-        {kind:'estate',texture:'trees',d:'M32 4 H62 V30 H32 Z'},
-        {kind:'estate',texture:'trees',d:'M34 30 H58 V44 H34 Z'},
-        {kind:'institutional',d:'M60 6 H78 V24 H60 Z'},
-        {kind:'yard',texture:'hatch',d:'M80 6 H97 V24 H80 Z'},
-        {kind:'farmland',texture:'furrow',d:'M46 46 H97 V60 H46 Z'}
-      ],
-      waterways:[],
-      railways:[],
-      roads:[
-        'M 2 78 C 24 64 48 48 70 34 C 80 28 90 24 98 22',
-        'M 14 2 C 15 14 15 24 14 34 C 13 44 13 54 15 64',
-        'M 14 34 C 24 36 34 36 44 34 C 56 32 68 32 80 34',
-        'M 44 34 C 46 44 46 54 44 62',
-        'M 60 24 C 62 34 62 44 60 52'
-      ],
-      minorRoads:[
-        'M 8 16 H 21','M 8 33 H 20',
-        'M 26 38 H 39','M 46 39 H 56',
-        'M 64 33 H 74','M 66 48 H 74',
-        'M 32 65 H 42','M 50 64 H 59'
-      ],
-      bridges:[],
-      relief:[],
-      fabric:[
-        {x:36,y:31,w:18,h:10,density:.4,gap:3.6,size:1.3},
-        {x:48,y:47,w:44,h:11,density:.3,gap:4,size:1.4},
-        {x:5,y:56,w:22,h:8,density:.35,gap:3.8,size:1.3},
-        {x:82,y:8,w:13,h:14,density:.5,gap:3,size:1.6}
+      corridors:[
+        {road:'market-square-n',sides:'both',interval:25,setback:6,depth:10,wMin:8,wMax:13,density:.95,back:.4,class:'core'},
+        {road:'market-square-s',sides:'both',interval:26,setback:6,depth:10,wMin:8,wMax:13,density:.93,back:.4,class:'core'},
+        {road:'high-street',sides:'both',interval:25,setback:6,depth:10,wMin:8,wMax:13,density:.94,back:.4,class:'core'},
+        {road:'bell-lane',sides:'both',interval:24,setback:5,depth:9,wMin:7,wMax:11,density:.96,back:.45,class:'core'},
+        {road:'fields-road',sides:'right',interval:34,setback:6,depth:10,wMin:8,wMax:12,density:.75,back:.35,class:'rural'},
+        {road:'coach-yard-rd',sides:'both',interval:31,setback:6,depth:10,wMin:8,wMax:12,density:.82,back:.3,class:'ring'},
+        {road:'grain-lane',sides:'both',interval:30,setback:4,depth:8,wMin:6,wMax:9,density:.8,back:.2,class:'core'},
+        {road:'kiosk-row',sides:'both',interval:30,setback:4,depth:8,wMin:6,wMax:9,density:.82,back:.25,class:'core'}
       ]
     },
     marec:{
-      motif:'county and grain town: offices row above the granaries, Low Road housing',
-      slots:{
-        civic:[{x:8,y:8,w:16,h:10},{x:28,y:8,w:15,h:10},{x:8,y:26,w:14,h:9},{x:47,y:26,w:13,h:9}],
-        bureau:[{x:47,y:8,w:13,h:9},{x:64,y:26,w:11,h:8}],
-        residence:[{x:66,y:8,w:14,h:9}],
-        clinic:[{x:26,y:26,w:13,h:9}],
-        transport:[{x:26,y:46,w:15,h:9}],
-        public:[{x:47,y:46,w:11,h:8}]
-      },
-      default:[{x:8,y:46,w:13,h:8},{x:66,y:46,w:11,h:8}],
+      motif:'county and grain town: offices row above the granaries and depot, Low Road housing below',
+      bounds:{w:1450,h:1120},
+      zoomMax:16,
       districts:[
-        {name:'County Offices',x:3,y:4,w:60,h:22},
-        {name:'Grain Market',x:3,y:22,w:60,h:22},
-        {name:'Low Road',x:3,y:40,w:60,h:38}
-      ],
-      landUse:[
-        {kind:'institutional',d:'M4 4 H60 V20 H4 Z'},
-        {kind:'yard',texture:'hatch',d:'M4 42 H22 V52 H4 Z'},
-        {kind:'farmland',texture:'furrow',d:'M64 42 H97 V78 H64 Z'},
-        {kind:'urban',d:'M24 58 H60 V76 H24 Z'}
-      ],
-      waterways:[],
-      railways:[
-        {d:'M 2 56 C 16 55 22 52 26 48'},
-        {d:'M 26 48 C 40 46 60 46 98 47'},
-        {d:'M 41 46 V 52',spur:true}
+        {name:'County Offices',pts:[[120,120],[1000,100],[1040,420],[160,440]]},
+        {name:'Grain Market',pts:[[120,440],[1000,420],[1040,720],[160,740]]},
+        {name:'Low Road',pts:[[120,740],[1000,720],[1040,1060],[160,1080]]}
       ],
       roads:[
-        'M 2 22 H 98',
-        'M 2 40 H 98',
-        'M 24 2 V 78',
-        'M 62 2 V 78',
-        'M 84 2 V 78'
+        {id:'county-row',name:'County Row',cls:'primary',pts:[[160,260],[600,240],[1000,260]]},
+        {id:'grain-street',name:'Grain Street',cls:'primary',pts:[[160,560],[600,540],[1000,560]]},
+        {id:'low-road',name:'Low Road',cls:'secondary',pts:[[160,880],[600,860],[1000,880]]},
+        {id:'cross-lane',name:'Cross Lane',cls:'secondary',pts:[[420,140],[450,420],[470,700],[490,1040]]},
+        {id:'depot-lane',name:'Depot Lane',cls:'lane',pts:[[560,700],[590,840]]},
+        {id:'east-lane',name:'East Lane',cls:'lane',pts:[[800,280],[820,680]]}
       ],
-      minorRoads:[
-        'M 8 14 H 21','M 30 14 H 42','M 48 14 H 60','M 66 14 H 82',
-        'M 8 31 H 21','M 28 31 H 42','M 48 31 H 58','M 66 31 H 74',
-        'M 8 48 H 20','M 44 48 H 56','M 66 48 H 80',
-        'M 28 64 H 58','M 8 64 H 20'
+      railways:[
+        {pts:[[0,760],[400,745],[900,735],[1450,725]]},
+        {pts:[[590,745],[620,690]],spur:true}
       ],
-      bridges:[],
-      relief:[],
-      fabric:[
-        {x:25,y:59,w:33,h:15,density:.8,gap:2.8,size:1.6},
-        {x:5,y:43,w:16,h:8,density:.7,gap:3,size:1.8},
-        {x:44,y:56,w:14,h:8,density:.6,gap:3.2,size:1.6},
-        {x:66,y:44,w:28,h:10,density:.35,gap:4,size:1.5}
+      waterways:[],
+      landUse:[
+        {kind:'institutional',pts:[[140,140],[980,120],[1000,400],[160,420]]},
+        {kind:'yard',texture:'hatch',pts:[[640,560],[980,550],[990,700],[650,710]]},
+        {kind:'urban',pts:[[160,780],[560,765],[570,1040],[180,1050]]},
+        {kind:'farmland',texture:'furrow',pts:[[1060,140],[1420,130],[1430,1040],[1080,1050]]}
+      ],
+      landmarks:[
+        {ref:'b1',kind:'civic',x:300,y:300,w:56,h:28,district:'County Offices'},
+        {ref:'b2',kind:'civic',x:660,y:500,w:52,h:28,district:'Grain Market'},
+        {ref:'b3',kind:'residence',x:300,y:940,w:36,h:20,district:'Low Road'},
+        {ref:'b4',kind:'clinic',x:520,y:600,w:32,h:20,district:'Grain Market'},
+        {ref:'b5',kind:'school',x:520,y:310,w:36,h:21,district:'County Offices'},
+        {ref:'b6',kind:'bureau',x:800,y:320,w:38,h:22,district:'County Offices'},
+        {ref:'b7',kind:'civic',x:650,y:315,w:32,h:22,district:'County Offices'},
+        {ref:'b8',kind:'transport',x:700,y:640,w:52,h:24,a:.02,district:'Grain Market'},
+        {ref:'b9',kind:'bureau',x:180,y:330,w:36,h:21,district:'County Offices'},
+        {ref:'b10',kind:'public',x:760,y:930,w:26,h:18,district:'Low Road'}
+      ],
+      corridors:[
+        {road:'county-row',sides:'both',interval:28,setback:7,depth:10,wMin:9,wMax:14,density:.9,back:.3,class:'expansion'},
+        {road:'grain-street',sides:'both',interval:27,setback:6,depth:10,wMin:9,wMax:14,density:.91,back:.35,class:'expansion'},
+        {road:'low-road',sides:'both',interval:27,setback:6,depth:9,wMin:8,wMax:12,density:.92,back:.5,class:'ring'},
+        {road:'cross-lane',sides:'both',interval:29,setback:5,depth:9,wMin:7,wMax:11,density:.87,back:.3,class:'core'},
+        {road:'depot-lane',sides:'right',interval:32,setback:4,depth:8,wMin:6,wMax:9,density:.8,back:.15,class:'industrial'},
+        {road:'east-lane',sides:'both',interval:33,setback:5,depth:9,wMin:7,wMax:10,density:.78,back:.25,class:'expansion'}
+      ],
+      yards:[
+        {x:700,y:590,w:46,h:14,rows:2,cols:3,gap:10,class:'industrial',angle:.01}
       ]
     },
     kamenor:{
-      motif:'river-crossing town: the broad river, its bridge, quays and converging ways',
-      slots:{
-        civic:[{x:34,y:42,w:17,h:11},{x:26,y:8,w:13,h:9}],
-        residence:[{x:60,y:44,w:13,h:9},{x:26,y:56,w:14,h:9}],
-        clinic:[{x:60,y:8,w:12,h:9}],
-        school:[{x:8,y:8,w:13,h:9}],
-        workplace:[{x:44,y:12,w:14,h:10}],
-        worship:[{x:8,y:44,w:12,h:9}],
-        bureau:[{x:64,y:19,w:10,h:7}],
-        public:[{x:62,y:60,w:11,h:8}]
-      },
-      default:[{x:8,y:64,w:12,h:8},{x:80,y:52,w:10,h:8}],
+      motif:'river town: every street answers the broad river and its bridge',
+      bounds:{w:1500,h:1150},
+      zoomMax:16,
       districts:[
-        {name:'Bridge Ward',x:28,y:24,w:34,h:32},
-        {name:'Mill Bank',x:20,y:4,w:44,h:22},
-        {name:'Old Quays',x:3,y:40,w:26,h:38}
+        {name:'Bridge Ward',pts:[[520,440],[1060,420],[1120,820],[560,840]]},
+        {name:'Mill Bank',pts:[[300,100],[1180,80],[1220,420],[340,440]]},
+        {name:'Old Quays',pts:[[120,560],[500,540],[540,1060],[160,1080]]}
       ],
-      landUse:[
-        {kind:'water',d:'M0 27 C 18 25 40 29 58 27 S 88 25 100 28 L100 41 C 82 43 60 39 42 41 S 12 43 0 40 Z'},
-        {kind:'meadow',d:'M3 56 H22 V78 H3 Z'},
-        {kind:'urban',d:'M30 55 H56 V66 H30 Z'}
-      ],
-      waterways:[
-        {kind:'river',d:'M 0 33 C 18 31 40 35 58 33 S 88 31 100 34'},
-        {kind:'river',d:'M 0 35 C 18 33 40 37 58 35 S 88 33 100 36'},
-        {kind:'stream',d:'M 51 22 C 51 26 50 29 50 32'},
-        {kind:'quay',d:'M 4 41.5 H 30'},
-        {kind:'quay',d:'M 52 40.5 H 96'},
-        {kind:'quay',d:'M 8 26.5 H 30'}
+      roads:[
+        {id:'bridge-north',name:'Bridge Approach North',cls:'primary',pts:[[720,80],[740,300],[750,440]]},
+        {id:'bridge-south',name:'Bridge Approach South',cls:'primary',pts:[[760,660],[770,880],[780,1120]]},
+        {id:'quay-north',name:'North Quay',cls:'secondary',pts:[[180,400],[520,395],[900,385],[1300,390]]},
+        {id:'quay-south',name:'Customs Quay',cls:'secondary',pts:[[200,700],[520,705],[900,695],[1340,700]]},
+        {id:'mill-bank',name:'Mill Bank Road',cls:'secondary',pts:[[350,180],[540,220],[760,240]]},
+        {id:'ferry-lane',name:'Ferry Lane',cls:'lane',pts:[[260,700],[280,880],[300,1040]]},
+        {id:'ward-cross',name:'Ward Cross',cls:'secondary',pts:[[540,780],[900,770],[1180,780]]},
+        {id:'school-lane',name:'School Lane',cls:'lane',pts:[[420,140],[440,340]]},
+        {id:'east-bank',name:'East Bank Road',cls:'secondary',pts:[[1000,100],[1030,340],[1040,420]]}
       ],
       railways:[],
-      roads:[
-        'M 42 2 V 24',
-        'M 42 44 C 41 56 41 68 42 80',
-        'M 2 47 C 14 46 26 45 40 44',
-        'M 42 46 C 56 45 72 45 98 46',
-        'M 2 14 C 14 13 22 12 32 12',
-        'M 46 12 C 60 11 76 11 98 12',
-        'M 12 2 C 13 10 13 18 12 26'
+      waterways:[
+        {kind:'water',pts:[[0,470],[300,460],[600,472],[900,458],[1200,470],[1500,460],[1500,620],[1200,630],[900,618],[600,632],[300,620],[0,630]]},
+        {kind:'river',pts:[[0,505],[300,498],[600,508],[900,495],[1200,505],[1500,498]]},
+        {kind:'river',pts:[[0,585],[300,578],[600,588],[900,575],[1200,585],[1500,578]]},
+        {kind:'stream',pts:[[830,240],[838,320],[842,455]]},
+        {kind:'quay',pts:[[200,688],[500,692],[900,683],[1330,688]]},
+        {kind:'quay',pts:[[190,412],[500,408],[880,398],[1290,402]]},
+        {kind:'pier',pts:[[240,632],[232,700]]}
       ],
-      minorRoads:[
-        'M 8 14 H 20','M 60 14 H 70',
-        'M 8 49 H 19','M 62 49 H 72',
-        'M 28 61 H 38','M 62 65 H 72',
-        'M 66 22 H 73'
+      landUse:[
+        {kind:'meadow',pts:[[140,740],[420,730],[430,1040],[160,1050]]},
+        {kind:'urban',pts:[[560,720],[1060,700],[1080,960],[580,980]]},
+        {kind:'urban',pts:[[340,140],[1000,120],[1030,360],[370,380]]}
       ],
       bridges:[
-        {x:37,y:26,w:9,h:15}
+        {x:700,y:455,w:34,h:170}
       ],
-      relief:[],
-      fabric:[
-        {x:30,y:56,w:24,h:8,density:.6,gap:2.8,size:1.4},
-        {x:4,y:58,w:18,h:16,density:.4,gap:3.6,size:1.3},
-        {x:62,y:44,w:26,h:8,density:.5,gap:3.2,size:1.4},
-        {x:6,y:6,w:16,h:8,density:.4,gap:3.4,size:1.3}
+      landmarks:[
+        {ref:'b1',kind:'civic',x:800,y:720,w:54,h:28,district:'Bridge Ward'},
+        {ref:'b2',kind:'residence',x:560,y:280,w:34,h:20,district:'Mill Bank'},
+        {ref:'b3',kind:'residence',x:280,y:800,w:38,h:22,a:.06,district:'Old Quays'},
+        {ref:'b4',kind:'clinic',x:1060,y:280,w:32,h:20,district:'Mill Bank'},
+        {ref:'b5',kind:'school',x:460,y:210,w:34,h:21,district:'Mill Bank'},
+        {ref:'b6',kind:'workplace',x:900,y:180,w:52,h:26,district:'Mill Bank'},
+        {ref:'b7',kind:'civic',x:340,y:740,w:32,h:19,district:'Old Quays'},
+        {ref:'b8',kind:'worship',x:420,y:900,w:28,h:25,district:'Old Quays'},
+        {ref:'b9',kind:'bureau',x:640,y:740,w:28,h:17,district:'Bridge Ward'},
+        {ref:'b10',kind:'public',x:955,y:755,w:26,h:18,district:'Bridge Ward'}
+      ],
+      corridors:[
+        {road:'bridge-north',sides:'both',interval:27,setback:6,depth:10,wMin:8,wMax:13,density:.92,back:.35,class:'core'},
+        {road:'bridge-south',sides:'both',interval:27,setback:6,depth:10,wMin:8,wMax:13,density:.92,back:.35,class:'core'},
+        {road:'quay-north',sides:'both',interval:28,setback:6,depth:10,wMin:9,wMax:14,density:.9,back:.3,class:'expansion'},
+        {road:'quay-south',sides:'both',interval:28,setback:6,depth:10,wMin:9,wMax:14,density:.9,back:.3,class:'expansion'},
+        {road:'mill-bank',sides:'both',interval:29,setback:6,depth:10,wMin:9,wMax:13,density:.89,back:.3,class:'expansion'},
+        {road:'ward-cross',sides:'both',interval:28,setback:6,depth:9,wMin:8,wMax:12,density:.9,back:.35,class:'core'},
+        {road:'ferry-lane',sides:'left',interval:33,setback:4,depth:8,wMin:6,wMax:9,density:.78,back:.2,class:'rural'},
+        {road:'school-lane',sides:'both',interval:32,setback:4,depth:8,wMin:6,wMax:9,density:.8,back:.2,class:'core'},
+        {road:'east-bank',sides:'both',interval:31,setback:5,depth:9,wMin:7,wMax:11,density:.84,back:.25,class:'expansion'}
+      ]
+    },
+    sundervik:{
+      motif:'fishing town: harbor steps cut into the northern sea wall, net yards ashore, signal hill above',
+      bounds:{w:1400,h:1100},
+      zoomMax:16,
+      districts:[
+        {name:'Harbor Steps',pts:[[80,140],[620,120],[660,420],[120,440]]},
+        {name:'Netmakers\u2019 Row',pts:[[200,460],[860,440],[900,760],[240,780]]},
+        {name:'Signal Hill',pts:[[880,140],[1320,160],[1300,720],[920,700],[900,420]]}
+      ],
+      roads:[
+        {id:'shore-street',name:'Shore Street',cls:'primary',pts:[[100,400],[500,385],[900,375],[1320,380]]},
+        {id:'harbor-steps',name:'Harbor Steps',cls:'secondary',pts:[[240,140],[260,240],[280,330]]},
+        {id:'net-row',name:'Netmakers\u2019 Row',cls:'secondary',pts:[[280,520],[600,505],[880,510]]},
+        {id:'hill-road',name:'Signal Hill Road',cls:'secondary',pts:[[980,180],[1020,420],[1000,660]]},
+        {id:'inland-track',name:'Inland Track',cls:'lane',pts:[[140,700],[500,690],[860,700],[1240,715]]},
+        {id:'salt-lane',name:'Salt Lane',cls:'lane',pts:[[380,240],[400,380]]},
+        {id:'chapel-lane',name:'Chapel Lane',cls:'lane',pts:[[320,560],[340,690]]}
+      ],
+      railways:[],
+      waterways:[
+        {kind:'water',pts:[[0,0],[1400,0],[1400,110],[1000,120],[600,132],[250,140],[0,135]]},
+        {kind:'coast',pts:[[0,138],[250,142],[600,134],[1000,122],[1400,112]]},
+        {kind:'quay',pts:[[60,146],[300,152],[560,142],[860,130]]},
+        {kind:'steps',pts:[[250,148],[262,176],[276,204],[290,232]]},
+        {kind:'pier',pts:[[430,136],[438,196]]}
+      ],
+      landUse:[
+        {kind:'yard',texture:'hatch',pts:[[300,430],[540,420],[550,500],[310,510]]},
+        {kind:'meadow',pts:[[940,440],[1290,430],[1280,640],[960,650]]},
+        {kind:'urban',pts:[[300,560],[560,550],[570,690],[320,700]]}
+      ],
+      relief:[
+        'M 940 660 C 990 600 1060 560 1130 555 C 1210 550 1270 590 1290 640',
+        'M 980 630 C 1020 585 1080 555 1140 552 C 1200 550 1250 580 1265 620'
+      ],
+      landmarks:[
+        {ref:'b1',kind:'residence',x:330,y:300,w:34,h:20,district:'Harbor Steps'},
+        {ref:'b2',kind:'transport',x:400,y:460,w:48,h:22,district:'Netmakers\u2019 Row'},
+        {ref:'b3',kind:'transport',x:1060,y:300,w:44,h:22,a:.05,district:'Signal Hill'},
+        {ref:'b4',kind:'clinic',x:640,y:560,w:30,h:19,district:'Netmakers\u2019 Row'},
+        {ref:'b5',kind:'school',x:560,y:620,w:32,h:20,district:'Netmakers\u2019 Row'},
+        {ref:'b6',kind:'market',x:180,y:300,w:32,h:20,district:'Harbor Steps'},
+        {ref:'b7',kind:'civic',x:1180,y:480,w:34,h:21,district:'Signal Hill'},
+        {ref:'b8',kind:'worship',x:420,y:640,w:26,h:23,district:'Netmakers\u2019 Row'},
+        {ref:'b9',kind:'bureau',x:470,y:300,w:26,h:16,district:'Harbor Steps'},
+        {ref:'b10',kind:'public',x:1060,y:600,w:26,h:18,district:'Signal Hill'}
+      ],
+      corridors:[
+        {road:'shore-street',sides:'both',interval:28,setback:6,depth:10,wMin:8,wMax:13,density:.9,back:.3,class:'expansion'},
+        {road:'harbor-steps',sides:'right',interval:30,setback:5,depth:9,wMin:7,wMax:11,density:.85,back:.25,class:'core'},
+        {road:'net-row',sides:'both',interval:27,setback:6,depth:9,wMin:8,wMax:12,density:.92,back:.45,class:'ring'},
+        {road:'hill-road',sides:'both',interval:31,setback:6,depth:10,wMin:8,wMax:12,density:.84,back:.25,class:'expansion'},
+        {road:'inland-track',sides:'both',interval:36,setback:6,depth:9,wMin:7,wMax:11,density:.62,back:.2,class:'rural'},
+        {road:'salt-lane',sides:'both',interval:32,setback:4,depth:8,wMin:6,wMax:9,density:.78,back:.2,class:'core'},
+        {road:'chapel-lane',sides:'left',interval:33,setback:4,depth:8,wMin:6,wMax:8,density:.72,back:.15,class:'ring'}
+      ],
+      yards:[
+        {x:330,y:440,w:36,h:12,rows:2,cols:3,gap:9,class:'industrial',angle:.01}
+      ]
+    },
+    krasnava:{
+      motif:'linear agricultural village: long houses facing the road, narrow plots and barns behind, green at the heart',
+      bounds:{w:950,h:750},
+      zoomMax:13,
+      districts:[
+        {name:'Village Green',pts:[[300,240],[640,225],[660,430],[320,450]]},
+        {name:'North Fields',pts:[[60,40],[890,30],[900,220],[80,235]]},
+        {name:'Mill Road',pts:[[240,450],[680,435],[700,700],[260,715]]}
+      ],
+      roads:[
+        {id:'main-road',name:'Village Main Road',cls:'primary',pts:[[50,330],[300,322],[650,315],[900,308]]},
+        {id:'green-cross',name:'Green Crossing',cls:'secondary',pts:[[470,60],[478,240],[485,470],[492,700]]},
+        {id:'mill-road',name:'Mill Road',cls:'secondary',pts:[[300,530],[470,522],[660,515]]},
+        {id:'field-lane',name:'Field Lane',cls:'lane',pts:[[130,120],[145,300],[155,470]]},
+        {id:'orchard-lane',name:'Orchard Lane',cls:'lane',pts:[[700,120],[712,300],[720,460]]}
+      ],
+      railways:[],
+      waterways:[
+        {kind:'stream',pts:[[0,640],[200,632],[420,645],[650,630],[950,638]]}
+      ],
+      landUse:[
+        {kind:'farmland',texture:'furrow',pts:[[40,40],[440,32],[450,215],[60,228]]},
+        {kind:'farmland',texture:'furrow',pts:[[520,36],[910,28],[920,210],[530,218]]},
+        {kind:'farmland',texture:'furrow',pts:[[40,470],[240,462],[250,720],[60,730]]},
+        {kind:'farmland',texture:'furrow',pts:[[540,478],[930,468],[940,720],[560,728]]},
+        {kind:'green',d:null,pts:[[330,300],[620,290],[630,410],[340,420]]},
+        {kind:'orchard',texture:'orchard',pts:[[540,530],[660,525],[668,610],[548,616]]}
+      ],
+      landmarks:[
+        {ref:'b1',kind:'civic',x:400,y:300,w:34,h:20,district:'Village Green'},
+        {ref:'b2',kind:'residence',x:170,y:130,w:30,h:18,a:.04,district:'North Fields'},
+        {ref:'b3',kind:'residence',x:560,y:560,w:28,h:17,district:'Mill Road'},
+        {ref:'b4',kind:'clinic',x:560,y:340,w:26,h:17,district:'Village Green'},
+        {ref:'b5',kind:'school',x:340,y:390,w:30,h:18,district:'Village Green'},
+        {ref:'b6',kind:'market',x:620,y:390,w:28,h:18,district:'Village Green'},
+        {ref:'b7',kind:'workplace',x:420,y:600,w:38,h:22,district:'Mill Road'},
+        {ref:'b8',kind:'worship',x:480,y:350,w:24,h:22,district:'Village Green'},
+        {ref:'b9',kind:'bureau',x:600,y:300,w:20,h:14,district:'Village Green'},
+        {ref:'b10',kind:'public',x:340,y:560,w:24,h:16,district:'Mill Road'}
+      ],
+      corridors:[
+        {road:'main-road',sides:'both',interval:34,setback:5,depth:10,wMin:9,wMax:14,density:.94,back:.6,class:'village'},
+        {road:'green-cross',sides:'both',interval:36,setback:5,depth:9,wMin:8,wMax:12,density:.85,back:.5,class:'village'},
+        {road:'mill-road',sides:'both',interval:37,setback:5,depth:9,wMin:8,wMax:12,density:.86,back:.5,class:'village'},
+        {road:'field-lane',sides:'right',interval:40,setback:4,depth:8,wMin:6,wMax:9,density:.7,back:.3,class:'village'},
+        {road:'orchard-lane',sides:'left',interval:42,setback:4,depth:8,wMin:6,wMax:9,density:.68,back:.3,class:'village'}
+      ]
+    },
+    brezin:{
+      motif:'forest village: clearings strung along the timber road under broad woodland and low hills',
+      bounds:{w:1000,h:800},
+      zoomMax:13,
+      districts:[
+        {name:'Lower Road',pts:[[60,420],[420,400],[460,720],[100,740]]},
+        {name:'Timber Yard',pts:[[300,180],[700,160],[740,400],[340,420]]},
+        {name:'Hill Houses',pts:[[620,420],[940,400],[960,740],[640,760]]}
+      ],
+      roads:[
+        {id:'timber-road',name:'Timber Road',cls:'primary',pts:[[40,600],[260,520],[520,420],[780,330],[970,270]]},
+        {id:'yard-road',name:'Yard Road',cls:'secondary',pts:[[380,240],[420,360],[450,470]]},
+        {id:'hill-lane',name:'Hill Lane',cls:'lane',pts:[[680,430],[720,560],[750,700]]},
+        {id:'church-path',name:'Church Path',cls:'lane',pts:[[180,470],[200,590]]}
+      ],
+      railways:[],
+      waterways:[],
+      landUse:[
+        {kind:'forest',texture:'trees',pts:[[30,40],[340,30],[360,220],[60,240]]},
+        {kind:'forest',texture:'trees',pts:[[480,30],[780,20],[800,180],[500,200]]},
+        {kind:'forest',texture:'trees',pts:[[820,60],[970,55],[975,260],[840,270]]},
+        {kind:'forest',texture:'trees',pts:[[30,700],[240,690],[250,780],[50,790]]},
+        {kind:'forest',texture:'trees',pts:[[470,700],[640,690],[650,780],[480,790]]},
+        {kind:'forest',texture:'trees',pts:[[800,560],[970,550],[975,780],[815,790]]},
+        {kind:'meadow',pts:[[240,560],[420,545],[430,660],[255,670]]}
+      ],
+      relief:[
+        'M 640 760 C 700 700 780 660 850 660 C 910 660 950 690 962 730',
+        'M 676 726 C 724 678 792 650 848 650 C 898 650 934 674 944 706'
+      ],
+      landmarks:[
+        {ref:'b1',kind:'residence',x:150,y:530,w:30,h:18,district:'Lower Road'},
+        {ref:'b2',kind:'civic',x:470,y:290,w:38,h:22,district:'Timber Yard'},
+        {ref:'b3',kind:'residence',x:790,y:560,w:30,h:18,a:.08,district:'Hill Houses'},
+        {ref:'b4',kind:'clinic',x:250,y:620,w:28,h:18,district:'Lower Road'},
+        {ref:'b5',kind:'school',x:340,y:660,w:30,h:18,district:'Lower Road'},
+        {ref:'b6',kind:'workplace',x:560,y:380,w:52,h:26,district:'Timber Yard'},
+        {ref:'b7',kind:'transport',x:800,y:480,w:34,h:18,a:.1,district:'Hill Houses'},
+        {ref:'b8',kind:'market',x:590,y:340,w:28,h:17,district:'Timber Yard'},
+        {ref:'b9',kind:'bureau',x:200,y:680,w:22,h:14,district:'Lower Road'},
+        {ref:'b10',kind:'public',x:720,y:640,w:24,h:16,district:'Hill Houses'}
+      ],
+      corridors:[
+        {road:'timber-road',sides:'both',interval:38,setback:5,depth:9,wMin:8,wMax:12,density:.8,back:.4,class:'village'},
+        {road:'yard-road',sides:'both',interval:36,setback:5,depth:9,wMin:8,wMax:11,density:.8,back:.3,class:'village'},
+        {road:'hill-lane',sides:'both',interval:40,setback:4,depth:8,wMin:6,wMax:9,density:.7,back:.3,class:'village'},
+        {road:'church-path',sides:'left',interval:42,setback:4,depth:7,wMin:5,wMax:8,density:.65,back:.2,class:'village'}
       ]
     },
     svetlin:{
-      motif:'monastery village: walled close and clinic road, gardens and farms around',
-      slots:{
-        worship:[{x:34,y:8,w:20,h:14},{x:8,y:8,w:13,h:9}],
-        clinic:[{x:8,y:26,w:12,h:9},{x:62,y:26,w:12,h:9}],
-        residence:[{x:62,y:8,w:13,h:9},{x:34,y:34,w:12,h:9}],
-        school:[{x:8,y:44,w:13,h:9}],
-        market:[{x:62,y:44,w:12,h:9}],
-        bureau:[{x:26,y:26,w:11,h:8}],
-        public:[{x:34,y:56,w:12,h:9}]
-      },
-      default:[{x:62,y:60,w:12,h:8},{x:8,y:60,w:12,h:8}],
+      motif:'monastery village: walled close and clinic road at the heart, gardens and fields around',
+      bounds:{w:900,h:720},
+      zoomMax:13,
       districts:[
-        {name:'Monastery Close',x:28,y:2,w:32,h:24},
-        {name:'Clinic Road',x:3,y:22,w:94,h:16},
-        {name:'East Gardens',x:56,y:38,w:41,h:40}
+        {name:'Monastery Close',pts:[[220,60],[600,50],[620,300],[240,320]]},
+        {name:'Clinic Road',pts:[[60,300],[840,280],[860,440],[80,460]]},
+        {name:'East Gardens',pts:[[480,460],[860,440],[880,690],[500,700]]}
       ],
-      landUse:[
-        {kind:'institutional',texture:'trees',d:'M30 3 H58 V25 H30 Z'},
-        {kind:'gardens',texture:'trees',d:'M32 26 H56 V34 H32 Z'},
-        {kind:'farmland',texture:'furrow',d:'M58 40 H97 V60 H58 Z'},
-        {kind:'farmland',texture:'furrow',d:'M58 62 H97 V79 H58 Z'},
-        {kind:'meadow',d:'M3 56 H30 V79 H3 Z'},
-        {kind:'orchard',texture:'orchard',d:'M34 66 H54 V78 H34 Z'}
-      ],
-      waterways:[],
-      railways:[],
       roads:[
-        'M 2 30 H 98',
-        'M 22 2 C 23 16 23 30 22 44 C 21 56 21 68 22 80',
-        'M 58 2 C 59 14 59 24 58 34 C 57 48 57 64 58 80',
-        'M 22 52 C 32 50 44 50 56 52'
+        {id:'clinic-road',name:'Clinic Road',cls:'primary',pts:[[40,380],[300,370],[600,360],[860,352]]},
+        {id:'close-lane',name:'Close Lane',cls:'secondary',pts:[[260,120],[280,240],[290,360]]},
+        {id:'pilgrim-lane',name:'Pilgrim Lane',cls:'lane',pts:[[420,120],[430,240],[438,360]]},
+        {id:'gardens-lane',name:'Gardens Lane',cls:'lane',pts:[[540,440],[560,580],[575,700]]},
+        {id:'shrine-path',name:'Shrine Path',cls:'lane',pts:[[340,300],[355,380]]}
       ],
-      minorRoads:[
-        'M 8 13 H 21','M 62 13 H 74',
-        'M 26 34 H 34','M 46 34 H 58',
-        'M 8 49 H 21','M 62 49 H 74',
-        'M 26 62 H 34','M 46 62 H 58'
+      railways:[],
+      waterways:[],
+      landUse:[
+        {kind:'institutional',texture:'trees',pts:[[240,70],[590,60],[605,280],[255,295]]},
+        {kind:'gardens',texture:'trees',pts:[[320,300],[560,290],[570,360],[330,368]]},
+        {kind:'farmland',texture:'furrow',pts:[[490,470],[870,455],[880,690],[510,700]]},
+        {kind:'meadow',pts:[[60,470],[300,460],[310,690],[80,700]]},
+        {kind:'orchard',texture:'orchard',pts:[[330,470],[460,465],[465,570],[340,578]]}
       ],
-      bridges:[],
-      relief:[],
-      fabric:[
-        {x:5,y:6,w:14,h:16,density:.35,gap:3.8,size:1.2},
-        {x:62,y:6,w:12,h:6,density:.35,gap:3.8,size:1.2},
-        {x:60,y:64,w:32,h:12,density:.3,gap:4.2,size:1.4},
-        {x:6,y:64,w:14,h:12,density:.25,gap:4.2,size:1.2}
+      landmarks:[
+        {ref:'b1',kind:'worship',x:340,y:120,w:64,h:34,district:'Monastery Close'},
+        {ref:'b2',kind:'clinic',x:180,y:390,w:34,h:20,district:'Clinic Road'},
+        {ref:'b3',kind:'residence',x:660,y:520,w:32,h:19,a:.05,district:'East Gardens'},
+        {ref:'b4',kind:'clinic',x:620,y:390,w:32,h:20,district:'Clinic Road'},
+        {ref:'b5',kind:'school',x:300,y:420,w:30,h:18,district:'Clinic Road'},
+        {ref:'b6',kind:'market',x:520,y:200,w:26,h:17,district:'Monastery Close'},
+        {ref:'b7',kind:'residence',x:470,y:300,w:28,h:17,district:'Monastery Close'},
+        {ref:'b8',kind:'bureau',x:400,y:395,w:28,h:16,district:'Clinic Road'},
+        {ref:'b9',kind:'worship',x:250,y:250,w:22,h:20,district:'Monastery Close'},
+        {ref:'b10',kind:'public',x:640,y:620,w:24,h:16,district:'East Gardens'}
+      ],
+      corridors:[
+        {road:'clinic-road',sides:'both',interval:35,setback:5,depth:9,wMin:8,wMax:12,density:.85,back:.35,class:'village'},
+        {road:'close-lane',sides:'right',interval:37,setback:4,depth:8,wMin:6,wMax:9,density:.72,back:.25,class:'village'},
+        {road:'pilgrim-lane',sides:'both',interval:38,setback:4,depth:8,wMin:6,wMax:9,density:.7,back:.25,class:'village'},
+        {road:'gardens-lane',sides:'left',interval:40,setback:4,depth:8,wMin:6,wMax:8,density:.6,back:.2,class:'village'},
+        {road:'shrine-path',sides:'right',interval:44,setback:4,depth:7,wMin:5,wMax:8,density:.6,back:0,class:'village'}
+      ]
+    },
+    oberhain:{
+      motif:'estate village: lawns and chapel lane strung along the old military road',
+      bounds:{w:900,h:720},
+      zoomMax:13,
+      districts:[
+        {name:'Upper Hain',pts:[[280,80],[640,60],[660,300],[320,320]]},
+        {name:'Chapel Lane',pts:[[60,60],[280,60],[340,430],[400,510],[350,565],[110,450]]},
+        {name:'South Yards',pts:[[340,340],[840,320],[860,660],[380,680]]}
+      ],
+      roads:[
+        {id:'military-road',name:'Military Road',cls:'primary',pts:[[0,660],[200,560],[420,430],[650,300],[900,190]]},
+        {id:'estate-drive',name:'Estate Drive',cls:'secondary',pts:[[420,120],[440,240],[455,380]]},
+        {id:'chapel-lane',name:'Chapel Lane',cls:'secondary',pts:[[150,120],[170,260],[185,420],[205,560]]},
+        {id:'yards-lane',name:'Yards Lane',cls:'lane',pts:[[600,380],[620,520],[640,660]]},
+        {id:'garden-wall',name:'Garden Wall Walk',cls:'lane',pts:[[300,300],[460,290],[620,300]]}
+      ],
+      railways:[],
+      waterways:[],
+      landUse:[
+        {kind:'estate',texture:'trees',pts:[[300,90],[640,70],[660,290],[330,310]]},
+        {kind:'estate',texture:'trees',pts:[[480,300],[660,290],[670,400],[490,410]]},
+        {kind:'yard',texture:'hatch',pts:[[680,340],[850,330],[860,470],[695,480]]},
+        {kind:'farmland',texture:'furrow',pts:[[380,500],[660,490],[670,680],[395,690]]}
+      ],
+      landmarks:[
+        {ref:'b1',kind:'residence',x:430,y:150,w:56,h:28,district:'Upper Hain'},
+        {ref:'b2',kind:'worship',x:190,y:180,w:28,h:24,district:'Chapel Lane'},
+        {ref:'b3',kind:'civic',x:700,y:380,w:34,h:20,district:'South Yards'},
+        {ref:'b4',kind:'clinic',x:560,y:430,w:30,h:19,district:'South Yards'},
+        {ref:'b5',kind:'school',x:480,y:520,w:32,h:19,district:'South Yards'},
+        {ref:'b6',kind:'market',x:720,y:500,w:30,h:18,district:'South Yards'},
+        {ref:'b7',kind:'worship',x:210,y:330,w:26,h:23,district:'Chapel Lane'},
+        {ref:'b8',kind:'transport',x:330,y:490,w:36,h:18,a:-.5,district:'Chapel Lane'},
+        {ref:'b9',kind:'bureau',x:640,y:560,w:24,h:15,district:'South Yards'},
+        {ref:'b10',kind:'public',x:540,y:250,w:24,h:16,district:'Upper Hain'}
+      ],
+      corridors:[
+        {road:'military-road',sides:'both',interval:42,setback:5,depth:9,wMin:8,wMax:12,density:.7,back:.3,class:'village'},
+        {road:'estate-drive',sides:'both',interval:44,setback:5,depth:9,wMin:7,wMax:11,density:.62,back:.2,class:'village'},
+        {road:'chapel-lane',sides:'both',interval:40,setback:4,depth:8,wMin:6,wMax:9,density:.72,back:.25,class:'village'},
+        {road:'yards-lane',sides:'both',interval:41,setback:4,depth:8,wMin:6,wMax:9,density:.68,back:.25,class:'village'},
+        {road:'garden-wall',sides:'left',interval:46,setback:4,depth:7,wMin:5,wMax:8,density:.55,back:0,class:'village'}
       ]
     }
   };
+
+
+
+  /* ======================= SETTLEMENT SCENE BUILDER ====================
+     Deterministic expansion of an authored plan into a full scene: landmark
+     footprints bound to canonical ids, generated street frontage and yards,
+     cached so repeated renders never regenerate.
+     --------------------------------------------------------------------- */
+  const POI_PRIORITY={transport:9,bureau:8,civic:8,clinic:7,market:6,school:5,worship:4,workplace:3,residence:2,public:1};
+  const POI_TIER_FLOOR=[6,3,1];
+  function poiPriority(type){ return POI_PRIORITY[type]||1; }
+  const sceneCache=new Map();
   function settlementPlan(id){ return Object.prototype.hasOwnProperty.call(SETTLEMENT_PLANS,id)?SETTLEMENT_PLANS[id]:null; }
-  function legacyRect(i){
-    return {x:12+(i%5)*18+(Math.floor(i/5)%2)*4,y:15+Math.floor(i/5)*31,w:10+(i%3)*2,h:8+(i%2)*2};
-  }
-  function placeBuildings(buildings,plan){
-    const list=Array.isArray(buildings)?buildings:[];
-    if(!plan){
-      return list.map((b,i)=>Object.assign({},b,legacyRect(i)));
-    }
-    const queues={};
-    TYPE_ORDER.forEach(type=>{ queues[type]=(plan.slots&&plan.slots[type]?plan.slots[type]:[]).slice(); });
-    const fallback=(plan.default||[]).slice();
-    return list.map((b,i)=>{
-      const queue=queues[b.type];
-      const rect=(queue&&queue.length)?queue.shift():(fallback.length?fallback.shift():legacyRect(i));
-      return Object.assign({},b,rect);
+  function buildScene(id){
+    const p=SETTLEMENT_PLANS[id];
+    const rnd=seeded(hashSeed('scene:'+id));
+    const visuals=[];
+    const canonical={};
+    const exclusions=[];
+    (p.landmarks||[]).forEach(lm=>{
+      const poly=rectPoly(lm.x,lm.y,lm.w,lm.h,num(lm.a,0));
+      const v={id:id+'-'+lm.ref,poly,kind:lm.kind,minor:false,canonicalBuildingId:id+'-'+lm.ref,
+        district:lm.district,cx:lm.x,cy:lm.y,w:lm.w,h:lm.h,a:num(lm.a,0),fabricClass:'landmark'};
+      visuals.push(v);
+      canonical[v.canonicalBuildingId]=v;
+      exclusions.push(rectPoly(lm.x,lm.y,lm.w+10,lm.h+10,num(lm.a,0)));
     });
+    const roadById={};
+    (p.roads||[]).forEach(r=>{ roadById[r.id]=r; });
+    (p.corridors||[]).forEach(c=>{
+      const road=roadById[c.road];
+      if(!road) return;
+      segmentsOf(road.pts).forEach(seg=>generateCorridor(seg,c,rnd,visuals));
+    });
+    (p.yards||[]).forEach(y=>generateShedGrid(y,rnd,visuals));
+    function blocked(cx,cy){
+      for(let i=0;i<exclusions.length;i++) if(pointInPolygon(cx,cy,exclusions[i])) return true;
+      return false;
+    }
+    let fabricIndex=0;
+    const kept=[];
+    visuals.forEach(v=>{
+      if(v.canonicalBuildingId){ kept.push(v); return; }
+      const c=polyCentroid(v.poly);
+      if(c.x<0||c.y<0||c.x>p.bounds.w||c.y>p.bounds.h) return;
+      if(blocked(c.x,c.y)) return;
+      fabricIndex++;
+      v.id=id+'-vb-'+String(fabricIndex).padStart(5,'0');
+      v.cx=c.x; v.cy=c.y;
+      kept.push(v);
+    });
+    const streetLabels=[];
+    (p.roads||[]).forEach(r=>{
+      if(!r.name||r.cls==='lane') return;
+      const segs=segmentsOf(r.pts);
+      if(!segs.length) return;
+      const longest=segs.reduce((m,s)=>s.len>m.len?s:m,segs[0]);
+      streetLabels.push({id:'st-'+r.id,text:r.name,cls:r.cls,
+        x:(longest.ax+longest.bx)/2,y:(longest.ay+longest.by)/2,angle:longest.angle});
+    });
+    return {
+      id,bounds:p.bounds,motif:p.motif,
+      districts:p.districts||[],roads:p.roads||[],waterways:p.waterways||[],railways:p.railways||[],
+      landUse:p.landUse||[],bridges:p.bridges||[],
+      visuals:kept,canonical,streetLabels
+    };
+  }
+  function settlementScene(id){
+    if(!sceneCache.has(id)) sceneCache.set(id,buildScene(id));
+    return sceneCache.get(id);
+  }
+  function settlementZoomConfig(id){
+    const p=settlementPlan(id);
+    return p?{min:1,max:num(p.zoomMax,14)}:{min:1,max:14};
+  }
+  function visualBuildingForCanonicalId(settlementId,canonicalBuildingId){
+    const scene=settlementScene(settlementId);
+    return scene.canonical[canonicalBuildingId]||null;
   }
 
-  /* ---- plan geometry builders (string output only) ---- */
-  function districtsMarkup(plan){
-    if(!plan||!plan.districts||!plan.districts.length) return '';
-    return '<g class="plan-districts" aria-hidden="true">'+plan.districts.map(d=>{
-      const lx=clamp(d.x+d.w/2,d.x+6,d.x+d.w-6), ly=clamp(d.y+d.h/2,d.y+5,d.y+d.h-3);
-      return '<rect class="plan-district-area" x="'+d.x+'" y="'+d.y+'" width="'+d.w+'" height="'+d.h+'" rx="1.4"></rect>'
-        +'<rect class="plan-district-boundary" x="'+d.x+'" y="'+d.y+'" width="'+d.w+'" height="'+d.h+'" rx="1.4"'+nsAttr()+'></rect>'
-        +'<text class="plan-district-label" x="'+lx.toFixed(1)+'" y="'+ly.toFixed(1)+'">'+d.name.toUpperCase()+'</text>';
+  /* ---- settlement geometry markup ---- */
+  const LANDUSE_FILL={urban:'#e3e0cd',farmland:'#eae6c4',meadow:'#e0e7c7',gardens:'#dbe4cf',estate:'#dde6d3',
+    industrial:'#ddd8ca',yard:'#ded9c9',institutional:'#e2ddce',orchard:'#e2e8c9',harbor:'#cfe0e4',
+    forest:'#cbdcc9',green:'#dfe8c2'};
+  function waterwaysMarkup(list){
+    return '<g class="plan-waterways" aria-hidden="true">'+list.map(w=>{
+      if(w.kind==='water'||w.kind==='basin') return '<path class="plan-water-area" d="'+polyPath(w.pts)+'"></path>';
+      const cls={river:'plan-river-line',stream:'plan-stream-line',coast:'plan-coast-line',
+        quay:'plan-quay-line',pier:'plan-quay-line',steps:'plan-steps-line'}[w.kind]||'plan-river-line';
+      return '<path class="'+cls+'" d="'+linePath(w.pts)+'"'+nsAttr()+'></path>';
     }).join('')+'</g>';
   }
-  const LANDUSE_FILL={urban:'#e3e0cd',farmland:'#eae6c4',meadow:'#e0e7c7',gardens:'#dbe4cf',estate:'#dde6d3',industrial:'#ddd8ca',yard:'#ded9c9',institutional:'#e2ddce',orchard:'#e2e8c9',harbor:'#cfe0e4',forest:'#cbdcc9'};
-  function landUseMarkup(plan){
-    if(!plan||!plan.landUse||!plan.landUse.length) return '';
-    return '<g class="plan-landuse" aria-hidden="true">'+plan.landUse.map(p=>{
-      const cls=LANDUSE_FILL[p.kind]?'lu-'+p.kind:'lu-meadow';
-      const tex=p.texture?'<path class="lu-texture lu-tex-'+p.texture+'" d="'+p.d+'"'+nsAttr()+'></path>':'';
-      return '<path class="'+cls+'" d="'+p.d+'"></path>'+tex;
-    }).join('')+'</g>';
-  }
-  const WATERWAY_CLASS={water:'plan-water-area',river:'plan-river-line',stream:'plan-stream-line',coast:'plan-coast-line',quay:'plan-quay-line'};
-  function waterwaysMarkup(plan){
-    if(!plan||!plan.waterways||!plan.waterways.length) return '';
-    return '<g class="plan-waterways" aria-hidden="true">'+plan.waterways.map(w=>{
-      const cls=WATERWAY_CLASS[w.kind]||'plan-river-line';
-      return '<path class="'+cls+'" d="'+w.d+'"'+(w.kind==='water'?'':nsAttr())+'></path>';
-    }).join('')+'</g>';
-  }
-  function railwaysMarkup(plan){
-    if(!plan||!plan.railways||!plan.railways.length) return '';
-    return '<g class="plan-railways" aria-hidden="true">'+plan.railways.map(r=>{
-      const d=typeof r==='string'?r:r.d, spur=!!(r&&r.spur);
+  function railwaysMarkup(list){
+    return '<g class="plan-railways" aria-hidden="true">'+list.map(r=>{
+      const d=linePath(r.pts), spur=!!r.spur;
       return '<path class="plan-rail-casing" d="'+d+'"'+nsAttr()+'></path>'
         +'<path class="plan-rail'+(spur?' spur':'')+'" d="'+d+'"'+nsAttr()+'></path>';
     }).join('')+'</g>';
   }
-  function planRoadsMarkup(plan){
-    if(!plan) return '';
-    return '<g class="plan-streets">'
-      +paths('plan-road',plan.roads||[])
-      +paths('plan-road minor',(plan.minorRoads||[]).filter(d=>typeof d==='string'))
-      +'</g>';
+  function roadsMarkup(list){
+    return '<g class="plan-streets">'+list.map(r=>{
+      const cls=r.cls==='primary'?'plan-road':r.cls==='lane'?'plan-road lane':'plan-road secondary';
+      return '<path class="'+cls+'" data-road-id="'+r.id+'" d="'+linePath(r.pts)+'"></path>';
+    }).join('')+'</g>';
   }
-  function bridgesMarkup(plan){
-    if(!plan||!plan.bridges||!plan.bridges.length) return '';
-    return '<g class="plan-bridges" aria-hidden="true">'+plan.bridges.map(b=>
-      '<rect class="plan-bridge" x="'+b.x+'" y="'+b.y+'" width="'+b.w+'" height="'+b.h+'" rx=".6"></rect>'
+  function districtsMarkup(list){
+    return '<g class="plan-districts" aria-hidden="true">'+list.map(d=>
+      '<path class="plan-district-area" d="'+polyPath(d.pts)+'"></path>'
+      +'<path class="plan-district-boundary" d="'+polyPath(d.pts)+'"'+nsAttr()+'></path>'
     ).join('')+'</g>';
   }
-  function reliefMarkup(plan){
-    if(!plan||!plan.relief||!plan.relief.length) return '';
+  function landUseMarkup(list){
+    return '<g class="plan-landuse" aria-hidden="true">'+list.map(p=>{
+      const cls='lu-'+(LANDUSE_FILL[p.kind]?p.kind:'meadow');
+      const tex=p.texture?'<path class="lu-texture lu-tex-'+p.texture+'" d="'+polyPath(p.pts)+'"></path>':'';
+      return '<path class="'+cls+'" d="'+polyPath(p.pts)+'"></path>'+tex;
+    }).join('')+'</g>';
+  }
+  function bridgesMarkup(list){
+    if(!list.length) return '';
+    return '<g class="plan-bridges" aria-hidden="true">'+list.map(b=>
+      '<rect class="plan-bridge" x="'+b.x+'" y="'+b.y+'" width="'+b.w+'" height="'+b.h+'" rx="2"></rect>').join('')+'</g>';
+  }
+  function fabricMarkup(visuals){
+    const groups={};
+    visuals.forEach(v=>{
+      if(v.canonicalBuildingId) return;
+      const key=v.fabricClass||v.kind||'urban';
+      groups[key]=(groups[key]||'')+polyPath(v.poly)+' ';
+    });
+    return '<g class="plan-fabric" aria-hidden="true">'+Object.keys(groups).map(k=>
+      '<path class="fabric-'+k+'" d="'+groups[k].trim()+'"></path>').join('')+'</g>';
+  }
+  function reliefMarkup(scene){
+    const plan=SETTLEMENT_PLANS[scene.id];
+    if(!plan.relief||!plan.relief.length) return '';
     return '<g class="plan-relief" aria-hidden="true">'+paths('plan-contour',plan.relief)+'</g>';
   }
-  function fabricBlocks(plan,id){
-    if(!plan||!plan.fabric||!plan.fabric.length) return [];
-    const rnd=seeded(hashSeed(id||'karsen'));
-    const out=[];
-    plan.fabric.forEach(zone=>{
-      const gap=num(zone.gap,3), size=num(zone.size,1.6), dens=clamp(num(zone.density,.5),0,1);
-      for(let y=zone.y;y<=zone.y+zone.h-size;y+=gap){
-        for(let x=zone.x;x<=zone.x+zone.w-size;x+=gap){
-          const keep=rnd();
-          const jw=size*(0.7+rnd()*0.6), jh=size*(0.65+rnd()*0.7);
-          const ox=rnd()*0.8, oy=rnd()*0.8;
-          if(keep<dens){
-            out.push({x:+(x+ox).toFixed(2),y:+(y+oy).toFixed(2),w:+jw.toFixed(2),h:+jh.toFixed(2)});
-          }
-        }
-      }
-    });
-    return out;
-  }
-  function fabricMarkup(plan,id){
-    const blocks=fabricBlocks(plan,id);
-    if(!blocks.length) return '';
-    return '<g class="plan-fabric" aria-hidden="true">'+blocks.map(b=>
-      '<rect x="'+b.x+'" y="'+b.y+'" width="'+b.w+'" height="'+b.h+'" rx=".25"></rect>'
-    ).join('')+'</g>';
-  }
-  function settlementBaseMarkup(plan,id){
-    if(!plan) return '';
-    return districtsMarkup(plan)
-      +landUseMarkup(plan)
-      +waterwaysMarkup(plan)
-      +reliefMarkup(plan)
-      +fabricMarkup(plan,id)
-      +railwaysMarkup(plan)
-      +planRoadsMarkup(plan)
-      +bridgesMarkup(plan);
+  function settlementBaseMarkup(scene){
+    return '<rect class="settlement-ground" x="0" y="0" width="'+scene.bounds.w+'" height="'+scene.bounds.h+'"></rect>'
+      +patternDefs()
+      +districtsMarkup(scene.districts)
+      +landUseMarkup(scene.landUse)
+      +waterwaysMarkup(scene.waterways)
+      +reliefMarkup(scene)
+      +railwaysMarkup(scene.railways)
+      +roadsMarkup(scene.roads)
+      +bridgesMarkup(scene.bridges)
+      +fabricMarkup(scene.visuals);
   }
 
-  /* ---- POI cartographic symbols (presentation only, pointer-events none) ---- */
+  /* ---- POI cartographic symbols (presentation only) ---- */
   function starPath(cx,cy,R,r){
     let p='';
     for(let i=0;i<10;i++){
@@ -1238,39 +1427,96 @@ const MapSystem=(function(){
     const k=num(s,1.1);
     let inner='';
     if(type==='transport'){
-      inner='<circle cx="'+cx+'" cy="'+cy+'" r="'+(k*0.85)+'" class="sym-fill"/><circle cx="'+cx+'" cy="'+cy+'" r="'+(k*0.3)+'" class="sym-core"/>';
+      inner='<circle r="'+(k*0.85)+'" class="sym-fill"/><circle r="'+(k*0.32)+'" class="sym-core"/>';
     }else if(type==='bureau'){
-      inner='<path d="'+starPath(cx,cy,k,k*0.45)+'" class="sym-fill"/>';
+      inner='<path d="'+starPath(0,0,k,k*0.45)+'" class="sym-fill"/>';
     }else if(type==='civic'){
-      inner='<path d="M '+(cx-k)+' '+(cy+k*0.6)+' L '+cx+' '+(cy-k*0.8)+' L '+(cx+k)+' '+(cy+k*0.6)+' Z" class="sym-line"/>'
-        +'<path d="M '+(cx-k*0.8)+' '+(cy+k*0.9)+' H '+(cx+k*0.8)+'" class="sym-line"/>';
+      inner='<path d="M '+(-k)+' '+(k*0.6)+' L 0 '+(-k*0.8)+' L '+k+' '+(k*0.6)+' Z" class="sym-line"/>'
+        +'<path d="M '+(-k*0.8)+' '+(k*0.95)+' H '+(k*0.8)+'" class="sym-line"/>';
     }else if(type==='clinic'){
-      inner='<path d="M '+cx+' '+(cy-k)+' V '+(cy+k)+' M '+(cx-k)+' '+cy+' H '+(cx+k)+'" class="sym-heavy"/>';
+      inner='<path d="M 0 '+(-k)+' V '+k+' M '+(-k)+' 0 H '+k+'" class="sym-heavy"/>';
     }else if(type==='school'){
-      inner='<path d="M '+(cx-k*0.7)+' '+(cy+k)+' V '+(cy-k*0.8)+'" class="sym-line"/>'
-        +'<path d="M '+(cx-k*0.7)+' '+(cy-k*0.8)+' L '+(cx+k*0.9)+' '+(cy-k*0.3)+' L '+(cx-k*0.7)+' '+(cy+k*0.2)+' Z" class="sym-fill"/>';
+      inner='<path d="M '+(-k*0.7)+' '+k+' V '+(-k*0.8)+'" class="sym-line"/>'
+        +'<path d="M '+(-k*0.7)+' '+(-k*0.8)+' L '+(k*0.9)+' '+(-k*0.3)+' L '+(-k*0.7)+' '+(k*0.2)+' Z" class="sym-fill"/>';
     }else if(type==='market'){
-      inner='<path d="M '+cx+' '+(cy-k*0.9)+' V '+(cy+k*0.5)+'" class="sym-line"/>'
-        +'<path d="M '+(cx-k)+' '+(cy-k*0.5)+' H '+(cx+k)+'" class="sym-line"/>'
-        +'<circle cx="'+(cx-k*0.75)+'" cy="'+(cy-k*0.05)+'" r="'+(k*0.32)+'" class="sym-line"/>'
-        +'<circle cx="'+(cx+k*0.75)+'" cy="'+(cy-k*0.05)+'" r="'+(k*0.32)+'" class="sym-line"/>';
+      inner='<path d="M 0 '+(-k*0.9)+' V '+(k*0.5)+'" class="sym-line"/>'
+        +'<path d="M '+(-k)+' '+(-k*0.5)+' H '+k+'" class="sym-line"/>'
+        +'<circle cx="'+(-k*0.75)+'" cy="'+(-k*0.05)+'" r="'+(k*0.3)+'" class="sym-line"/>'
+        +'<circle cx="'+(k*0.75)+'" cy="'+(-k*0.05)+'" r="'+(k*0.3)+'" class="sym-line"/>';
     }else if(type==='worship'){
-      inner='<path d="M '+cx+' '+(cy-k)+' V '+(cy+k)+'" class="sym-heavy"/>'
-        +'<path d="M '+(cx-k*0.6)+' '+(cy-k*0.25)+' H '+(cx+k*0.6)+'" class="sym-heavy"/>';
+      inner='<path d="M 0 '+(-k)+' V '+k+'" class="sym-heavy"/><path d="M '+(-k*0.6)+' '+(-k*0.25)+' H '+(k*0.6)+'" class="sym-heavy"/>';
     }else if(type==='workplace'){
-      inner='<path d="M '+(cx-k)+' '+(cy+k*0.7)+' V '+(cy-k*0.1)+' L '+(cx-k*0.3)+' '+(cy-k*0.55)+' L '+(cx-k*0.3)+' '+(cy-k*0.1)+' L '+cx+' '+(cy-k*0.55)+' L '+cx+' '+(cy-k*0.1)+' L '+(cx+k*0.7)+' '+(cy-k*0.55)+' V '+(cy+k*0.7)+' Z" class="sym-line"/>';
+      inner='<path d="M '+(-k)+' '+(k*0.7)+' V '+(-k*0.1)+' L '+(-k*0.3)+' '+(-k*0.55)+' L '+(-k*0.3)+' '+(-k*0.1)+' L 0 '+(-k*0.55)+' L 0 '+(-k*0.1)+' L '+(k*0.7)+' '+(-k*0.55)+' V '+(k*0.7)+' Z" class="sym-line"/>';
     }else if(type==='residence'){
-      inner='<path d="M '+(cx-k)+' '+(cy+k*0.7)+' V '+(cy-k*0.1)+' L '+cx+' '+(cy-k*0.9)+' L '+(cx+k)+' '+(cy-k*0.1)+' V '+(cy+k*0.7)+' Z" class="sym-line"/>';
+      inner='<path d="M '+(-k)+' '+(k*0.7)+' V '+(-k*0.1)+' L 0 '+(-k*0.9)+' L '+k+' '+(-k*0.1)+' V '+(k*0.7)+' Z" class="sym-line"/>';
     }else{
-      inner='<circle cx="'+cx+'" cy="'+cy+'" r="'+(k*0.75)+'" class="sym-line"/><circle cx="'+cx+'" cy="'+cy+'" r="'+(k*0.22)+'" class="sym-fill"/>';
+      inner='<circle r="'+(k*0.75)+'" class="sym-line"/><circle r="'+(k*0.22)+'" class="sym-fill"/>';
     }
     return '<g class="map-poi poi-'+type+'" aria-hidden="true" pointer-events="none">'+inner+'</g>';
   }
 
-  /* ---- cartography furniture: scale bar and illustrated legends ---- */
+  /* ======================= ANNOTATION SYSTEM ==========================
+     Labels belong to their entities. Anchors come from entity geometry,
+     candidates/collision run in view space against the current camera, and
+     results are emitted back into world coordinates inside counter-scaled
+     groups so text and icons keep approximately constant screen size while
+     the map pans under them. Viewport culling keeps off-screen labels out
+     of the collision pool entirely.
+     --------------------------------------------------------------------- */
+  function annotationItems(scene,camera,view,tier,names,selectedId,currentId){
+    const s=num(camera.scale,1), U=scene.bounds.h/42;
+    const rect=viewRectWorld(camera,view,.15);
+    const floor=POI_TIER_FLOOR[clamp(num(tier,2),0,2)];
+    const font=U*0.4, charW=font*0.6;
+    const inView=(x,y)=>x>=rect.x&&x<=rect.x+rect.w&&y>=rect.y&&y<=rect.y+rect.h;
+    const items=[], reserved=[];
+    const padX=view.width*0.35, padY=view.height*0.25;
+    Object.keys(scene.canonical).forEach(cid=>{
+      const v=scene.canonical[cid];
+      const forced=cid===selectedId||cid===currentId;
+      if(!inView(v.cx,v.cy)&&!forced) return;
+      const pr=poiPriority(v.kind);
+      if(!forced&&pr<floor) return;
+      const rad=Math.max(num(v.w,10),num(v.h,10))*0.16*s+font*0.45;
+      reserved.push({x:v.cx*s+camera.x+padX,y:v.cy*s+camera.y+padY,r:rad});
+      items.push({id:cid,world:{x:v.cx,y:v.cy},x:v.cx*s+camera.x+padX,y:v.cy*s+camera.y+padY,
+        text:names[cid]||cid,priority:pr+(forced?100:0),r:rad,annoKind:'poi',symbol:v.kind,
+        forced,footprint:v});
+    });
+    scene.streetLabels.forEach(sl=>{
+      /* Street names appear only at useful zooms: primaries once the user
+         has zoomed into the sheet, secondaries only at deep detail. */
+      if(sl.cls==='primary'&&s<0.7) return;
+      if(sl.cls!=='primary'&&(tier<2||s<1.2)) return;
+      if(!inView(sl.x,sl.y)) return;
+      items.push({id:sl.id,world:{x:sl.x,y:sl.y},x:sl.x*s+camera.x+padX,y:sl.y*s+camera.y+padY,
+        text:sl.text,priority:1.2,r:font*0.5,annoKind:'street',angle:sl.angle,cls:sl.cls,forced:false});
+    });
+    const layout=layoutLabels(items,{width:view.width+padX*2,height:view.height+padY*2,dots:reserved,
+      fontSize:font,charW:charW,margin:font*0.3});
+    const labels=[];
+    items.forEach(item=>{
+      const p=layout.placements[item.id];
+      if(!p) return;
+      labels.push({
+        id:item.id,text:item.text,annoKind:item.annoKind,symbol:item.symbol,angle:item.angle||0,
+        anchor:{x:item.world.x,y:item.world.y},
+        pos:{x:(p.x-padX-camera.x)/s,y:(p.y-padY-camera.y)/s},
+        leader:item.leader?{from:{x:item.world.x,y:item.world.y},to:{x:(p.x-padX-camera.x)/s,y:(p.y-padY-camera.y)/s}}:null,
+        emphasized:item.forced,cls:item.cls,overlap:p.overlap
+      });
+    });
+    const districtLabels=scene.districts.filter(d=>{
+      const c=polyCentroid(d.pts);
+      return inView(c.x,c.y);
+    }).map(d=>({name:d.name,centroid:polyCentroid(d.pts)}));
+    return {labels,districtLabels,overlaps:layout.overlaps,unit:U,scale:s,font};
+  }
+
+  /* ---- cartography furniture ---- */
   function scaleBarMarkup(kind){
     const cfg=kind==='settlement'
-      ?{label:'500 FEET',note:'MUNICIPAL SURVEY - SCALE OF SHEET'}
+      ?{label:'200 METERS',note:'MUNICIPAL SURVEY - SCALE OF SHEET AT 1X'}
       :{label:'100 KILOMETERS',note:'PROVISIONAL SURVEY - SCALE OF SHEET'};
     return '<div class="map-scalebar" aria-hidden="true"><span class="sb-bar"><i></i><i></i><i></i><i></i></span><b>'+cfg.label+'</b><em>'+cfg.note+'</em></div>';
   }
@@ -1325,18 +1571,17 @@ const MapSystem=(function(){
       +'</div></div>';
   }
 
-
-
   return {
-    VERSION,NATIONAL_VIEWBOX,SETTLEMENT_VIEWBOX,NATIONAL_ZOOM,SETTLEMENT_ZOOM,ZOOM_CONFIG,
-    createCamera,clampCamera,zoomAtPoint,panBy,fitBounds,
-    nationalTier,nationalKindVisible,settlementTier,poiPriority,poiVisible,poiLabelItems,
-    nationalLayout,transformY,geoTransform,
-    TERRAIN,nationalGeographyMarkup,regionLabelsMarkup,seaLabelsMarkup,routePath,routeMidPoint,patternDefs,
-    estimateTextSize,rectsIntersect,layoutLabels,labelLeaderPath,
-    TYPE_ORDER,SETTLEMENT_PLANS,settlementPlan,placeBuildings,legacyRect,
-    districtsMarkup,landUseMarkup,waterwaysMarkup,railwaysMarkup,planRoadsMarkup,bridgesMarkup,
-    reliefMarkup,fabricBlocks,fabricMarkup,poiSymbolMarkup,settlementBaseMarkup,
-    scaleBarMarkup,legendSwatch,nationalLegendMarkup,settlementLegendMarkup
+    VERSION,NATIONAL_VIEWBOX,NATIONAL_ZOOM,ZOOM_CONFIG,GESTURE,
+    createCamera,clampCamera,zoomAtPoint,panBy,fitBounds,centerOn,viewCenterWorld,viewRectWorld,
+    classifyGesture,isDoubleTap,
+    rectPoly,polyCentroid,pointInPolygon,polysIntersect,polyPath,linePath,segmentsOf,
+    estimateTextSize,rectsIntersect,layoutLabels,labelLeaderPath,seeded,hashSeed,
+    nationalLayout,transformY,geoTransform,TERRAIN,nationalGeographyMarkup,regionLabelsMarkup,
+    seaLabelsMarkup,routePath,routeMidPoint,nationalTier,nationalKindVisible,settlementTier,patternDefs,
+    SETTLEMENT_PLANS,settlementPlan,settlementScene,settlementZoomConfig,
+    visualBuildingForCanonicalId,annotationItems,settlementBaseMarkup,
+    poiSymbolMarkup,scaleBarMarkup,nationalLegendMarkup,settlementLegendMarkup,legendSwatch,
+    generateCorridor,generateShedGrid
   };
 })();

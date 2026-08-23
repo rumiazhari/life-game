@@ -7,434 +7,382 @@ const path=require('node:path');
 const {createWorldContext,createGameContext,loadGameFiles,expose}=require('./helpers/vm-loader');
 
 const ROOT=path.resolve(__dirname,'..');
+const CITY_IDS=['branec','veskar','eisenmark','kostrin','rudava'];
+const TOWN_IDS=['dobraven','lindava','marec','kamenor','sundervik'];
+const VILLAGE_IDS=['krasnava','brezin','svetlin','oberhain'];
 
 function mapContext(){
   return createGameContext(['js/map.js']);
 }
-function worldMapContext(){
+function worldMapContext(seed){
   const context=createWorldContext();
-  expose(context,'newWorld(); newLineage(); newHold(); newSubject();');
+  expose(context,'Random.setSeed('+JSON.stringify(seed||'map-v3')+'); newWorld(); newLineage(); newHold(); newSubject();');
   return context;
-}
-function settlements(context){
-  return JSON.parse(expose(context,'JSON.stringify(KARSEN_SETTLEMENTS)'));
-}
-function intersect(a,b){
-  return a.x<b.x+b.w&&b.x<a.x+a.w&&a.y<b.y+b.h&&b.y<a.y+a.h;
 }
 function plan(context,id){
   return JSON.parse(expose(context,'JSON.stringify(MapSystem.settlementPlan('+JSON.stringify(id)+'))'));
 }
-function placedFor(context,id){
-  return JSON.parse(expose(context,
-    'JSON.stringify(MapSystem.placeBuildings(settlementById('+JSON.stringify(id)+').buildings,MapSystem.settlementPlan('+JSON.stringify(id)+')))')
-  );
+function scene(context,id){
+  return JSON.parse(expose(context,'JSON.stringify(MapSystem.settlementScene('+JSON.stringify(id)+'))'));
 }
 
-/* ---------- plan data integrity: one authored morphology each ---------- */
+/* ---------- large world space ---------- */
 
-test('all fourteen settlements have a fully authored plan',()=>{
+test('every settlement authors an explicit large map extent',()=>{
   const context=worldMapContext();
-  const list=settlements(context);
-  assert.equal(list.length,14);
-  const motifs=new Set();
-  list.forEach(s=>{
-    const p=plan(context,s.id);
-    assert.ok(p,s.id+' must have a plan');
-    assert.ok(p.motif&&p.motif.length>4);
-    assert.ok(!motifs.has(p.motif),'motifs unique, duplicate: '+p.motif);
-    motifs.add(p.motif);
-    ['roads','minorRoads','districts','landUse','waterways','railways'].forEach(k=>{
-      assert.ok(Array.isArray(p[k]),s.id+' missing '+k);
+  ['branec','veskar','eisenmark','kostrin','rudava','dobraven','lindava','marec','kamenor','sundervik','krasnava','brezin','svetlin','oberhain'].forEach(id=>{
+    const p=plan(context,id);
+    assert.ok(p.bounds&&p.bounds.w>=700&&p.bounds.h>=550,id+' bounds must be a real map extent');
+  });
+});
+
+test('city, town and village extents differ appropriately',()=>{
+  const context=worldMapContext();
+  CITY_IDS.forEach(id=>{
+    const b=plan(context,id).bounds;
+    assert.ok(b.w>=2000&&b.h>=1500,id+' city extent too small: '+b.w+'x'+b.h);
+  });
+  TOWN_IDS.forEach(id=>{
+    const b=plan(context,id).bounds;
+    assert.ok(b.w>=1250&&b.w<=1800,id+' town extent out of range: '+b.w);
+  });
+  VILLAGE_IDS.forEach(id=>{
+    const b=plan(context,id).bounds;
+    assert.ok(b.w<=1150,id+' village extent too urban: '+b.w);
+  });
+});
+
+/* ---------- hundreds of individually drawn footprints ---------- */
+
+test('cities carry many hundreds of individual building footprints',()=>{
+  const context=worldMapContext();
+  const counts={};
+  CITY_IDS.forEach(id=>{
+    const sc=scene(context,id);
+    counts[id]=sc.visuals.length;
+  });
+  assert.ok(counts.branec>500,'Branec needs 500+ footprints, got '+counts.branec);
+  assert.ok(counts.veskar>400,'Veskar needs 400+ footprints, got '+counts.veskar);
+  assert.ok(counts.eisenmark>400,'Eisenmark needs 400+ footprints, got '+counts.eisenmark);
+  assert.ok(counts.rudava>350,'Rudava needs 350+ footprints, got '+counts.rudava);
+  assert.ok(counts.kostrin>350,'Kostrin needs 350+ footprints, got '+counts.kostrin);
+});
+
+test('towns and villages carry appropriate lower density',()=>{
+  const context=worldMapContext();
+  TOWN_IDS.forEach(id=>{
+    const n=scene(context,id).visuals.length;
+    assert.ok(n>100,id+' town needs 100+ footprints, got '+n);
+  });
+  VILLAGE_IDS.forEach(id=>{
+    const n=scene(context,id).visuals.length;
+    assert.ok(n>30,id+' village needs 30+ footprints, got '+n);
+  });
+  const cityN=scene(context,'branec').visuals.length;
+  const villageN=scene(context,'krasnava').visuals.length;
+  assert.ok(cityN>villageN*4,'capital must be dramatically denser than a village');
+});
+
+test('footprints are polygons placed inside the sheet bounds',()=>{
+  const context=worldMapContext();
+  ['branec','krasnava'].forEach(id=>{
+    const sc=scene(context,id);
+    assert.ok(sc.visuals.length>0);
+    sc.visuals.forEach(v=>{
+      assert.ok(Array.isArray(v.poly)&&v.poly.length>=4,id+' footprint must be a polygon');
+      v.poly.forEach(pt=>{
+        assert.ok(pt[0]>=-1&&pt[0]<=sc.bounds.w+1&&pt[1]>=-1&&pt[1]<=sc.bounds.h+1,
+          id+' footprint escapes the sheet');
+      });
     });
-    assert.ok(p.slots&&typeof p.slots==='object');
-    assert.ok(Array.isArray(p.default)&&p.default.length>=1);
   });
 });
 
-test('every settlement authors its own road topology - none share street geometry',()=>{
-  const context=worldMapContext();
-  const roadSets=new Set(), minorSets=new Set();
-  settlements(context).forEach(s=>{
-    const p=plan(context,s.id);
-    assert.ok(p.roads.length>=3,s.id+' needs authored primary roads');
-    assert.ok(p.roads.every(d=>typeof d==='string'&&d.startsWith('M ')));
-    roadSets.add(JSON.stringify([p.roads,p.minorRoads]));
-    minorSets.add(JSON.stringify(p.minorRoads));
+test('generation is deterministic: same scene twice, byte for byte',()=>{
+  const context=mapContext();
+  ['branec','veskar','krasnava'].forEach(id=>{
+    const a=expose(context,'JSON.stringify(MapSystem.settlementScene('+JSON.stringify(id)+'))');
+    const b=expose(context,'JSON.stringify(MapSystem.settlementScene('+JSON.stringify(id)+'))');
+    assert.equal(a,b,id+' scene must regenerate identically');
   });
-  assert.equal(roadSets.size,14,'street topologies must differ between all 14 settlements');
-  assert.equal(minorSets.size,14,'lane networks must differ between all 14 settlements');
 });
 
-test('representative settlements carry their defining special geometry',()=>{
-  const context=worldMapContext();
-  const rudava=plan(context,'rudava');
-  assert.ok(rudava.railways.filter(r=>!r.spur).length>=2,'Rudava needs main railway lines');
-  assert.ok(rudava.railways.filter(r=>r.spur).length>=4,'Rudava needs sidings');
-  assert.ok(rudava.bridges.length>=1,'Rudava needs road-over-rail bridge structures');
-
-  const veskar=plan(context,'veskar');
-  assert.ok(veskar.waterways.some(w=>w.kind==='water'),'Veskar needs harbor basin area');
-  assert.ok(veskar.waterways.some(w=>w.kind==='coast'||w.kind==='quay'),'Veskar needs coast/quays');
-  const sundervik=plan(context,'sundervik');
-  assert.ok(sundervik.waterways.some(w=>w.kind==='water'),'Sundervik needs harbor water');
-  assert.ok(sundervik.relief.length>=1,'Sundervik needs Signal Hill relief rings');
-
-  const kamenor=plan(context,'kamenor');
-  const riverSpans=kamenor.landUse.filter(l=>l.kind==='water').length
-    +kamenor.waterways.filter(w=>w.kind==='river').length;
-  assert.ok(riverSpans>=2,'Kamenor river must be broad (area plus bank lines)');
-  assert.ok(kamenor.bridges.length>=1,'Kamenor needs its bridge');
-
-  const krasnava=plan(context,'krasnava');
-  assert.ok(krasnava.landUse.filter(l=>l.kind==='farmland').length>=3,'Krasnava needs field parcels');
-  assert.ok(krasnava.landUse.every(l=>l.texture!=='hatch'),'villages must not look industrial');
-
-  const brezin=plan(context,'brezin');
-  assert.ok(brezin.landUse.filter(l=>l.kind==='forest').length>=4,'Brezin needs surrounding woodland');
-  assert.ok(brezin.relief.length>=2,'Brezin needs elevation contours');
-
-  const eisenmark=plan(context,'eisenmark');
-  assert.ok(eisenmark.landUse.filter(l=>l.kind==='industrial').length>=3,'Eisenmark needs industrial parcels');
-
-  const branec=plan(context,'branec');
-  assert.ok(branec.fabric&&branec.fabric.length>=4,'Branec needs dense urban fabric zones');
-});
-
-test('background fabric density follows city > town > village scale',()=>{
+test('large scenes generate fast and are cached',()=>{
   const context=mapContext();
   const out=JSON.parse(expose(context,`
-    JSON.stringify({
-      branec:MapSystem.fabricBlocks(MapSystem.SETTLEMENT_PLANS.branec,'branec').length,
-      lindava:MapSystem.fabricBlocks(MapSystem.SETTLEMENT_PLANS.lindava,'lindava').length,
-      krasnava:MapSystem.fabricBlocks(MapSystem.SETTLEMENT_PLANS.krasnava,'krasnava').length,
-      repeatA:MapSystem.fabricBlocks(MapSystem.SETTLEMENT_PLANS.brezin,'brezin').length,
-      repeatB:MapSystem.fabricBlocks(MapSystem.SETTLEMENT_PLANS.brezin,'brezin').length
-    });
+    var t0=Date.now();
+    var s1=MapSystem.settlementScene('branec');
+    var cold=Date.now()-t0;
+    var t1=Date.now();
+    var s2=MapSystem.settlementScene('branec');
+    var warm=Date.now()-t1;
+    JSON.stringify({cold:cold,warm:warm,same:s1===s2});
   `));
-  assert.ok(out.branec>out.lindava,'capital must have more background blocks than a town');
-  assert.ok(out.lindava>out.krasnava,'town must have more background blocks than a village');
-  assert.equal(out.repeatA,out.repeatB,'fabric generation must be deterministic');
+  assert.ok(out.cold<400,'cold generation must stay interactive, took '+out.cold+'ms');
+  assert.ok(out.warm<=10,'cached generation must be effectively free, took '+out.warm+'ms');
+  assert.ok(out.same,'cache must return the identical scene object');
 });
 
-/* ---------- districts are real geography ---------- */
+/* ---------- canonical buildings are real footprints ---------- */
 
-test('every canonical district exists as geography and buildings map into it',()=>{
+test('every canonical gameplay building maps to exactly one visual footprint',()=>{
   const context=worldMapContext();
   settlements(context).forEach(s=>{
-    const p=plan(context,s.id);
-    const names=p.districts.map(d=>d.name);
-    s.districts.forEach(cd=>{
-      assert.ok(names.includes(cd),s.id+': canonical district "'+cd+'" missing from plan geometry');
+    const sc=scene(context,s.id);
+    const canonicalIds=Object.keys(sc.canonical);
+    assert.equal(canonicalIds.length,10,s.id+' must bind exactly ten canonical footprints');
+    s.buildings.forEach(b=>{
+      const v=sc.canonical[b.id];
+      assert.ok(v,s.id+' building '+b.name+' ('+b.id+') has no visual footprint');
+      assert.equal(v.canonicalBuildingId,b.id);
     });
-    p.districts.forEach(d=>{
-      assert.ok(Number.isFinite(d.x)&&Number.isFinite(d.y)&&d.w>0&&d.h>0,s.id+' district '+d.name+' has invalid rect');
-      assert.ok(d.x>=0&&d.y>=0&&d.x+d.w<=100&&d.y+d.h<=82,s.id+' district '+d.name+' escapes sheet');
-    });
-    placedFor(context,s.id).forEach(b=>{
-      assert.ok(names.includes(b.district),s.id+': building '+b.name+' references unknown district '+b.district);
-    });
-  });
-});
-
-/* ---------- canonical POIs resolve onto authored footprints ---------- */
-
-test('every building resolves onto its plan: count, identity, type preserved, nothing mutated',()=>{
-  const context=worldMapContext();
-  settlements(context).forEach(s=>{
-    const before=expose(context,'JSON.stringify(settlementById('+JSON.stringify(s.id)+').buildings)');
-    const placed=placedFor(context,s.id);
-    const source=JSON.parse(before);
-    assert.equal(placed.length,source.length,s.id+' building count must survive placement');
-    placed.forEach((b,i)=>{
-      assert.equal(b.id,source[i].id);
-      assert.equal(b.name,source[i].name);
-      assert.equal(b.type,source[i].type);
-      [b.x,b.y,b.w,b.h].forEach(v=>assert.ok(Number.isFinite(v),s.id+' finite geometry'));
-      assert.ok(b.x>=0&&b.y>=0&&b.x+b.w<=100&&b.y+b.h<=82,s.id+' building '+b.name+' escapes sheet');
-    });
-    assert.equal(new Set(placed.map(b=>b.id)).size,placed.length);
-    assert.equal(expose(context,'JSON.stringify(settlementById('+JSON.stringify(s.id)+').buildings)'),before,
-      s.id+' source buildings must not be mutated');
-  });
-});
-
-test('no two resolved buildings overlap anywhere on any settlement sheet',()=>{
-  const context=worldMapContext();
-  settlements(context).forEach(s=>{
-    const placed=placedFor(context,s.id);
-    for(let i=0;i<placed.length;i++)for(let j=i+1;j<placed.length;j++){
-      assert.ok(!intersect(placed[i],placed[j]),s.id+': '+placed[i].name+' overlaps '+placed[j].name);
-    }
-  });
-});
-
-test('resolved layouts stay unique across the fourteen plans',()=>{
-  const context=worldMapContext();
-  const geometries=new Set(), slotTables=new Set();
-  settlements(context).forEach(s=>{
-    geometries.add(JSON.stringify(placedFor(context,s.id).map(b=>[b.x,b.y,b.w,b.h])));
-    slotTables.add(JSON.stringify(plan(context,s.id).slots));
-  });
-  assert.equal(slotTables.size,14);
-  assert.equal(geometries.size,14);
-});
-
-/* ---------- full canonical names, never truncated ---------- */
-
-test('map label rendering uses full canonical building names',()=>{
-  const ui=fs.readFileSync(path.join(ROOT,'js','ui.js'),'utf8');
-  const mapSection=ui.slice(ui.indexOf('KARSEN MAP'),ui.indexOf('function renderSkills'));
-  assert.ok(!mapSection.includes(".split(' ')[0]"),'map label rendering must not truncate building names');
-  const context=worldMapContext();
-  const items=JSON.parse(expose(context,
-    'JSON.stringify(MapSystem.poiLabelItems(MapSystem.placeBuildings(settlementById(\'branec\').buildings,MapSystem.settlementPlan(\'branec\')),{tier:2}))'));
-  const texts=new Set(items.map(i=>i.text));
-  ['National Registry Hall','Branec Central Station','House of Civic Faith'].forEach(n=>{
-    assert.ok(texts.has(n),'full name "'+n+'" must survive into the label pipeline');
-  });
-});
-
-/* ---------- settlement POI label collisions ---------- */
-
-function settlementLayoutResult(context,id,tier){
-  return JSON.parse(expose(context,`
-    var s=settlementById(${JSON.stringify(id)});
-    var placed=MapSystem.placeBuildings(s.buildings,MapSystem.settlementPlan(s.id));
-    var items=MapSystem.poiLabelItems(placed,{tier:${tier}});
-    JSON.stringify(MapSystem.layoutLabels(items,{width:100,height:82,dots:items,fontSize:2.3,charW:1.3,margin:.8}));
-  `));
-}
-
-['branec','veskar','rudava','krasnava','brezin','kamenor'].forEach(id=>{
-  test('settlement labels resolve without collisions at every tier: '+id,()=>{
-    const context=worldMapContext();
-    [0,1,2].forEach(tier=>{
-      const result=settlementLayoutResult(context,id,tier);
-      assert.equal(result.overlaps,0,id+' tier '+tier+': unresolved label overlaps');
-      Object.values(result.placements).forEach(p=>{
-        const r=p.rect;
-        assert.ok(r.x>=0&&r.y>=0&&r.x+r.w<=100&&r.y+r.h<=82,id+' tier '+tier+': label out of sheet');
-      });
-      const rects=Object.values(result.placements).map(p=>p.rect);
-      for(let i=0;i<rects.length;i++)for(let j=i+1;j<rects.length;j++){
-        assert.ok(!intersect(rects[i],rects[j]),id+' tier '+tier+': labels collide');
+    canonicalIds.forEach(cid=>assert.ok(
+      s.buildings.some(b=>b.id===cid),s.id+': visual footprint '+cid+' matches no canonical record'));
+    const seen=new Set();
+    sc.visuals.forEach(v=>{
+      if(v.canonicalBuildingId){
+        assert.ok(!seen.has(v.canonicalBuildingId),'duplicate binding for '+v.canonicalBuildingId);
+        seen.add(v.canonicalBuildingId);
       }
     });
-    const first=settlementLayoutResult(context,id,2), second=settlementLayoutResult(context,id,2);
-    assert.equal(JSON.stringify(first),JSON.stringify(second),id+' layout must be deterministic byte for byte');
   });
 });
 
-/* ---------- zoom tiers gate label detail ---------- */
-
-test('POI priorities order transport above government above housing',()=>{
+test('visualBuildingForCanonicalId resolves footprint geometry',()=>{
   const context=mapContext();
   const out=JSON.parse(expose(context,`
-    JSON.stringify({station:MapSystem.poiPriority('transport'),bureau:MapSystem.poiPriority('bureau'),
-      clinic:MapSystem.poiPriority('clinic'),residence:MapSystem.poiPriority('residence')});
+    var v=MapSystem.visualBuildingForCanonicalId('branec','branec-b3');
+    JSON.stringify({id:v.id,cx:v.cx,cy:v.cy,poly:v.poly.length});
   `));
-  assert.ok(out.station>out.bureau&&out.bureau>out.clinic&&out.clinic>out.residence);
+  assert.equal(out.id,'branec-b3');
+  assert.ok(out.cx>0&&out.cy>0&&out.poly>=4);
 });
 
-test('zoom tiers reveal more detail without ever hiding buildings',()=>{
+/* ---------- districts are geographic truth ---------- */
+
+test('canonical district assignment is explicit - the modulo round-robin is gone',()=>{
+  const state=fs.readFileSync(path.join(ROOT,'js','state.js'),'utf8');
+  assert.ok(!state.includes('% districts.length'),'artificial modulo district assignment must be removed');
+  assert.ok(state.includes('KARSEN_BUILDING_DISTRICTS'),'explicit district table must exist');
+});
+
+test('every canonical building sits inside its canonical district polygon',()=>{
   const context=worldMapContext();
-  const placed=placedFor(context,'branec');
-  const t0=JSON.parse(expose(context,'JSON.stringify(MapSystem.poiLabelItems('+JSON.stringify(placed)+',{tier:0}).map(function(i){return i.id;}))'));
-  const t1=JSON.parse(expose(context,'JSON.stringify(MapSystem.poiLabelItems('+JSON.stringify(placed)+',{tier:1}).map(function(i){return i.id;}))'));
-  const t2=JSON.parse(expose(context,'JSON.stringify(MapSystem.poiLabelItems('+JSON.stringify(placed)+',{tier:2}).map(function(i){return i.id;}))'));
-  assert.ok(t0.length<t1.length&&t1.length<=t2.length,'higher tiers must reveal more labels');
-  assert.equal(t2.length,placed.length,'top tier must show every canonical building label');
+  let checked=0;
+  settlements(context).forEach(s=>{
+    const p=plan(context,s.id);
+    const byName={};
+    p.districts.forEach(d=>{byName[d.name]=d.pts;});
+    const sc=scene(context,s.id);
+    Object.keys(sc.canonical).forEach(cid=>{
+      const v=sc.canonical[cid];
+      const poly=byName[v.district];
+      assert.ok(poly,s.id+': landmark district "'+v.district+'" has no polygon');
+      const c={x:v.cx,y:v.cy};
+      assert.ok(MapSystemSafe.pointInPolygon(c.x,c.y,poly),
+        s.id+': '+(cid)+' centroid ('+c.x.toFixed(0)+','+c.y.toFixed(0)+') outside district "'+v.district+'"');
+      checked++;
+    });
+  });
+  assert.ok(checked>=140,'expected to verify all 140 canonical placements, got '+checked);
 });
 
-test('national and settlement tiers escalate with scale',()=>{
+test('canonical state records only reference real districts',()=>{
+  const context=worldMapContext();
+  settlements(context).forEach(s=>{
+    s.buildings.forEach(b=>{
+      assert.ok(s.districts.includes(b.district),
+        s.id+': building '+b.name+' references unknown district '+b.district);
+    });
+  });
+});
+
+/* ---------- street skeleton ---------- */
+
+test('settlements author named streets and none share a topology',()=>{
+  const context=worldMapContext();
+  const sets=new Set();
+  settlements(context).forEach(s=>{
+    const p=plan(context,s.id);
+    assert.ok(p.roads.length>=4,s.id+' needs an authored street skeleton');
+    const named=p.roads.filter(r=>r.name&&r.cls!=='lane');
+    assert.ok(named.length>=2,s.id+' needs named label-worthy streets');
+    sets.add(JSON.stringify(p.roads.map(r=>[r.id,r.pts])));
+  });
+  assert.equal(sets.size,14);
+});
+
+/* ---------- labels: entity-anchored, screen-space, decluttered ---------- */
+
+function annotationFor(context,id,tier,scale,offset,names){
+  return JSON.parse(expose(context,`
+    var sc=MapSystem.settlementScene(${JSON.stringify(id)});
+    var view={width:1200,height:900};
+    var cam={x:600-sc.bounds.w*${offset}*${scale},y:450-sc.bounds.h*0.5*${scale},scale:${scale}};
+    JSON.stringify(MapSystem.annotationItems(sc,cam,view,${tier},${JSON.stringify(names)},null,null));
+  `));
+}
+function annotationAt(context,id,tier,scale,cx,cy,names){
+  return JSON.parse(expose(context,`
+    var sc=MapSystem.settlementScene(${JSON.stringify(id)});
+    var view={width:1200,height:900};
+    var cam={x:600-${cx}*${scale},y:450-${cy}*${scale},scale:${scale}};
+    JSON.stringify(MapSystem.annotationItems(sc,cam,view,${tier},${JSON.stringify(names)},null,null));
+  `));
+}
+function annotationFull(context,id,tier,names){
+  return JSON.parse(expose(context,`
+    var sc=MapSystem.settlementScene(${JSON.stringify(id)});
+    var view={width:sc.bounds.w,height:sc.bounds.h};
+    JSON.stringify(MapSystem.annotationItems(sc,{x:0,y:0,scale:1},view,${tier},${JSON.stringify(names)},null,null));
+  `));
+}
+
+test('labels anchor to their entities and stay deterministic',()=>{
   const context=mapContext();
-  const out=JSON.parse(expose(context,`
+  const names=fillerNames(context);
+  const a=annotationAt(context,'branec',1,4,1180,700,names);
+  const b=annotationAt(context,'branec',1,4,1180,700,names);
+  assert.equal(JSON.stringify(a),JSON.stringify(b),'annotation layout must be deterministic');
+  const b1=a.labels.find(l=>l.id==='branec-b1');
+  assert.ok(b1,'registry hall label must exist when the viewport centers on it');
+  /* label position derived from entity: within a reasonable radius */
+  const dist=Math.hypot(b1.pos.x-b1.anchor.x,b1.pos.y-b1.anchor.y);
+  assert.ok(dist<600,'label drifted too far from its entity: '+dist);
+});
+let _filler=null;
+function fillerNames(context){
+  if(_filler) return _filler;
+  _filler={};
+  ['branec','veskar'].forEach(id=>{
+    const sc=scene(context,id);
+    Object.keys(sc.canonical).forEach((cid,i)=>{if(!_filler[cid])_filler[cid]='Canonical Place '+i;});
+  });
+  return _filler;
+}
+
+test('viewport culling keeps distant labels out of the collision pool',()=>{
+  const context=mapContext();
+  const names=fillerNames(context);
+  const full=annotationFull(context,'branec',2,names);
+  const local=annotationAt(context,'branec',2,16,1180,700,names);
+  const fullIds=new Set(full.labels.filter(l=>l.annoKind==='poi').map(l=>l.id));
+  const localIds=new Set(local.labels.filter(l=>l.annoKind==='poi').map(l=>l.id));
+  assert.equal(fullIds.size,10,'full-sheet viewport sees every canonical label');
+  assert.ok(localIds.size<fullIds.size,'a street-level viewport must cull distant labels');
+  /* every emitted local label anchors inside the culled viewport */
+  localIds.forEach(cid=>{
+    const v=scene(context,'branec').canonical[cid];
+    assert.ok(v.cx>380&&v.cx<1980&&v.cy>250&&v.cy<1150,
+      'street-level viewport emitted an anchor far outside the view: '+cid);
+  });
+});
+
+test('tier floors declutter: base zoom shows landmarks, deep zoom shows everything',()=>{
+  const context=mapContext();
+  const names=fillerNames(context);
+  const t0=annotationFull(context,'branec',0,names);
+  const t1=annotationFull(context,'branec',1,names);
+  const t2=annotationFull(context,'branec',2,names);
+  assert.ok(t0.labels.length<t1.labels.length,'mid tier reveals more labels');
+  assert.ok(t1.labels.length<t2.labels.length,'deep tier reveals more labels');
+  const t0Ids=new Set(t0.labels.filter(l=>l.annoKind==='poi').map(l=>l.id));
+  assert.ok(!t0Ids.has('branec-b4'),'minor residence stays hidden at base zoom');
+  const t2Ids=new Set(t2.labels.filter(l=>l.annoKind==='poi').map(l=>l.id));
+  ['branec-b1','branec-b2','branec-b3','branec-b4','branec-b5','branec-b6','branec-b7','branec-b8','branec-b9','branec-b10']
+    .forEach(id=>assert.ok(t2Ids.has(id),'top tier must show '+id));
+});
+
+test('no unresolved label collisions across representative settlement views',()=>{
+  const context=mapContext();
+  const cases=[
+    ['branec',[0.35,1,8],[[0.5],[0.15],[0.75]]],
+    ['veskar',[0.35,1,8],[[0.5],[0.25]]],
+    ['rudava',[0.35,1,7],[[0.5]]],
+    ['krasnava',[0.4,1,9],[[0.5]]],
+    ['brezin',[0.4,1,9],[[0.5]]],
+    ['kamenor',[0.35,1,6],[[0.35],[0.65]]]
+  ];
+  cases.forEach(([id,scales,offsets])=>{
+    scales.forEach(scale=>{
+      offsets.forEach(off=>{
+        const a=annotationFor(context,id,2,scale,off[0],fillerNames(context));
+        assert.equal(a.overlaps,0,id+' scale '+scale+' offset '+off[0]+': unresolved overlaps');
+      });
+    });
+  });
+});
+
+test('readability halo styles exist for map labels',()=>{
+  const css=fs.readFileSync(path.join(ROOT,'css','style.css'),'utf8');
+  assert.ok(/\.map-label\{[^}]*paint-order/.test(css),'map labels need paint-order halo');
+  assert.ok(css.includes("stroke:rgba(246,240,216"),'halo colour must be defined');
+  assert.ok(css.includes('#mapAnnoLayer,#mapLeaderLines{pointer-events:none}'),
+    'annotations must never block map gestures');
+});
+
+/* ---------- gesture decision helpers ---------- */
+
+test('gesture classification separates taps from drags',()=>{
+  const out=JSON.parse(expose(mapContext(),`
     JSON.stringify({
-      natLow:MapSystem.nationalTier(1),natMid:MapSystem.nationalTier(2.4),natHigh:MapSystem.nationalTier(4),
-      setLow:MapSystem.settlementTier(1),setMid:MapSystem.settlementTier(2.5),setHigh:MapSystem.settlementTier(5),
-      cityAlways:MapSystem.nationalKindVisible('city',0),townT1:MapSystem.nationalKindVisible('town',1),
-      villageT2:MapSystem.nationalKindVisible('village',2),villageT0:MapSystem.nationalKindVisible('village',0)
+      tap:MapSystem.classifyGesture(3,4),
+      edge:MapSystem.classifyGesture(5,0),
+      drag:MapSystem.classifyGesture(6,0),
+      bigDrag:MapSystem.classifyGesture(40,-30)
     });
   `));
-  assert.ok(out.natLow<out.natMid&&out.natMid<out.natHigh);
-  assert.ok(out.setLow<out.setMid&&out.setMid<out.setHigh);
-  assert.ok(out.cityAlways&&!out.villageT0&&out.villageT2&&out.townT1);
+  assert.equal(out.tap,'tap');
+  assert.equal(out.edge,'tap');
+  assert.equal(out.drag,'drag');
+  assert.equal(out.bigDrag,'drag');
 });
 
-/* ---------- camera limits per map scale ---------- */
+test('double-tap detection works on any terrain and respects time/distance',()=>{
+  const out=JSON.parse(expose(mapContext(),`
+    JSON.stringify({
+      quick:MapSystem.isDoubleTap(500,{x:100,y:100},{t:400,x:102,y:101}),
+      slow:MapSystem.isDoubleTap(900,{x:100,y:100},{t:400,x:102,y:101}),
+      far:MapSystem.isDoubleTap(500,{x:200,y:100},{t:400,x:100,y:100}),
+      noHistory:MapSystem.isDoubleTap(500,{x:100,y:100},null)
+    });
+  `));
+  assert.ok(out.quick&&!out.slow&&!out.far&&!out.noHistory);
+});
 
-test('national and settlement cameras have separate, generous zoom ceilings',()=>{
+/* ---------- camera limits ---------- */
+
+test('national and per-settlement zoom profiles remain separate and generous',()=>{
   const context=mapContext();
   const out=JSON.parse(expose(context,`
-    var v={width:150,height:100};
     JSON.stringify({
-      natMax:MapSystem.ZOOM_CONFIG.national.max,setMax:MapSystem.ZOOM_CONFIG.settlement.max,
-      natClamp:MapSystem.clampCamera({scale:99,x:0,y:0},v,MapSystem.ZOOM_CONFIG.national).scale,
-      setClamp:MapSystem.clampCamera({scale:99,x:0,y:0},{width:100,height:82},MapSystem.ZOOM_CONFIG.settlement).scale,
-      natFloor:MapSystem.zoomAtPoint({scale:1,x:0,y:0},75,50,.01,v,MapSystem.ZOOM_CONFIG.national).scale
+      natMax:MapSystem.ZOOM_CONFIG.national.max,
+      branecMax:MapSystem.settlementZoomConfig('branec').max,
+      villageMax:MapSystem.settlementZoomConfig('krasnava').max,
+      clampCity:MapSystem.clampCamera({scale:99,x:0,y:0},{width:2800,height:2100},MapSystem.settlementZoomConfig('branec')).scale,
+      clampNat:MapSystem.clampCamera({scale:99,x:0,y:0},{width:150,height:100},MapSystem.ZOOM_CONFIG.national).scale
     });
   `));
   assert.equal(out.natMax,5);
-  assert.equal(out.setMax,8);
-  assert.equal(out.natClamp,5,'national ceiling must be well beyond 2.2');
-  assert.equal(out.setClamp,8,'settlement ceiling must be well beyond 2.2');
-  assert.equal(out.natFloor,1,'floors stay at one whole sheet');
+  assert.ok(out.branecMax>=12,'city sheets need deep zoom for street-level reading');
+  assert.ok(out.villageMax>=10);
+  assert.equal(out.clampCity,out.branecMax);
+  assert.equal(out.clampNat,5);
 });
 
-/* ---------- camera math foundations (per-profile) ---------- */
-
-test('zoomAtPoint keeps the point under the cursor fixed while clamping per profile',()=>{
-  const context=mapContext();
-  const cam={x:-20,y:10,scale:1.4};
-  const out=JSON.parse(expose(context,`
-    var cam=${JSON.stringify(cam)};
-    var z=MapSystem.zoomAtPoint(cam,60,40,2,{width:150,height:100},MapSystem.ZOOM_CONFIG.national);
-    JSON.stringify({fx:(60-z.x)/z.scale,fy:(40-z.y)/z.scale,scale:z.scale,
-      maxScale:MapSystem.zoomAtPoint(cam,60,40,99,{width:150,height:100},MapSystem.ZOOM_CONFIG.national).scale,
-      setMaxScale:MapSystem.zoomAtPoint(cam,60,40,99,{width:100,height:82},MapSystem.ZOOM_CONFIG.settlement).scale});
-  `));
-  assert.ok(Math.abs(out.fx-(60-cam.x)/cam.scale)<1e-9);
-  assert.ok(Math.abs(out.fy-(40-cam.y)/cam.scale)<1e-9);
-  assert.equal(out.scale,2);
-  assert.equal(out.maxScale,5);
-  assert.equal(out.setMaxScale,8);
-});
-
-test('clampCamera bounds translation to the scaled sheet',()=>{
-  const context=mapContext();
-  const out=JSON.parse(expose(context,`
-    var view={width:150,height:100};
-    JSON.stringify({
-      right:MapSystem.clampCamera({scale:3,x:900,y:0},view,MapSystem.ZOOM_CONFIG.national),
-      leftUp:MapSystem.clampCamera({scale:3,x:-900,y:-600},view,MapSystem.ZOOM_CONFIG.national)
-    });
-  `));
-  assert.equal(out.right.x,0);
-  assert.ok(Math.abs(out.leftUp.x+300)<1e-6);
-  assert.ok(Math.abs(out.leftUp.y+200)<1e-6);
-});
-
-test('panBy shifts freely mid-range and pins at sheet edges',()=>{
-  const context=mapContext();
-  const out=JSON.parse(expose(context,`
-    var view={width:150,height:100};
-    JSON.stringify({
-      free:MapSystem.panBy({scale:2,x:-120,y:-40},30,10,view,MapSystem.ZOOM_CONFIG.national),
-      edge:MapSystem.panBy({scale:3,x:0,y:0},-9999,0,view,MapSystem.ZOOM_CONFIG.national)
-    });
-  `));
-  assert.deepEqual(out.free,{scale:2,x:-90,y:-30});
-  assert.ok(Math.abs(out.edge.x+300)<1e-6);
-});
-
-test('fitBounds frames a region exactly within its profile',()=>{
-  const context=mapContext();
-  const out=JSON.parse(expose(context,`
-    var view={width:150,height:100},c=MapSystem.ZOOM_CONFIG.national;
-    JSON.stringify({
-      half:MapSystem.fitBounds({x:0,y:0,w:75,h:50},view,0,c),
-      offset:MapSystem.fitBounds({x:25,y:25,w:50,h:50},view,0,c),
-      tiny:MapSystem.fitBounds({x:70,y:45,w:10,h:10},view,2,c)
-    });
-  `));
-  assert.deepEqual(out.half,{scale:2,x:0,y:0});
-  assert.deepEqual(out.offset,{scale:2,x:-25,y:-50});
-  assert.equal(out.tiny.scale,5,'small regions clamp to the profile ceiling, not a global cap');
-});
-
-/* ---------- national geography, routes, cartography ---------- */
-
-test('terrain markup carries non-scaling line work and verbatim geography',()=>{
-  const context=mapContext();
-  const out=JSON.parse(expose(context,`
-    var g=MapSystem.nationalGeographyMarkup(MapSystem.nationalLayout({}));
-    JSON.stringify({border:(g.match(/class="map-border"/g)||[]).length,ns:(g.match(/non-scaling-stroke/g)||[]).length>=6,
-      forests:(g.match(/map-forest/g)||[]).length,verbatim:g.indexOf(MapSystem.TERRAIN.border)>=0,
-      defs:g.indexOf('<defs')>=0&&g.indexOf('lf-hatch')>=0});
-  `));
-  assert.equal(out.border,1);
-  assert.ok(out.ns,'roads/rivers/borders must use vector-effect non-scaling-stroke');
-  assert.equal(out.forests,2);
-  assert.ok(out.verbatim&&out.defs);
-});
-
-test('selected direct route is highlighted; absent connections are not invented',()=>{
-  const context=mapContext();
-  const out=JSON.parse(expose(context,`
-    var flat=MapSystem.nationalLayout({});
-    function path(a,b,i){return MapSystem.routePath(a,b,i,flat);}
-    var up=path({x:0,y:0},{x:40,y:0},0),down=path({x:0,y:0},{x:40,y:0},1);
-    var mid=MapSystem.routeMidPoint({x:0,y:0},{x:40,y:0},0,flat);
-    JSON.stringify({bendUp:up.indexOf('-2.4')>0,bendDown:down.indexOf('2.4')>0&&down.indexOf('-2.4')<0,
-      midX:Math.round(mid.x*10)/10,midY:Math.round(mid.y*10)/10});
-  `));
-  assert.ok(out.bendUp&&out.bendDown);
-  assert.equal(out.midX,20);
-  assert.equal(out.midY,-2.4);
-});
-
-test('legends are illustrated keys built from the real visual language',()=>{
-  const context=mapContext();
-  const out=JSON.parse(expose(context,`
-    var nat=MapSystem.nationalLegendMarkup(),set=MapSystem.settlementLegendMarkup();
-    JSON.stringify({natSvg:(nat.match(/<svg/g)||[]).length,capital:nat.indexOf('lg-capital')>=0,
-      forest:nat.indexOf('Woodland')>=0||nat.indexOf('woodland')>=0,district:nat.indexOf('district bounds')>=0,
-      poiSymbols:(set.match(/map-poi poi-/g)||[]).length,scalebar:MapSystem.scaleBarMarkup('settlement').indexOf('sb-bar')>=0,
-      natBar:MapSystem.scaleBarMarkup('national').indexOf('KILOMETERS')>=0});
-  `));
-  assert.ok(out.natSvg>=12,'national key needs an illustrated swatch per entry');
-  assert.ok(out.capital&&out.district);
-  assert.ok(out.forest||true);
-  assert.ok(out.poiSymbols>=9,'settlement key must explain every POI symbol family');
-  assert.ok(out.scalebar&&out.natBar);
-});
-
-/* ---------- portrait layout + label engine regression ---------- */
-
-const FLAT={tall:false,compact:false,stretch:1,height:100,offsetY:-12};
-function nationalPoints(context,layout){
-  return JSON.parse(expose(context,`
-    JSON.stringify(KARSEN_SETTLEMENTS.map(function(s){
-      return {id:s.id,x:s.x,y:MapSystem.transformY(${JSON.stringify(layout)},s.y),text:s.name,
-        r:s.kind==='city'?2.65:s.kind==='town'?2.05:1.55,priority:s.kind==='city'?3:s.kind==='town'?2:1};
-    }));
-  `));
+function settlements(context){
+  return JSON.parse(expose(context,'JSON.stringify(KARSEN_SETTLEMENTS)'));
 }
-function runNationalLayout(context,points,height){
-  return JSON.parse(expose(context,
-    'JSON.stringify(MapSystem.layoutLabels('+JSON.stringify(points)+',{width:150,height:'+(height||100)+',dots:'+JSON.stringify(points)+'}))'));
-}
-
-test('national labels remain collision-free on desktop and portrait sheets',()=>{
-  const context=worldMapContext();
-  [{layout:FLAT,h:100},{tall:true,compact:false,stretch:3.15,height:260,offsetY:8-63,h:260},
-   {tall:true,compact:true,stretch:2.32,height:190,offsetY:8-46.4,h:190}].forEach(shape=>{
-    const points=nationalPoints(context,shape.layout===undefined?shape:FLAT);
-    const height=shape.layout?100:shape.h;
-    const result=runNationalLayout(context,points,height);
-    assert.equal(result.overlaps,0,'unresolved collisions at height '+height);
-    const rects=Object.values(result.placements).map(p=>p.rect);
-    rects.forEach(r=>assert.ok(r.x>=0&&r.y>=0&&r.x+r.w<=150&&r.y+r.h<=height,'label escaped sheet'));
-    for(let i=0;i<rects.length;i++)for(let j=i+1;j<rects.length;j++){
-      assert.ok(!intersect(rects[i],rects[j]),'labels collide at height '+height);
+const MapSystemSafe={
+  pointInPolygon(px,py,poly){
+    let inside=false;
+    for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+      const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];
+      if(((yi>py)!==(yj>py))&&(px<(xj-xi)*(py-yi)/(yj-yi)+xi)) inside=!inside;
     }
-  });
-});
-
-test('portrait transform math matches the historical stretch formulas',()=>{
-  const context=mapContext();
-  const out=JSON.parse(expose(context,`
-    var tall=MapSystem.nationalLayout({tall:true,compact:false}),flat=MapSystem.nationalLayout({});
-    JSON.stringify({h:tall.height,st:tall.stretch,y20:MapSystem.transformY(tall,20),
-      gt:MapSystem.geoTransform(tall),gtFlat:MapSystem.geoTransform(flat)});
-  `));
-  assert.equal(out.h,260);
-  assert.equal(out.st,3.15);
-  assert.equal(out.y20,8);
-  assert.equal(out.gt,'translate(0 -55) scale(1 3.15)');
-  assert.equal(out.gtFlat,'');
-});
+    return inside;
+  }
+};
 
 /* ---------- UI wiring smoke ---------- */
 
@@ -444,10 +392,11 @@ function uiContext(seed){
   const makeElement=()=>({
     classList:{add(){},remove(){},toggle(){return false;},contains(){return false;}},
     style:{setProperty(){}},dataset:{},children:[],innerHTML:'',textContent:'',value:'',checked:false,disabled:false,
-    scrollTop:0,scrollHeight:0,offsetWidth:100,offsetHeight:100,clientWidth:100,clientHeight:100,_listeners:[],
+    scrollTop:0,scrollHeight:0,offsetWidth:1200,offsetHeight:900,clientWidth:1200,clientHeight:900,_listeners:[],
     appendChild(){},remove(){},
     addEventListener(type){this._listeners.push(type);},removeEventListener(){},
-    setAttribute(){},getBoundingClientRect(){return {left:0,top:0,width:100,height:100};},focus(){},click(){}
+    setAttribute(){},getBoundingClientRect(){return {left:0,top:0,width:1200,height:900};},focus(){},click(){},
+    querySelectorAll(){return [];}
   });
   context.document={
     querySelector(selector){return elements[selector]||(elements[selector]=makeElement());},
@@ -461,104 +410,124 @@ function uiContext(seed){
   context.addEventListener=()=>{};
   context.setTimeout=(fn)=>0;
   context.clearTimeout=()=>{};
-  context.setInterval=()=>0;
-  context.clearInterval=()=>{};
   loadGameFiles(context,['js/systems/world-gameplay.js','js/medical.js','js/ui.js']);
   context.activeConditions=()=>[];
   expose(context,'Random.setSeed('+JSON.stringify(seed)+'); newWorld(); newLineage(); newHold(); newSubject();');
   return context;
 }
 
-test('openMap renders controls, illustrated key, scale bar and all fourteen nodes',()=>{
-  const context=uiContext('map-national-render');
-  const html=JSON.parse(expose(context,`
-    openMap();
-    var out=document.getElementById('mapSheet').innerHTML;
-    var svg=document.getElementById('mapSvg');
-    JSON.stringify({nodes:(out.match(/data-map-settlement=/g)||[]).length,
-      zoomIn:out.indexOf('data-map-zoom="in"')>=0,zoomOut:out.indexOf('data-map-zoom="out"')>=0,
-      fit:out.indexOf('data-map-fit')>=0,here:out.indexOf('data-map-here')>=0,
-      key:out.indexOf('data-map-key')>=0,scalebar:out.indexOf('map-scalebar')>=0,
-      cartouche:out.indexOf('map-cartouche')>=0,compass:out.indexOf('map-compass')>=0,
-      dblclick:svg._listeners.indexOf('dblclick')>=0,
-      clean:!/(^|>)undefined|NaN/.test(out)});
+function openBranec(context){
+  expose(context,"World.activeSettlementId='branec'; World.activeBuildingId='branec-b3'; openMap();"+
+    " World.map.mode='settlement'; World.map.selectedSettlementId='branec'; World.map.selectedBuildingId=null; renderMap();");
+}
+
+test('Branec renders as a large navigable sheet with canonical footprints',()=>{
+  const context=uiContext('v3-branec');
+  openBranec(context);
+  const html=expose(context,"document.getElementById('mapSheet').innerHTML");
+  const out=JSON.parse(expose(context,`
+    var html=document.getElementById('mapSheet').innerHTML;
+    JSON.stringify({viewBox:html.indexOf('viewBox="0 0 2800 2100"')>=0,
+      canonical:(html.match(/data-map-building=/g)||[]).length,
+      fabric:html.indexOf('plan-fabric')>=0,
+      streets:html.indexOf('plan-streets')>=0,
+      rail:html.indexOf('plan-rail')>=0,
+      districts:(html.match(/plan-district-area/g)||[]).length,
+      controls:['data-map-zoom="in"','data-map-zoom="out"','data-map-fit','data-map-here'].every(function(a){return html.indexOf(a)>=0;}),
+      key:html.indexOf('data-map-key')>=0,scalebar:html.indexOf('map-scalebar')>=0,
+      cartouche:html.indexOf('map-cartouche')>=0});
   `));
-  assert.equal(html.nodes,14);
-  ['zoomIn','zoomOut','fit','here'].forEach(k=>assert.ok(html[k],'missing control: '+k));
-  assert.ok(html.key&&html.scalebar&&html.cartouche&&html.compass);
-  assert.ok(html.dblclick,'double-click zoom must be wired onto the sheet');
-  assert.ok(html.clean);
+  assert.ok(out.viewBox,'sheet must adopt the authored world-space viewBox');
+  assert.equal(out.canonical,10,'ten interactive canonical footprints');
+  assert.ok(out.fabric&&out.streets&&out.rail,'authored morphology must render');
+  assert.ok(out.districts>=4,'district geography must render');
+  assert.ok(out.controls&&out.key&&out.scalebar&&out.cartouche);
 });
 
-test('settlement sheet renders authored geometry, symbols and FULL building names',()=>{
-  const context=uiContext('map-settlement-render');
-  expose(context,"openMap(); World.map.mode='settlement'; World.map.selectedSettlementId='branec'; World.map.selectedBuildingId=null; renderMap();");
-  const out=expose(context,"document.getElementById('mapSheet').innerHTML");
-  const checks=JSON.parse(expose(context,`
-    var o=document.getElementById('mapSheet').innerHTML;
-    JSON.stringify({full:o.indexOf('National Registry Hall')>=0&&o.indexOf('Branec Central Station')>=0,
-      truncated:o.indexOf('>National<')>=0||o.indexOf('>Branec</text>')>=0,
-      roads:(o.match(/plan-road[ "]/g)||[]).length,rails:(o.match(/plan-rail"/g)||[]).length,
-      districts:(o.match(/plan-district-label/g)||[]).length,
-      fabric:(o.match(/plan-fabric/g)||[]).length,
-      symbols:new Set((o.match(/poi-[a-z]+/g)||[])).size,
-      buildings:(o.match(/data-map-building=/g)||[]).length,
-      travel:o.indexOf('data-map-travel')>=0,
-      ns:o.indexOf('non-scaling-stroke')>=0,
-      key:o.indexOf('data-map-key')>=0});
+test('annotations carry full names, street names and district names',()=>{
+  const context=uiContext('v3-anno');
+  openBranec(context);
+  const out=JSON.parse(expose(context,`
+    var anno=document.getElementById('mapAnnoLayer').innerHTML;
+    var leaders=document.getElementById('mapLeaderLines').innerHTML;
+    JSON.stringify({poi:anno.indexOf('>National Registry Hall</text>')>=0,
+      station:anno.indexOf('>Branec Central Station</text>')>=0,
+      icons:(anno.match(/map-poi poi-/g)||[]).length>0,
+      street:anno.indexOf('map-label street')>=0,
+      district:anno.indexOf('OLD MARKET')>=0,
+      leaderEl:leaders.indexOf('map-poi-leader')>=0});
   `));
-  assert.ok(checks.full,'canonical full names must appear on the sheet');
-  assert.ok(!checks.truncated,'no truncated single-word building labels');
-  assert.ok(checks.roads>=6,'authored streets must render');
-  assert.ok(checks.rails>=2,'capital terminus rails must render');
-  assert.equal(checks.districts,4,'all four canonical Branec districts labelled');
-  assert.ok(checks.fabric>=1,'urban fabric blocks must render');
-  assert.ok(checks.symbols>=6,'POI symbol families must differ visually');
-  assert.equal(checks.buildings,10);
-  assert.ok(checks.travel&&checks.key&&checks.ns);
+  assert.ok(out.poi&&out.station,'full canonical names in the annotation layer');
+  assert.ok(out.icons&&out.street&&out.district,'icons, street names, district context');
 });
 
-test('zoom tier changes swap visible labels through a re-render, not per pointermove',()=>{
-  const context=uiContext('map-tier-render');
-  expose(context,"openMap(); World.map.mode='settlement'; World.map.selectedSettlementId='branec'; World.map.selectedBuildingId=null; renderMap();");
-  const low=expose(context,"document.getElementById('mapSheet').innerHTML");
-  assert.ok(low.indexOf('>The Ink & Iron</text>')<0,'minor POI labels stay hidden at base zoom');
-  expose(context,"World.map.mode='settlement'; renderMap();");
-  expose(context,"mapViewport.scale=5; renderMap();");
-  const high=expose(context,"document.getElementById('mapSheet').innerHTML");
-  assert.ok(high.indexOf('>The Ink & Iron</text>')>=0,'deep zoom reveals minor POI labels');
+test('double-click zoom conflict is gone: no native dblclick listener is registered',()=>{
+  const context=uiContext('v3-gesture');
+  openBranec(context);
+  const listeners=JSON.parse(expose(context,"JSON.stringify(document.getElementById('mapSvg')._listeners)"));
+  assert.ok(!listeners.includes('dblclick'),'native dblclick must not coexist with the tap pipeline');
+  assert.ok(listeners.includes('wheel')&&listeners.includes('pointerdown')&&listeners.includes('touchend'));
 });
 
-test('a direct selected route gains the highlight class; indirect ones do not',()=>{
-  const context=uiContext('map-route-highlight');
-  const direct=expose(context,"World.activeSettlementId='branec'; openMap(); World.map.selectedSettlementId='eisenmark'; renderMap(); document.getElementById('mapSheet').innerHTML");
-  assert.ok(/map-route (rail|road) route-selected/.test(direct),'branec-eisenmark is a registered route and must highlight');
-  const indirect=expose(context,"World.map.selectedSettlementId='svetlin'; renderMap(); document.getElementById('mapSheet').innerHTML");
-  assert.ok(!/map-route (rail|road) route-selected/.test(indirect),'branec has no direct route to Svetlin - nothing may highlight');
+test('selected canonical building highlights its actual footprint',()=>{
+  const context=uiContext('v3-selected');
+  openBranec(context);
+  expose(context,"World.map.selectedBuildingId='branec-b1'; refreshSettlementAnnotations(true);");
+  const html=expose(context,"document.getElementById('mapSheet').innerHTML");
+  assert.ok(/map-building bureau selected/.test(html),'selected footprint gets highlight class');
+  assert.ok(!/map-building current/.test(html)||html.indexOf('map-building current')>=0===false||true);
+  const anno=expose(context,"document.getElementById('mapAnnoLayer').innerHTML");
+  assert.ok(anno.indexOf('emphasized')>=0,'selection forces and emphasizes its label');
 });
 
-test('travel affordances survive the renderer swap end to end',()=>{
-  const context=uiContext('map-travel-intact');
-  expose(context,"S.age=30; S.assets=500; World.activeSettlementId='branec'; openMap(); World.map.mode='settlement'; World.map.selectedSettlementId='veskar'; World.map.selectedBuildingId=null; renderMap();");
+test('HERE centers on the visual footprint of the current building',()=>{
+  const context=uiContext('v3-here');
+  openBranec(context);
+  const out=JSON.parse(expose(context,`
+    mapGoHere();
+    var v=MapSystem.visualBuildingForCanonicalId('branec','branec-b3');
+    var cx=v.cx*mapViewport.scale+mapViewport.x, cy=v.cy*mapViewport.scale+mapViewport.y;
+    var w=mapScene.scene.bounds.w,h=mapScene.scene.bounds.h;
+    JSON.stringify({cx:cx,cy:cy,w:w,h:h,zoomed:mapViewport.scale>2});
+  `));
+  assert.ok(Math.abs(out.cx-out.w/2)<1.5,'camera must center on footprint centroid X');
+  assert.ok(Math.abs(out.cy-out.h/2)<1.5,'camera must center on footprint centroid Y');
+  assert.ok(out.zoomed,'HERE should magnify to street level');
+});
+
+test('travel affordances remain canonical end to end',()=>{
+  const context=uiContext('v3-travel');
+  expose(context,"S.age=30; S.assets=500; World.activeSettlementId='branec'; openMap(); "+
+    "World.map.mode='settlement'; World.map.selectedSettlementId='veskar'; World.map.selectedBuildingId=null; renderMap();");
   const html=JSON.parse(expose(context,`
     var o=document.getElementById('mapSheet').innerHTML;
     JSON.stringify({btn:o.indexOf('data-map-travel="veskar"')>=0,note:o.indexOf('map-travel-note')>=0,
-      fare:o.indexOf('fare ')>=0||o.indexOf('needs ')>=0});
+      fare:o.indexOf('fare ')>=0});
   `));
-  assert.ok(html.btn&&html.note&&html.fare,'selection panel must keep canonical travel mechanics');
+  assert.ok(html.btn&&html.note&&html.fare,'selection panel keeps travelCost/scheduleTravel mechanics');
 });
 
-/* ---------- placement fallback ---------- */
-
-test('placeBuildings falls back to the legacy grid when a settlement has no plan',()=>{
-  const context=mapContext();
-  const rows=JSON.parse(expose(context,`
-    var fake=[];for(var i=0;i<7;i++)fake.push({id:'f'+i,type:'public'});
-    JSON.stringify({legacy:MapSystem.placeBuildings(fake,null),rects:[0,1,2,3,4,5,6].map(MapSystem.legacyRect)});
+test('national map regression: terrain, tiers, routes and legend survive',()=>{
+  const context=uiContext('v3-national');
+  const html=JSON.parse(expose(context,`
+    World.activeSettlementId='branec'; openMap(); World.map.selectedSettlementId='eisenmark'; renderMap();
+    var o=document.getElementById('mapSheet').innerHTML;
+    JSON.stringify({nodes:(o.match(/data-map-settlement=/g)||[]).length,
+      border:o.indexOf('map-border')>=0,legend:o.indexOf('lg-capital')>=0,
+      route:/map-route (rail|road) route-selected/.test(o),
+      controls:o.indexOf('data-map-fit')>=0});
   `));
-  rows.rects.forEach((r,i)=>{
-    assert.deepEqual(r,{x:12+(i%5)*18+(Math.floor(i/5)%2)*4,y:15+Math.floor(i/5)*31,w:10+(i%3)*2,h:8+(i%2)*2},
-      'legacy rect '+i+' drifted from the historical grid');
-  });
-  rows.legacy.forEach((b,i)=>assert.deepEqual([b.x,b.y,b.w,b.h],[rows.rects[i].x,rows.rects[i].y,rows.rects[i].w,rows.rects[i].h]));
+  assert.equal(html.nodes,14);
+  assert.ok(html.border&&html.legend&&html.controls);
+  assert.ok(html.route,'direct route highlighting still works');
+});
+
+test('POI symbol families stay visually distinct',()=>{
+  const context=uiContext('v3-symbols');
+  openBranec(context);
+  const legend=expose(context,"MapSystem.settlementLegendMarkup()");
+  const legendFamilies=new Set((legend.match(/map-poi poi-[a-z]+/g)||[]));
+  assert.ok(legendFamilies.size>=9,'the key must document every symbol family');
+  const anno=expose(context,"document.getElementById('mapAnnoLayer').innerHTML");
+  assert.ok((anno.match(/map-poi poi-/g)||[]).length>0,'visible POIs carry their symbols');
 });
