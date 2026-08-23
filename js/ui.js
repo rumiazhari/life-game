@@ -2612,12 +2612,19 @@ function resolvePlan(){
 function runRandomEvents(){
   if(typeof educationEventTick==='function') educationEventTick();
   let n=chance(.5)?1:0; if(S.age>10&&chance(.12))n++;
+  // Unpredictable pulse: some years are simply busier than others, and the
+  // per-year weighting below reshuffles which candidates rise to the top.
+  // Both draws come from an isolated stream keyed to (file, year) so the
+  // shared legacy Random sequence -- and anything pinned to it -- is untouched.
+  const pulse=Random.create(['event-pulse',S.id||'subject',currentYear()].join('|'));
+  if(pulse.chance()<(S.age>=16?0.08:0.05)) n=Math.min(3,n+1);
+  const jitter=Random.create(['event-weight',S.id||'subject',currentYear()].join('|'));
   const dispId=currentDisposition(S).it.id;
   const darkMult = dispId==='saint'?0.5:(dispId==='gambler'||dispId==='hustler')?1.4:1;
   for(let i=0;i<n;i++){
     const pool=EVENTS.filter(e=>S.age>=e.a[0]&&S.age<=e.a[1]&&(!e.if||e.if(S))&&(!S.cool[e.id]||S.age>=S.cool[e.id]));
     if(!pool.length) break;
-    const weighted=pool.map(e=>{let w=e.w||2; if(e.dark)w*=(0.3+S.vice*0.4+(S.happiness<40?1.1:0))*darkMult; return {e,w:Math.max(w,0.05)};});
+    const weighted=pool.map(e=>{let w=(e.w||2)*(0.6+jitter.next()*0.8); if(e.dark)w*=(0.3+S.vice*0.4+(S.happiness<40?1.1:0))*darkMult; return {e,w:Math.max(w,0.05)};});
     const tot=weighted.reduce((a,x)=>a+x.w,0); let r=Random.next()*tot, e=weighted[weighted.length-1].e;
     for(const x of weighted){r-=x.w; if(r<=0){e=x.e;break;}}
     if(e.medical&&typeof medicalEventExposure==='function') medicalEventExposure(e.medical,S);
