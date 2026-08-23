@@ -342,7 +342,7 @@ function autoPlanCandidates(){
   return out;
 }
 // Greedily fills S.queue with the best available candidates within this
-// year's plan-hour budget, honoring every queueAdd() guard (definition,
+// year's plan-hour budget, honoring every performActionNow() guard (definition,
 // once-per-year reservation, availability, hour fit) without its per-action
 // UI side effects. Player-queued items already in S.queue are kept; only
 // remaining hours are topped up.
@@ -484,20 +484,46 @@ function fxPreviewChips(fx){
 }
 function planNoteText(def,type,id,ok,afford,dup){
   if(dup)return actionReservedNote(id);
-  if(!afford)return 'needs '+(def.cost||1)+'h free';
+  if(!afford)return 'needs ⚡'+(def.cost||1)+' free';
   if(!ok){const w=whyNotFor(id);return w?('— '+w):(type==='p'?'— not available this year':'— not available');}
   return fillLabel(def.note?def.note(S):'');
 }
 function recommendedActions(rem){
   const out=[];
-  const add=(type,id,label)=>{
+  const add=(type,id,label,extra)=>{
     const d=type==='p'?PUR_MAP[id]:DEC_MAP[id];
     if(!d||actionReservedThisYear(id))return;
     if(typeof d.avail==='function'&&!d.avail(S))return;
     if(d.cost&&rem<d.cost)return;
-    out.push('<button class="rec-chip" data-'+type+'="'+id+'" title="'+label+'"><b>'+label+'</b><span>'+clipText(fillLabel(d.note?d.note(S):''),46)+'</span></button>');
+    out.push('<button class="rec-chip" data-'+type+'="'+id+'" '+(extra?'data-extra=\''+JSON.stringify(extra).replace(/'/g,'&#39;')+'\'':'')+' title="'+label+'"><b>'+label+'</b><span>'+clipText(fillLabel(d.note?d.note(S):''),46)+'</span></button>');
+  };
+  const addUi=(id,label,note)=>{
+    if(actionReservedThisYear('openHousehold')&&id==='household')return;
+    out.push('<button class="rec-chip" data-ui-open="'+id+'" title="'+label+'"><b>'+label+'</b><span>'+clipText(note,46)+'</span></button>');
   };
   if(S.jailUntil>S.age)return out;
+  // The Ways Out advisor: when the file is genuinely struggling, the Bureau
+  // (for once) shows its work -- concrete, prioritized steps off the bottom
+  // rung, each queueable exactly like a normal suggestion.
+  let struggling=false;
+  if(typeof SurvivalSystem==='object'&&SurvivalSystem&&typeof World!=='undefined'&&World&&typeof SurvivalSystem.guidanceFor==='function'){
+    const desperate=SurvivalSystem.desperationOf(World,S);
+    struggling=desperate>=0.45||(Number(S.assets)||0)<0||(Number(S.health)||100)<35;
+    if(struggling){
+      SurvivalSystem.guidanceFor(World,S).forEach(g=>{
+        if(out.length>=4)return;
+        if(!g.action)return;
+        if(g.action.type==='ui'){
+          addUi(g.action.id,g.title+(g.risky?' ⚑':''),g.why);
+          return;
+        }
+        const before=out.length;
+        add(g.action.type,g.action.id,g.title+(g.risky?' ⚑':''),g.action.extra);
+        if(out.length>before&&g.risky){ /* flagged in its label */ }
+      });
+      if(out.length)return out;
+    }
+  }
   if(S.age>=16&&S.jobTier<1)add('p','lookwork','Find work');
   else if(S.assets<-500)add('p','overtime','Earn overtime');
   if(S.health<45)add('p','doctor','See the doctor');
@@ -518,8 +544,8 @@ function renderCoach(){
   const el=$('#coachBar');if(!el)return;
   if(!S||!S.alive||slipOpen){el.classList.add('hidden');return;}
   let step=null;
-  if(!coachGet('plan'))step=['STEP 1 · PLAN','Tap PLAN THE YEAR — queue pursuits, then seal.'];
-  else if(!coachGet('seal'))step=['STEP 2 · SEAL','Seal &amp; Advance — the Bureau stamps the year forward.'];
+  if(!coachGet('plan'))step=['STEP 1 · LIVE','Tap LIVE THE YEAR — act on things now; each act costs energy.'];
+  else if(!coachGet('seal'))step=['STEP 2 · END THE YEAR','End the Year — the Bureau stamps the year forward.'];
   else if(!coachGet('report'))step=['STEP 3 · THE REPORT','Each year files an Annual Report above the bar. Tap it to skim.'];
   else {el.classList.add('hidden');return;}
   el.innerHTML='<span class="cb-txt"><b>'+step[0]+'</b>'+step[1]+'</span><button id="coachDismiss">GOT IT</button>';
@@ -781,7 +807,7 @@ function openMedicalTreatmentPicker(conditionId){
     '<div class="chips">'+rows+'</div><div class="ps-foot"><button class="btn" id="medicalTreatmentCancel">Back ▸</button></div>';
   $('#skillSheet').onclick=e=>{
     const choice=e.target.closest('[data-medical-treatment]');
-    if(choice){ queueAdd('d','treatment',{condition:condition.instanceId,treatment:choice.dataset.medicalTreatment}); $('#skillWrap').classList.add('hidden'); return; }
+    if(choice){ performActionNow('d','treatment',{condition:condition.instanceId,treatment:choice.dataset.medicalTreatment}); $('#skillWrap').classList.add('hidden'); return; }
     if(e.target.id==='medicalTreatmentCancel') $('#skillWrap').classList.add('hidden');
   };
   $('#skillWrap').classList.remove('hidden');
@@ -920,19 +946,45 @@ $('#householdWrap').addEventListener('click',e=>{
   const carebd=e.target.closest('[data-childcare]'); if(carebd){ snd('stamp'); setLifestyle('childcare',carebd.dataset.childcare); return; }
 });
 /* ================= KARSEN MAP ================= */
-const MAP_ZOOM_MIN=1, MAP_ZOOM_MAX=2.2;
-let mapViewport={x:0,y:0,scale:1}, mapDragging=null, mapPointers=new Map(), mapTouchState=null;
+let mapViewport=MapSystem.createCamera(), mapDragging=null, mapPointers=new Map(), mapTouchState=null;
+let mapLastMode=null, mapGesture=null, mapTouchMoved=false;
+let mapTapTimer=null, mapLastTap=null, mapRefreshTimer=null;
 function applyMapTransform(){
   const plane=$('#mapPlane');
   if(plane) plane.setAttribute('transform','translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')');
+  applyAnnotationPositions();
 }
 function mapPoint(e,svg){
-  const r=svg.getBoundingClientRect();
-  const view=svg.viewBox?.baseVal||{width:100,height:82};
-  return {x:(e.clientX-r.left)/r.width*view.width,y:(e.clientY-r.top)/r.height*view.height};
+  /* Production path: real SVG screen matrix (handles letterboxing from
+     preserveAspectRatio and any CSS sizing). */
+  if(svg&&typeof svg.getScreenCTM==='function'){
+    try{
+      const ctm=svg.getScreenCTM();
+      if(ctm&&typeof ctm.inverse==='function'){
+        const inv=ctm.inverse();
+        if(typeof DOMPoint==='function') return new DOMPoint(e.clientX,e.clientY).matrixTransform(inv);
+        if(typeof svg.createSVGPoint==='function'){
+          const pt=svg.createSVGPoint(); pt.x=e.clientX; pt.y=e.clientY;
+          return pt.matrixTransform(inv);
+        }
+      }
+    }catch(err){/* fall through to manual conversion */}
+  }
+  /* Test/no-SVG fallback with correct letterboxing math. */
+  const rect=svg&&typeof svg.getBoundingClientRect==='function'?svg.getBoundingClientRect():{left:0,top:0,width:100,height:100};
+  const view=svg&&svg.viewBox&&svg.viewBox.baseVal||{width:100,height:82};
+  return MapSystem.viewboxPoint(e.clientX,e.clientY,rect,view);
 }
 function mapViewSize(svg){
-  const view=svg.viewBox?.baseVal||{width:100,height:82};
+  /* Settlement sheets use a FIXED screen viewport (Google-Maps style):
+     the camera fits and pans the authored world across it, so the viewport
+     also carries the world content size for panning limits. */
+  if(World&&World.map&&World.map.mode==='settlement'){
+    const vp={width:MapSystem.SETTLEMENT_VIEWPORT.width,height:MapSystem.SETTLEMENT_VIEWPORT.height};
+    if(mapScene) vp.content={width:mapScene.scene.bounds.w,height:mapScene.scene.bounds.h};
+    return vp;
+  }
+  const view=svg&&svg.viewBox?.baseVal||{width:100,height:82};
   return {width:view.width||100,height:view.height||82};
 }
 function mapPinchState(){
@@ -942,187 +994,308 @@ function mapPinchState(){
   return {center:{x:(a.x+b.x)/2,y:(a.y+b.y)/2},distance:Math.max(1,Math.hypot(dx,dy))};
 }
 function mapSettlementBadge(s){ return s.kind==='village'?'VILLAGE':s.kind==='town'?'TOWN':'CITY'; }
-function mapNodeClass(s){
-  const current=World&&World.activeSettlementId===s.id, known=World&&World.map&&World.map.discoveredSettlementIds.includes(s.id);
-  return 'map-node '+(current?'current ':'')+(known?'known':'unverified');
+function nationalMediaLayout(){
+  const tall=!!window.matchMedia?.('(max-width: 700px)').matches;
+  const compact=!!window.matchMedia?.('(max-width: 520px)').matches;
+  return MapSystem.nationalLayout({tall,compact});
 }
-function mapRoutesSvg(){
-  return KARSEN_ROUTES.map(r=>{const a=settlementById(r.from),b=settlementById(r.to);return '<line class="map-route '+r.mode+'" x1="'+a.x+'" y1="'+a.y+'" x2="'+b.x+'" y2="'+b.y+'"></line>';}).join('');
+function nationalDotRadius(s){ return s.kind==='city'?2.65:s.kind==='town'?2.05:1.55; }
+function activeZoomConfig(){
+  return World&&World.map&&World.map.mode==='settlement'&&mapScene?mapScene.zoomCfg:MapSystem.ZOOM_CONFIG.national;
+}
+/* Annotations are refreshed only when the tier, selection, or a meaningfully
+   moved camera settles - never during pointermove. */
+function scheduleMapRefresh(){
+  if(mapRefreshTimer) clearTimeout(mapRefreshTimer);
+  mapRefreshTimer=setTimeout(()=>{
+    mapRefreshTimer=null;
+    const wrap=$('#mapWrap');
+    if(!wrap||wrap.classList.contains('hidden')) return;
+    refreshSettlementAnnotations(false);
+  },170);
+}
+function mapControlsMarkup(){
+  return '<div class="map-controls" role="group" aria-label="Map controls">'
+    +'<button class="map-ctl" data-map-zoom="in" title="Zoom in" aria-label="Zoom in">+</button>'
+    +'<button class="map-ctl" data-map-zoom="out" title="Zoom out" aria-label="Zoom out">&minus;</button>'
+    +'<button class="map-ctl ctl-wide" data-map-fit title="Fit the whole sheet" aria-label="Fit map">FIT</button>'
+    +'<button class="map-ctl ctl-wide" data-map-here title="Center on current location" aria-label="Current location">HERE</button>'
+    +'</div>';
 }
 function renderNationalMap(){
   const selected=settlementById(World.map.selectedSettlementId)||currentSettlement();
-  const nodes=KARSEN_SETTLEMENTS.map(s=>{const radius=s.kind==='city'?2.6:s.kind==='town'?2:1.5;return '<g class="'+mapNodeClass(s)+'" data-map-settlement="'+s.id+'" tabindex="0" role="button" aria-label="'+(World.map.discoveredSettlementIds.includes(s.id)?s.name:'Unverified settlement')+'"><circle class="map-node-hit" cx="'+s.x+'" cy="'+s.y+'" r="4.2"></circle><circle class="map-node-dot" cx="'+s.x+'" cy="'+s.y+'" r="'+radius+'"></circle><text x="'+(s.x+3)+'" y="'+(s.y+1)+'">'+(World.map.discoveredSettlementIds.includes(s.id)?s.name:'UNVERIFIED')+'</text></g>';}).join('');
-  return '<div class="map-kicker"><span>COMMONWEALTH OF KARSEN</span><span>OFFICIAL SURVEY · '+currentYear()+'</span></div>'+
-    '<div class="map-toolbar"><button class="map-tool active" data-map-mode="national">NATIONAL</button><span>'+KARSEN_SETTLEMENTS.length+' SETTLEMENTS · '+World.map.visitedSettlementIds.length+' VISITED</span></div>'+
-    '<div class="map-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 100 82" aria-label="National map of Karsen"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')"><path class="map-border" d="M8 12 L25 5 L45 7 L67 4 L91 16 L96 42 L89 74 L65 80 L42 76 L17 80 L5 58 Z"></path><path class="map-river" d="M12 43 C29 34 36 47 50 38 S72 29 91 35"></path>'+mapRoutesSvg()+nodes+'</g></svg><div class="map-compass">N</div></div>'+
-    '<div class="map-legend"><span><i class="legend-city"></i> city</span><span><i class="legend-town"></i> town</span><span><i class="legend-route"></i> official route</span><span><i class="legend-hidden"></i> unverified</span></div>'+
-    '<div class="map-selection"><div class="map-selection-copy"><b>'+selected.name+'</b><span>'+mapSettlementBadge(selected)+' · '+selected.region+' · population '+selected.population+'</span><em>'+selected.description+'</em></div><button class="btn small" data-map-open="'+selected.id+'">Open Settlement Map ▸</button></div>';
+  World.map.discoveredSettlementIds=KARSEN_SETTLEMENTS.map(s=>s.id);
+  // Phones receive a true portrait survey sheet: geography and routes spread
+  // vertically, while settlement dots and type remain circular and readable.
+  const layout=nationalMediaLayout();
+  const tier=MapSystem.nationalTier(mapViewport.scale);
+  const points=KARSEN_SETTLEMENTS.map(s=>({id:s.id,x:s.x,y:MapSystem.transformY(layout,s.y),text:s.name,r:nationalDotRadius(s),priority:s.kind==='city'?3:s.kind==='town'?2:1}));
+  const labelled=points.filter(p=>MapSystem.nationalKindVisible(settlementById(p.id).kind,tier));
+  const labels=MapSystem.layoutLabels(labelled,{width:MapSystem.NATIONAL_VIEWBOX.width,height:layout.height,dots:points,fontSize:3});
+  const labelLeaders=labelled.filter(p=>labels.placements[p.id].leader).map(p=>'<path class="map-label-leader" d="'+MapSystem.labelLeaderPath(p,labels.placements[p.id],p.r)+'"></path>').join('');
+  const nodes=KARSEN_SETTLEMENTS.map(s=>{
+    const p=labels.placements[s.id], cy=MapSystem.transformY(layout,s.y), current=World.activeSettlementId===s.id;
+    return '<g class="map-node '+s.kind+(current?' current':'')+'" data-map-settlement="'+s.id+'" tabindex="0" role="button" aria-label="'+s.name+'"><circle class="map-node-hit" cx="'+s.x+'" cy="'+cy+'" r="5.2"></circle><circle class="map-node-dot" cx="'+s.x+'" cy="'+cy+'" r="'+nationalDotRadius(s)+'"></circle>'+(p?'<text x="'+p.x.toFixed(1)+'" y="'+p.y.toFixed(1)+'" text-anchor="'+p.anchor+'">'+s.name+'</text>':'')+'</g>';
+  }).join('');
+  const here=currentSettlement(), direct=here&&selected?routeBetween(here.id,selected.id):null;
+  const regionLabels=MapSystem.regionLabelsMarkup(layout,tier);
+  const seaLabels=MapSystem.seaLabelsMarkup(layout);
+  const routes=KARSEN_ROUTES.map((r,i)=>{
+    const a=settlementById(r.from), b=settlementById(r.to);
+    const isDirect=direct&&((r.from===direct.from&&r.to===direct.to)||(r.from===direct.to&&r.to===direct.from));
+    let out='<path class="map-route '+r.mode+(isDirect?' route-selected':'')+'" d="'+MapSystem.routePath(a,b,i,layout)+'"></path>';
+    if(isDirect) out+='<path class="map-route-glow" d="'+MapSystem.routePath(a,b,i,layout)+'"></path>';
+    if(tier>=2){
+      const m=MapSystem.routeMidPoint(a,b,i,layout);
+      out+='<text class="map-route-distance" x="'+m.x.toFixed(1)+'" y="'+m.y.toFixed(1)+'">'+r.distance+'</text>';
+    }
+    return out;
+  }).join('');
+  const cartouche='<div class="map-cartouche"><b>COMMONWEALTH OF KARSEN</b><span>OFFICIAL SURVEY · '+currentYear()+'</span></div>';
+  return '<div class="map-kicker"><span>COMMONWEALTH OF KARSEN</span><span>OFFICIAL SURVEY - '+currentYear()+'</span></div>'+
+    '<div class="map-toolbar"><button class="map-tool active" data-map-mode="national">NATIONAL</button><span>'+KARSEN_SETTLEMENTS.length+' SETTLEMENTS - '+World.map.visitedSettlementIds.length+' VISITED</span></div>'+
+    '<div class="map-canvas national-map-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 150 '+layout.height+'" preserveAspectRatio="xMidYMid meet" aria-label="National map of Karsen"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')">'+MapSystem.nationalGeographyMarkup(layout)+(layout.tall?seaLabels:'')+regionLabels+routes+labelLeaders+nodes+'</g></svg>'+cartouche+mapControlsMarkup()+MapSystem.scaleBarMarkup('national')+'<div class="map-compass" title="North">N</div></div>'+
+    MapSystem.nationalLegendMarkup()+
+    '<div class="map-selection"><div class="map-selection-copy"><b>'+selected.name+'</b><span>'+mapSettlementBadge(selected)+' - '+selected.region+' - population '+selected.population+(direct?' - direct '+direct.mode+' route':'')+'</span><em>'+selected.description+'</em></div><button class="btn small" data-map-open="'+selected.id+'">Open Settlement Map &gt;</button></div>';
 }
-function settlementRoadsSvg(){
-  return '<path class="settlement-road" d="M5 18 H95 M5 42 H95 M5 66 H95 M20 5 V77 M49 5 V77 M78 5 V77"></path><path class="settlement-road minor" d="M5 30 H95 M5 54 H95 M34 5 V77 M64 5 V77"></path>';
-}
+let mapScene=null, mapAnnoLast=null;
 function renderSettlementMap(){
   const s=settlementById(World.map.selectedSettlementId)||currentSettlement();
   if(!s) return '';
+  mapScene={id:s.id,scene:MapSystem.settlementScene(s.id),zoomCfg:MapSystem.settlementZoomConfig(s.id)};
+  const scene=mapScene.scene, vp=MapSystem.SETTLEMENT_VIEWPORT;
+  const same=World.activeSettlementId===s.id;
   const selectedId=World.map.selectedBuildingId||s.buildings[0].id;
-  const buildings=s.buildings.map(b=>'<g class="map-building '+b.type+(b.id===selectedId?' selected':'')+'" data-map-building="'+b.id+'" tabindex="0" role="button"><rect x="'+b.x+'" y="'+b.y+'" width="'+b.w+'" height="'+b.h+'" rx=".7"></rect><text x="'+(b.x+b.w/2)+'" y="'+(b.y+b.h/2+1)+'">'+b.name.split(' ')[0]+'</text></g>').join('');
-  const selected=buildingById(s.id,selectedId)||s.buildings[0], same=World.activeSettlementId===s.id;
-  const currentLabel=same?'CURRENT SETTLEMENT':'OFFICIAL LOCATION FILE';
+  const currentB=same?World.activeBuildingId:null;
+  const names={};
+  s.buildings.forEach(b=>{names[b.id]=b.name;});
+  const base=MapSystem.settlementBaseMarkup(scene);
+  const canonicalEls=Object.keys(scene.canonical).map(cid=>{
+    const v=scene.canonical[cid];
+    const sel=cid===selectedId?' selected':'', cur=cid===currentB?' current':'';
+    /* invisible generous hit area first, then the visible footprint */
+    return '<path class="map-building-hit" data-map-building="'+cid+'" d="'+MapSystem.polyPath(v.hitPoly)+'"></path>'
+      +'<path class="map-building '+v.kind+sel+cur+'" data-map-building="'+cid+'" tabindex="0" role="button" aria-label="'+(names[cid]||'')+'" d="'+MapSystem.polyPath(v.poly)+'"></path>';
+  }).join('');
+  const selected=buildingById(s.id,selectedId)||s.buildings[0];
   const route=routeBetween(currentSettlement().id,s.id), cost=same?0:travelCost(currentSettlement(),s);
   const travelNote=S.traveling?'already travelling to '+settlementById(S.traveling.to).name:S.age<16?'independent travel begins at age 16':same?'already here':S.assets<cost?'needs '+money(cost):'fare '+money(cost)+' · arrives next year';
   const travelButton=!same?'<button class="btn small map-travel-btn" data-map-travel="'+s.id+'" '+(S.traveling||S.age<16||S.assets<cost?'disabled':'')+'>Travel Here ▸</button>':'';
+  const cartouche='<div class="map-cartouche"><b>'+s.name.toUpperCase()+'</b><span>MUNICIPAL SURVEY · '+s.region.toUpperCase()+'</span></div>';
   return '<div class="map-kicker"><button class="map-back" data-map-mode="national">← NATIONAL MAP</button><span>'+s.name.toUpperCase()+' · '+mapSettlementBadge(s)+'</span></div>'+
     '<div class="map-toolbar"><button class="map-tool active" data-map-mode="settlement">SETTLEMENT</button><span>'+s.region+' · '+s.population+' residents</span></div>'+
-    '<div class="map-canvas settlement-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 100 82" aria-label="Map of '+s.name+'"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')"><rect class="settlement-ground" x="1" y="1" width="98" height="80" rx="2"></rect>'+settlementRoadsSvg()+buildings+'</g></svg><div class="map-compass">N</div></div>'+
-    '<div class="map-selection building-selection"><div class="map-selection-copy"><small>'+currentLabel+'</small><b>'+selected.name+'</b><span>'+selected.type.toUpperCase()+' · '+selected.district+'</span><em>'+selected.description+'</em></div><div class="map-actions">'+travelButton+'<span class="map-travel-note">'+travelNote+'</span></div></div>';
+    '<div class="map-canvas settlement-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 '+vp.width+' '+vp.height+'" preserveAspectRatio="xMidYMid meet" aria-label="Map of '+s.name+'"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')">'+base+'<g class="plan-canonical">'+canonicalEls+'</g></g><g id="mapScreenAnnotations"></g></svg>'+cartouche+mapControlsMarkup()+MapSystem.scaleBarMarkup('settlement')+'<div class="map-compass" title="North">N</div></div>'+
+    MapSystem.settlementLegendMarkup()+
+    '<div class="map-selection building-selection"><div class="map-selection-copy"><small>'+(same?'CURRENT SETTLEMENT':'OFFICIAL LOCATION FILE')+'</small><b>'+selected.name+'</b><span>'+selected.type.toUpperCase()+' · '+selected.district+'</span><em>'+selected.description+'</em></div><div class="map-actions">'+travelButton+'<span class="map-travel-note">'+travelNote+'</span></div></div>';
 }
-const KARSEN_MAP_LABELS={
- branec:{x:86,y:49,anchor:'start',leader:true},
- veskar:{x:29,y:64,anchor:'start',leader:true},
- eisenmark:{x:112,y:73,anchor:'start',leader:true},
- kostrin:{x:72,y:73,anchor:'start',leader:true},
- rudava:{x:126,y:57,anchor:'start'},
- dobraven:{x:45,y:35,anchor:'start',leader:true},
- krasnava:{x:83,y:86,anchor:'start'},
- brezin:{x:60,y:25,anchor:'start'},
- lindava:{x:27,y:38,anchor:'middle'},
- sundervik:{x:117,y:23,anchor:'middle'},
- oberhain:{x:129,y:84,anchor:'middle'},
- marec:{x:134,y:37,anchor:'middle'},
- kamenor:{x:48,y:62,anchor:'start'},
- svetlin:{x:104,y:86,anchor:'start'}
-};
-function nationalMapLayout(){
-  const tall=window.matchMedia?.('(max-width: 700px)').matches;
-  const compact=window.matchMedia?.('(max-width: 520px)').matches;
-  const stretch=tall?(compact?2.32:3.15):1;
-  const height=tall?(compact?190:260):100;
-  return {height,tall,y:y=>tall?8+(y-20)*stretch:y,geoTransform:tall?'translate(0 '+(8-20*stretch)+') scale(1 '+stretch+')':''};
+/* Annotations live in a SCREEN-SPACE layer outside the camera plane.
+   Sizes are fixed viewport/CSS units; positions are projections of world
+   anchors (sx = wx*scale + tx) and are re-projected every frame so labels
+   stay glued to their entities at constant size. Expensive relayout runs
+   only when the tier, selection or a meaningfully moved camera settles. */
+function refreshSettlementAnnotations(force){
+  if(!mapScene||!World||!World.map||World.map.mode!=='settlement') return;
+  const holder=$('#mapScreenAnnotations');
+  if(!holder) return;
+  const s=settlementById(mapScene.id); if(!s) return;
+  const scene=mapScene.scene, view=MapSystem.SETTLEMENT_VIEWPORT;
+  const tier=MapSystem.settlementTier(mapViewport.scale,mapScene.zoomCfg);
+  const moved=force||!mapAnnoLast
+    ||tier!==mapAnnoLast.tier
+    ||Math.abs(mapViewport.scale-mapAnnoLast.scale)>mapViewport.scale*0.25
+    ||Math.hypot(mapViewport.x-mapAnnoLast.cx,mapViewport.y-mapAnnoLast.cy)>view.width*mapViewport.scale*0.3;
+  if(!moved){ applyAnnotationPositions(); return; }
+  const names={};
+  s.buildings.forEach(b=>{names[b.id]=b.name;});
+  const same=World.activeSettlementId===s.id;
+  const selectedId=World.map.selectedBuildingId||s.buildings[0].id;
+  const currentB=same?World.activeBuildingId:null;
+  const anno=MapSystem.annotationItems(scene,mapViewport,view,tier,names,selectedId,currentB);
+  const iconSize=anno.iconSize;
+  const labelGroups=anno.labels.map(l=>{
+    if(l.annoKind==='street'){
+      return '<g data-wx="'+l.pos.x.toFixed(2)+'" data-wy="'+l.pos.y.toFixed(2)+'">'
+        +'<text class="map-label street" text-anchor="middle" transform="rotate('+Number(l.deg||0).toFixed(1)+')">'+l.text+'</text></g>';
+    }
+    const emphasized=l.emphasized?' emphasized':'';
+    const anchorLocal={x:l.anchor.sx-l.pos.x,y:l.anchor.sy-l.pos.y};
+    const leader=l.leader?'<path class="map-poi-leader" d="M '+anchorLocal.x.toFixed(1)+' '+anchorLocal.y.toFixed(1)+' L 0 0"></path>':'';
+    const icon='<g transform="translate('+anchorLocal.x.toFixed(1)+' '+(anchorLocal.y-0).toFixed(1)+')">'+MapSystem.poiSymbolMarkup(l.symbol,0,-iconSize*0.75,iconSize*0.42)+'</g>';
+    return '<g data-wx="'+l.anchor.sx.toFixed(2)+'" data-wy="'+l.anchor.sy.toFixed(2)+'">'+leader+icon+'</g>'
+      +'<g data-wx="'+l.pos.x.toFixed(2)+'" data-wy="'+l.pos.y.toFixed(2)+'"><text class="map-label poi'+emphasized+'" text-anchor="middle">'+l.text+'</text></g>';
+  }).join('');
+  const districtHtml=anno.districtLabels.map(d=>
+    '<g data-wx="'+d.screen.x.toFixed(1)+'" data-wy="'+d.screen.y.toFixed(1)+'"><text class="map-district-label" text-anchor="middle">'+d.name.toUpperCase()+'</text></g>').join('');
+  holder.innerHTML=districtHtml+labelGroups;
+  mapAnnoLast={tier:tier,cx:mapViewport.x,cy:mapViewport.y,scale:mapViewport.scale};
+  applyAnnotationPositions();
 }
-function mapRouteClean(r,i,layout=nationalMapLayout()){
-  const a=settlementById(r.from),b=settlementById(r.to),ay=layout.y(a.y),by=layout.y(b.y),dx=b.x-a.x,dy=by-ay,len=Math.max(1,Math.sqrt(dx*dx+dy*dy)),bend=(i%2?2.4:-2.4),cx=(a.x+b.x)/2+(-dy/len*bend),cy=(ay+by)/2+(dx/len*bend);
-  return '<path class="map-route '+r.mode+'" d="M '+a.x+' '+ay+' Q '+cx+' '+cy+' '+b.x+' '+by+'"></path>';
+/* Re-project every annotation from its stored world anchor. Cheap enough
+   to run on every camera frame (~dozens of nodes). */
+function applyAnnotationPositions(){
+  const svg=$('#mapSvg'); if(!svg||!svg.querySelectorAll||!World||!World.map) return;
+  const s=mapViewport.scale, tx=mapViewport.x, ty=mapViewport.y;
+  svg.querySelectorAll('#mapScreenAnnotations [data-wx]').forEach(el=>{
+    const wx=+el.getAttribute('data-wx'), wy=+el.getAttribute('data-wy');
+    el.setAttribute('transform','translate('+((wx*s+tx).toFixed(2))+','+((wy*s+ty).toFixed(2))+')');
+  });
 }
-function renderNationalMapClean(){
-  const selected=settlementById(World.map.selectedSettlementId)||currentSettlement();
-  World.map.discoveredSettlementIds=KARSEN_SETTLEMENTS.map(s=>s.id);
-  const nodes=KARSEN_SETTLEMENTS.map(s=>{const p=KARSEN_MAP_LABELS[s.id]||{dx:3,dy:1,anchor:'start'},radius=s.kind==='city'?2.35:s.kind==='town'?1.85:1.35,current=World.activeSettlementId===s.id;return '<g class="map-node '+s.kind+(current?' current':'')+'" data-map-settlement="'+s.id+'" tabindex="0" role="button" aria-label="'+s.name+'"><circle class="map-node-hit" cx="'+s.x+'" cy="'+s.y+'" r="4.2"></circle><circle class="map-node-dot" cx="'+s.x+'" cy="'+s.y+'" r="'+radius+'"></circle><text x="'+(s.x+p.dx)+'" y="'+(s.y+p.dy)+'" text-anchor="'+p.anchor+'">'+s.name+'</text></g>';}).join('');
-  const regionLabels='<g class="map-region-labels" aria-hidden="true"><text x="18" y="35">WESTERN MARCHES</text><text x="52" y="22">CENTRAL KARSEN</text><text x="73" y="38">EASTERN LINE</text><text x="50" y="64">SOUTHERN FARMLAND</text></g>';
-  const routes=KARSEN_ROUTES.map(mapRouteClean).join('');
-  return '<div class="map-kicker"><span>COMMONWEALTH OF KARSEN</span><span>OFFICIAL SURVEY · '+currentYear()+'</span></div>'+
-    '<div class="map-toolbar"><button class="map-tool active" data-map-mode="national">NATIONAL</button><span>'+KARSEN_SETTLEMENTS.length+' SETTLEMENTS · '+World.map.visitedSettlementIds.length+' VISITED</span></div>'+
-    '<div class="map-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 100 82" aria-label="National map of Karsen"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')"><path class="map-border" d="M 10 17 C 20 9 34 8 47 10 C 60 7 76 8 89 17 C 95 27 96 43 92 57 C 88 70 77 76 63 77 C 49 80 34 77 20 78 C 10 70 6 56 7 42 C 6 30 7 22 10 17 Z"></path><path class="map-relief" d="M 13 31 C 23 26 33 27 42 31 S 61 36 72 27 S 85 22 92 26 M 11 60 C 24 55 35 59 45 63 S 67 68 87 59"></path><path class="map-river" d="M 7 47 C 20 40 29 42 39 47 C 50 53 59 49 67 40 C 76 30 84 31 95 25"></path>'+regionLabels+routes+nodes+'</g></svg><div class="map-compass">N</div></div>'+ 
-    '<div class="map-legend"><span><i class="legend-city"></i> city</span><span><i class="legend-town"></i> town</span><span><i class="legend-village"></i> village</span><span><i class="legend-road"></i> road</span><span><i class="legend-rail"></i> rail</span><span><i class="legend-river"></i> river</span></div>'+ 
-    '<div class="map-selection"><div class="map-selection-copy"><b>'+selected.name+'</b><span>'+mapSettlementBadge(selected)+' · '+selected.region+' · population '+selected.population+'</span><em>'+selected.description+'</em></div><button class="btn small" data-map-open="'+selected.id+'">Open Settlement Map ▸</button></div>';
+function mapZoomStep(factor){
+  const svg=$('#mapSvg'); if(!svg||!World||!World.map) return;
+  const view=mapViewSize(svg), c=activeZoomConfig();
+  mapViewport=MapSystem.zoomAtPoint(mapViewport,view.width/2,view.height/2,mapViewport.scale*factor,view,c);
+  applyMapTransform(); scheduleMapRefresh();
 }
-function cleanNationalMapMarkup(markup){return markup.replace(/·/g,' - ').replace(/▸/g,' > ');}
-function mapMinorRoadsSvg(){
-  const roads=[
-    'M 18 49 C 24 45 30 42 38 40 C 43 38 45 38 48 37',
-    'M 22 59 C 29 58 36 57 43 58 C 54 57 68 53 82 52',
-    'M 43 58 C 53 64 64 73 78 81',
-    'M 82 52 C 77 45 70 37 68 31 C 64 28 60 28 56 28',
-    'M 68 31 C 81 28 98 28 117 29',
-    'M 108 69 C 115 70 122 74 128 78',
-    'M 122 57 C 127 52 131 47 134 43',
-    'M 122 57 C 122 47 119 37 117 29'
-  ];
-  return roads.map(d=>'<path class="map-minor-road" d="'+d+'"></path>').join('');
+function mapFitView(){
+  if(!World||!World.map) return;
+  const view=mapViewSize($('#mapSvg'));
+  if(World.map.mode==='settlement'&&mapScene){
+    /* Fit = the whole authored sheet framed in the fixed viewport. */
+    mapViewport=MapSystem.centerOn(mapViewport,mapScene.scene.bounds.w/2,mapScene.scene.bounds.h/2,activeZoomConfig().min,view,activeZoomConfig());
+    applyMapTransform(); refreshSettlementAnnotations(true); return;
+  }
+  mapViewport=MapSystem.createCamera();
+  mapViewport=MapSystem.clampCamera(mapViewport,view,MapSystem.ZOOM_CONFIG.national);
+  applyMapTransform(); scheduleMapRefresh();
 }
-function mapSeaSvg(showLabels=true){
-  return '<g class="map-sea-details" aria-hidden="true">'+
-    '<path class="map-shore" d="M 18 49 C 11 52 11 57 14 61 C 20 66 16 74 24 78"></path>'+
-    '<path class="map-sea-line" d="M 3 12 C 22 7 39 13 57 9 S 92 6 110 11 S 137 8 148 14"></path>'+
-    '<path class="map-sea-line" d="M 1 88 C 20 83 35 91 53 88 S 91 88 108 93 S 136 91 149 86"></path>'+
-    '<path class="map-sea-line" d="M 6 23 C 14 19 22 20 29 17 M 5 28 C 14 24 21 25 28 22"></path>'+
-    '<path class="map-sea-line" d="M 122 15 C 132 12 140 15 147 20 M 124 19 C 133 16 141 19 147 24"></path>'+
-    '<path class="map-sea-island" d="M 8 73 C 11 69 17 69 19 73 C 18 77 13 79 9 77 Z"></path>'+
-    '<path class="map-sea-island" d="M 136 72 C 139 68 145 69 146 73 C 144 77 139 78 136 76 Z"></path>'+
-    (showLabels?'<text class="map-sea-label" x="8" y="17" text-anchor="start">WESTERN SEA</text><text class="map-sea-label" x="107" y="96" text-anchor="middle">SOUTHERN SEA</text>':'')+
-    '</g>';
+function mapGoHere(){
+  if(!World||!World.map) return;
+  if(World.map.mode==='settlement'&&World.map.selectedSettlementId===World.activeSettlementId){
+    /* Resolve the canonical gameplay building to its actual visual footprint
+       on the survey sheet - never the legacy generic grid coordinates. */
+    const v=MapSystem.visualBuildingForCanonicalId(World.map.selectedSettlementId,World.activeBuildingId);
+    if(v){
+      const cfg=activeZoomConfig();
+      const target=Math.max(mapViewport.scale,cfg.max*0.5);
+      mapViewport=MapSystem.centerOn(mapViewport,v.cx,v.cy,target,mapViewSize($('#mapSvg')),cfg);
+      applyMapTransform(); refreshSettlementAnnotations(true); return;
+    }
+  }
+  const s=settlementById(World.activeSettlementId);
+  if(!s) return;
+  const layout=nationalMediaLayout(), height=layout.tall?layout.height:MapSystem.NATIONAL_VIEWBOX.height;
+  const px=s.x, py=MapSystem.transformY(layout,s.y);
+  mapViewport=MapSystem.clampCamera({scale:2.6,x:MapSystem.NATIONAL_VIEWBOX.width/2-px*2.6,y:height/2-py*2.6},{width:MapSystem.NATIONAL_VIEWBOX.width,height},MapSystem.ZOOM_CONFIG.national);
+  World.map.mode='national'; World.map.selectedSettlementId=s.id; mapLastMode=null;
+  renderMap();
 }
-function mapGreenerySvg(showSeaLabels=true){
-  return mapSeaSvg(showSeaLabels)+'<g class="map-greenery" aria-hidden="true">'+
-    '<path class="map-forest" d="M 35 27 C 41 20 52 19 62 23 C 67 28 64 37 56 41 C 47 42 38 38 35 32 Z"></path>'+
-    '<path class="map-forest" d="M 99 31 C 107 26 119 27 126 34 C 128 41 123 48 114 50 C 105 48 100 42 99 31 Z"></path>'+
-    '<path class="map-meadow" d="M 55 45 C 64 40 75 41 84 46 C 87 52 79 58 69 59 C 60 57 54 52 55 45 Z"></path>'+
-    '<path class="map-meadow" d="M 60 68 C 70 62 83 64 91 70 C 91 77 82 81 72 80 C 64 78 59 74 60 68 Z"></path>'+
-    '<path class="map-wetland" d="M 112 52 C 120 49 129 51 134 57 C 133 64 125 68 117 66 C 112 63 110 58 112 52 Z"></path>'+
-    '<path class="map-industrial" d="M 97 61 C 104 58 114 60 119 66 C 118 73 110 76 102 73 C 98 70 96 66 97 61 Z"></path>'+
-    '</g>';
+function activateMapTarget(el){
+  if(!el) return;
+  if(el.dataset.mapSettlement){
+    World.map.selectedSettlementId=el.dataset.mapSettlement;
+    World.map.mode='national';
+    renderMap();
+  } else if(el.dataset.mapBuilding){
+    World.map.selectedBuildingId=el.dataset.mapBuilding;
+    moveWithinSettlement(el.dataset.mapBuilding);
+  }
 }
-function renderNationalMapNatural(){
-  const selected=settlementById(World.map.selectedSettlementId)||currentSettlement();
-  World.map.discoveredSettlementIds=KARSEN_SETTLEMENTS.map(s=>s.id);
-  const layout=nationalMapLayout();
-  // Phones receive a true portrait survey sheet: geography and routes spread
-  // vertically, while settlement dots and type remain circular and readable.
-  const mapPreserve='xMidYMid meet';
-  const labelLeaders=KARSEN_SETTLEMENTS.map(s=>{const p=KARSEN_MAP_LABELS[s.id];return p?.leader?'<path class="map-label-leader" d="M '+s.x+' '+layout.y(s.y)+' L '+p.x+' '+layout.y(p.y-.9)+'"></path>':'';}).join('');
-  const nodes=KARSEN_SETTLEMENTS.map(s=>{const p=KARSEN_MAP_LABELS[s.id]||{x:s.x+4,y:s.y+1,anchor:'start'},radius=s.kind==='city'?2.65:s.kind==='town'?2.05:1.55,current=World.activeSettlementId===s.id;return '<g class="map-node '+s.kind+(current?' current':'')+'" data-map-settlement="'+s.id+'" tabindex="0" role="button" aria-label="'+s.name+'"><circle class="map-node-hit" cx="'+s.x+'" cy="'+layout.y(s.y)+'" r="5.2"></circle><circle class="map-node-dot" cx="'+s.x+'" cy="'+layout.y(s.y)+'" r="'+radius+'"></circle><text x="'+p.x+'" y="'+layout.y(p.y)+'" text-anchor="'+p.anchor+'">'+s.name+'</text></g>';}).join('');
-  const regionLabels='<g class="map-region-labels" aria-hidden="true"><text x="30" y="'+layout.y(69)+'">WESTERN COAST</text><text x="52" y="'+layout.y(22)+'">NORTH WOODS</text><text x="82" y="'+layout.y(46)+'">CENTRAL LOWLAND</text><text x="111" y="'+layout.y(61)+'">IRON COUNTRY</text><text x="75" y="'+layout.y(77)+'">SOUTHERN FARMLAND</text><text x="126" y="'+layout.y(49)+'">EASTERN GRAIN PLAIN</text></g>';
-  const seaLabels='<g class="map-sea-details" aria-hidden="true"><text class="map-sea-label" x="8" y="'+layout.y(17)+'" text-anchor="start">WESTERN SEA</text><text class="map-sea-label" x="107" y="'+layout.y(96)+'" text-anchor="middle">SOUTHERN SEA</text></g>';
-  const routes=KARSEN_ROUTES.map((r,i)=>mapRouteClean(r,i,layout)).join('');
-  const border='M 18 49 C 14 41 22 31 38 29 C 52 27 58 18 75 20 C 91 21 99 30 111 27 C 125 23 138 28 145 38 C 150 46 147 55 139 60 C 147 68 141 78 130 82 C 116 86 105 78 93 84 C 81 91 69 82 56 86 C 43 91 30 86 24 78 C 16 74 20 66 14 61 C 9 57 11 52 18 49 Z';
-  return '<div class="map-kicker"><span>COMMONWEALTH OF KARSEN</span><span>OFFICIAL SURVEY - '+currentYear()+'</span></div>'+ 
-    '<div class="map-toolbar"><button class="map-tool active" data-map-mode="national">NATIONAL</button><span>'+KARSEN_SETTLEMENTS.length+' SETTLEMENTS - '+World.map.visitedSettlementIds.length+' VISITED</span></div>'+
-    '<div class="map-canvas national-map-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 150 '+layout.height+'" preserveAspectRatio="'+mapPreserve+'" aria-label="National map of Karsen"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')"><g transform="'+layout.geoTransform+'"><path class="map-border" d="'+border+'"></path><path class="map-shore" d="M 18 49 C 14 41 22 31 38 29"></path>'+mapGreenerySvg(!layout.tall)+'<path class="map-river-main" d="M 56 28 C 61 36 68 43 76 48 C 83 53 91 58 102 60 C 112 62 121 59 132 54"></path><path class="map-river" d="M 43 58 C 53 54 62 51 76 48 M 68 68 C 73 60 77 54 76 48 M 117 29 C 111 37 106 45 102 60 M 108 69 C 113 66 119 62 124 58"></path><path class="map-river-small" d="M 24 62 C 31 61 37 59 43 58 M 78 81 C 84 73 91 67 102 60 M 126 78 C 123 71 123 64 124 58"></path>'+mapMinorRoadsSvg()+'</g>'+(layout.tall?seaLabels:'')+regionLabels+routes+labelLeaders+nodes+'</g></svg><div class="map-compass">N</div></div>'+
-    '<div class="map-legend"><span><i class="legend-city"></i> city</span><span><i class="legend-town"></i> town</span><span><i class="legend-village"></i> village</span><span><i class="legend-road"></i> road</span><span><i class="legend-rail"></i> rail</span><span><i class="legend-river"></i> river</span><span><i class="legend-green"></i> terrain</span></div>'+
-    '<div class="map-selection"><div class="map-selection-copy"><b>'+selected.name+'</b><span>'+mapSettlementBadge(selected)+' - '+selected.region+' - population '+selected.population+'</span><em>'+selected.description+'</em></div><button class="btn small" data-map-open="'+selected.id+'">Open Settlement Map &gt;</button></div>';
+/* One coherent gesture pipeline for mouse, pen and touch:
+   - movement over ~5px classifies as drag and suppresses selection,
+     including drags that START on a POI (drag-anywhere panning),
+   - a second quick tap/click within range zooms once toward the point and
+     cancels the pending selection - it works on empty terrain too,
+   - keyboard activation bypasses this via detail===0 synthesized clicks. */
+function handleMapTap(pos,target){
+  const now=Date.now();
+  const svg=$('#mapSvg'); if(!svg) return;
+  if(MapSystem.isDoubleTap(now,{x:pos.clientX,y:pos.clientY},mapLastTap)){
+    mapLastTap=null;
+    if(mapTapTimer){ clearTimeout(mapTapTimer); mapTapTimer=null; }
+    const pt=mapPoint(pos,svg);
+    mapViewport=MapSystem.zoomAtPoint(mapViewport,pt.x,pt.y,mapViewport.scale*1.8,mapViewSize(svg),activeZoomConfig());
+    applyMapTransform(); scheduleMapRefresh();
+    return;
+  }
+  mapLastTap={t:now,x:pos.clientX,y:pos.clientY};
+  if(mapTapTimer) clearTimeout(mapTapTimer);
+  mapTapTimer=setTimeout(()=>{ mapTapTimer=null; activateMapTarget(target); },260);
 }
-renderNationalMap=renderNationalMapNatural;
 function renderMap(){
   const sheet=$('#mapSheet'); if(!sheet||!World||!World.map) return;
-  mapViewport.scale=clamp(mapViewport.scale,MAP_ZOOM_MIN,MAP_ZOOM_MAX);
-  sheet.innerHTML=(World.map.mode==='settlement'?renderSettlementMap():renderNationalMap())+'<div class="ps-foot"><button class="btn" id="mapClose">Close the Map ▸</button></div>';
+  if(World.map.mode!=='settlement'){ mapScene=null; mapAnnoLast=null; }
+  sheet.innerHTML=(World.map.mode==='settlement'?renderSettlementMap():renderNationalMap())+'<div class="ps-foot"><button class="btn" id="mapClose">Close the Map \u25B8</button></div>';
   const svg=$('#mapSvg'); if(!svg) return;
   const viewSize=mapViewSize(svg);
-  svg.addEventListener('wheel',e=>{e.preventDefault();mapViewport.scale=clamp(mapViewport.scale+(e.deltaY<0?.12:-.12),MAP_ZOOM_MIN,MAP_ZOOM_MAX);applyMapTransform();},{passive:false});
+  const zoomCfg=activeZoomConfig();
+  if(World.map.mode!==mapLastMode){
+    /* Entering a settlement fits the whole authored world into the fixed
+       viewport (scale = zoomCfg.min, centered). */
+    if(World.map.mode==='settlement'&&mapScene){
+      const fit=zoomCfg.min;
+      mapViewport={x:viewSize.width/2-mapScene.scene.bounds.w*fit/2,
+        y:viewSize.height/2-mapScene.scene.bounds.h*fit/2,scale:fit};
+    } else mapViewport=MapSystem.createCamera();
+    mapLastMode=World.map.mode;
+  }
+  mapViewport=MapSystem.clampCamera(mapViewport,viewSize,zoomCfg);
+  applyMapTransform();
+  if(World.map.mode==='settlement') refreshSettlementAnnotations(true);
+  svg.addEventListener('wheel',e=>{
+    e.preventDefault();
+    const p=mapPoint(e,svg);
+    mapViewport=MapSystem.zoomAtPoint(mapViewport,p.x,p.y,mapViewport.scale+(e.deltaY<0?.12:-.12),viewSize,zoomCfg);
+    applyMapTransform(); scheduleMapRefresh();
+  },{passive:false});
   svg.addEventListener('pointerdown',e=>{
     if(e.pointerType==='touch') return;
-    const interactive=!!e.target.closest?.('[data-map-settlement],[data-map-building]');
     const point=mapPoint(e,svg);
-    mapPointers.set(e.pointerId,{x:point.x,y:point.y,cx:e.clientX,cy:e.clientY,interactive});
+    mapPointers.set(e.pointerId,{x:point.x,y:point.y,cx:e.clientX,cy:e.clientY});
     svg.setPointerCapture?.(e.pointerId);
-    if(mapPointers.size===1){ mapDragging=interactive?null:{x:e.clientX,y:e.clientY,ox:mapViewport.x,oy:mapViewport.y}; }
+    if(!mapGesture||mapGesture.done){
+      mapGesture={id:e.pointerId,x:e.clientX,y:e.clientY,moved:false,
+        target:e.target.closest?.('[data-map-settlement],[data-map-building]')||null};
+    }
+    /* Drag-anywhere: panning starts regardless of what is under the pointer. */
+    if(mapPointers.size===1){ mapDragging={x:e.clientX,y:e.clientY,ox:mapViewport.x,oy:mapViewport.y}; }
     else if(mapPointers.size===2){
       const pinch=mapPinchState();
       mapDragging={pinch,scale:mapViewport.scale,x:mapViewport.x,y:mapViewport.y};
+      if(mapGesture) mapGesture.moved=true;
     }
   });
   svg.addEventListener('pointermove',e=>{
     if(e.pointerType==='touch') return;
+    if(mapGesture&&mapGesture.id===e.pointerId){
+      if(MapSystem.classifyGesture(e.clientX-mapGesture.x,e.clientY-mapGesture.y)==='drag') mapGesture.moved=true;
+    }
     if(!mapPointers.has(e.pointerId)) return;
     e.preventDefault();
     const previous=mapPointers.get(e.pointerId), point=mapPoint(e,svg);
-    mapPointers.set(e.pointerId,{x:point.x,y:point.y,cx:e.clientX,cy:e.clientY,interactive:previous?.interactive});
+    mapPointers.set(e.pointerId,{x:point.x,y:point.y,cx:e.clientX,cy:e.clientY});
     if(mapPointers.size>=2){
       const pinch=mapPinchState(); if(!pinch||!mapDragging?.pinch) return;
-      const oldScale=mapDragging.scale, newScale=clamp(oldScale*(pinch.distance/mapDragging.pinch.distance),MAP_ZOOM_MIN,MAP_ZOOM_MAX);
-      const focal=mapDragging.pinch.center;
-      mapViewport.scale=newScale;
-      mapViewport.x=focal.x-(focal.x-mapDragging.x)*newScale/oldScale+(pinch.center.x-focal.x);
-      mapViewport.y=focal.y-(focal.y-mapDragging.y)*newScale/oldScale+(pinch.center.y-focal.y);
+      const oldScale=mapDragging.scale, newScale=clamp(oldScale*(pinch.distance/mapDragging.pinch.distance),zoomCfg.min,zoomCfg.max);
+      const focal=mapDragging.pinch.center, base={scale:oldScale,x:mapDragging.x,y:mapDragging.y};
+      const zoomed=MapSystem.zoomAtPoint(base,focal.x,focal.y,newScale,viewSize,zoomCfg);
+      mapViewport=MapSystem.clampCamera({scale:zoomed.scale,x:zoomed.x+(pinch.center.x-focal.x),y:zoomed.y+(pinch.center.y-focal.y)},viewSize,zoomCfg);
       applyMapTransform(); return;
     }
     if(!mapDragging) return;
-    mapViewport.x=mapDragging.ox+(e.clientX-mapDragging.x)/svg.clientWidth*viewSize.width;
-    mapViewport.y=mapDragging.oy+(e.clientY-mapDragging.y)/svg.clientHeight*viewSize.height;
+    mapViewport=MapSystem.clampCamera({
+      scale:mapViewport.scale,
+      x:mapDragging.ox+(point.x-mapDragging.wx),
+      y:mapDragging.oy+(point.y-mapDragging.wy)
+    },viewSize,zoomCfg);
     applyMapTransform();
   });
   function endMapPointer(e){
     if(e.pointerType==='touch') return;
+    if(mapGesture&&mapGesture.id===e.pointerId){
+      if(!mapGesture.moved) handleMapTap({clientX:e.clientX,clientY:e.clientY},mapGesture.target);
+      mapGesture.done=true;
+    }
     mapPointers.delete(e.pointerId);
     if(mapPointers.size===1){
       const [point]=mapPointers.values();
-      mapDragging=point.interactive?null:{x:point.cx,y:point.cy,ox:mapViewport.x,oy:mapViewport.y};
+      mapDragging={wx:point.x,wy:point.y,ox:mapViewport.x,oy:mapViewport.y};
     } else if(!mapPointers.size) mapDragging=null;
   }
   svg.addEventListener('pointerup',endMapPointer);
   svg.addEventListener('pointercancel',endMapPointer);
 
   // Mobile browsers can retarget pointer events to SVG objects during a pinch.
-  // Handle native touch events separately so dots/buildings never block zoom.
+  // Handle native touch events separately so buildings never block zooming.
   function touchCenter(touches){
     const a=touches[0],b=touches[1]||touches[0];
     return {x:(a.clientX+b.clientX)/2,y:(a.clientY+b.clientY)/2};
@@ -1135,37 +1308,58 @@ function renderMap(){
     const center=touchCenter(e.touches);
     if(e.touches.length>=2){
       e.preventDefault();
+      mapTouchMoved=true;
       const p=mapPoint({clientX:center.x,clientY:center.y},svg);
       mapTouchState={mode:'pinch',center:p,distance:touchDistance(e.touches),scale:mapViewport.scale,x:mapViewport.x,y:mapViewport.y};
     } else if(e.touches.length===1){
-      mapTouchState={mode:'pan',x:e.touches[0].clientX,y:e.touches[0].clientY,ox:mapViewport.x,oy:mapViewport.y};
+      mapTouchMoved=false;
+      const pt=mapPoint({clientX:e.touches[0].clientX,clientY:e.touches[0].clientY},svg);
+      mapGesture={id:'touch',x:e.touches[0].clientX,y:e.touches[0].clientY,moved:false,
+        target:e.target.closest?.('[data-map-settlement],[data-map-building]')||null};
+      mapTouchState={mode:'pan',wx:pt.x,wy:pt.y,cx:e.touches[0].clientX,cy:e.touches[0].clientY,ox:mapViewport.x,oy:mapViewport.y};
     }
   },{passive:false});
   svg.addEventListener('touchmove',e=>{
     e.preventDefault();
     if(e.touches.length>=2){
+      mapTouchMoved=true;
+      if(mapGesture) mapGesture.moved=true;
       const center=touchCenter(e.touches), current=mapPoint({clientX:center.x,clientY:center.y},svg);
       if(!mapTouchState||mapTouchState.mode!=='pinch'){
         mapTouchState={mode:'pinch',center:current,distance:touchDistance(e.touches),scale:mapViewport.scale,x:mapViewport.x,y:mapViewport.y};
         return;
       }
       const oldScale=mapTouchState.scale;
-      const newScale=clamp(oldScale*(touchDistance(e.touches)/mapTouchState.distance),MAP_ZOOM_MIN,MAP_ZOOM_MAX);
-      mapViewport.scale=newScale;
-      mapViewport.x=mapTouchState.center.x-(mapTouchState.center.x-mapTouchState.x)*newScale/oldScale+(current.x-mapTouchState.center.x);
-      mapViewport.y=mapTouchState.center.y-(mapTouchState.center.y-mapTouchState.y)*newScale/oldScale+(current.y-mapTouchState.center.y);
+      const newScale=clamp(oldScale*(touchDistance(e.touches)/mapTouchState.distance),zoomCfg.min,zoomCfg.max);
+      const focal=mapTouchState.center, base={scale:oldScale,x:mapTouchState.x,y:mapTouchState.y};
+      const zoomed=MapSystem.zoomAtPoint(base,focal.x,focal.y,newScale,viewSize,zoomCfg);
+      mapViewport=MapSystem.clampCamera({scale:zoomed.scale,x:zoomed.x+(current.x-focal.x),y:zoomed.y+(current.y-focal.y)},viewSize,zoomCfg);
       applyMapTransform();
     } else if(e.touches.length===1&&mapTouchState?.mode==='pan'){
       const t=e.touches[0];
-      mapViewport.x=mapTouchState.ox+(t.clientX-mapTouchState.x)/svg.clientWidth*viewSize.width;
-      mapViewport.y=mapTouchState.oy+(t.clientY-mapTouchState.y)/svg.clientHeight*viewSize.height;
+      if(MapSystem.classifyGesture(t.clientX-mapTouchState.cx,t.clientY-mapTouchState.cy)==='drag') mapTouchMoved=true;
+      if(mapGesture&&MapSystem.classifyGesture(t.clientX-mapGesture.x,t.clientY-mapGesture.y)==='drag') mapGesture.moved=true;
+      const cur=mapPoint({clientX:t.clientX,clientY:t.clientY},svg);
+      mapViewport=MapSystem.clampCamera({
+        scale:mapViewport.scale,
+        x:mapTouchState.ox+(cur.x-mapTouchState.wx),
+        y:mapTouchState.oy+(cur.y-mapTouchState.wy)
+      },viewSize,zoomCfg);
       applyMapTransform();
     }
   },{passive:false});
   function endMapTouch(e){
-    if(e.touches.length===0){ mapTouchState=null; return; }
+    if(e.touches.length===0){
+      if(mapGesture&&!mapGesture.moved&&e.changedTouches&&e.changedTouches.length){
+        const t=e.changedTouches[0];
+        handleMapTap({clientX:t.clientX,clientY:t.clientY},mapGesture.target);
+      }
+      mapGesture=null; mapTouchState=null; return;
+    }
     if(e.touches.length===1){
-      mapTouchState={mode:'pan',x:e.touches[0].clientX,y:e.touches[0].clientY,ox:mapViewport.x,oy:mapViewport.y};
+      mapTouchMoved=false;
+      const pt=mapPoint({clientX:e.touches[0].clientX,clientY:e.touches[0].clientY},svg);
+      mapTouchState={mode:'pan',wx:pt.x,wy:pt.y,cx:e.touches[0].clientX,cy:e.touches[0].clientY,ox:mapViewport.x,oy:mapViewport.y};
     }
   }
   svg.addEventListener('touchend',endMapTouch,{passive:false});
@@ -1173,14 +1367,28 @@ function renderMap(){
 }
 function openMap(){
   if(!S||!World) return; if(!World.map) World.map={discoveredSettlementIds:[World.activeSettlementId],visitedSettlementIds:[World.activeSettlementId],selectedSettlementId:World.activeSettlementId,selectedBuildingId:World.activeBuildingId,mode:'national'};
-  World.map.mode='national'; World.map.selectedSettlementId=World.activeSettlementId; mapViewport={x:0,y:0,scale:1}; renderMap(); $('#mapWrap').classList.remove('hidden');
+  World.map.mode='national'; World.map.selectedSettlementId=World.activeSettlementId; mapViewport=MapSystem.createCamera(); mapLastMode=null; mapScene=null; mapAnnoLast=null; renderMap(); $('#mapWrap').classList.remove('hidden');
 }
 $('#mapWrap').addEventListener('click',e=>{
   if(e.target.id==='mapWrap'||e.target.id==='mapClose'){ $('#mapWrap').classList.add('hidden'); return; }
-  const mode=e.target.closest('[data-map-mode]'); if(mode){ World.map.mode=mode.dataset.mapMode; mapViewport={x:0,y:0,scale:1}; renderMap(); return; }
-  const settlement=e.target.closest('[data-map-settlement]'); if(settlement){ World.map.selectedSettlementId=settlement.dataset.mapSettlement; World.map.mode='national'; renderMap(); return; }
-  const building=e.target.closest('[data-map-building]'); if(building){ World.map.selectedBuildingId=building.dataset.mapBuilding; moveWithinSettlement(building.dataset.mapBuilding); return; }
-  const open=e.target.closest('[data-map-open]'); if(open){ World.map.selectedSettlementId=open.dataset.mapOpen; World.map.mode='settlement'; const s=settlementById(open.dataset.mapOpen); World.map.selectedBuildingId=s.buildings[0].id; mapViewport={x:0,y:0,scale:1}; renderMap(); return; }
+  const keyToggle=e.target.closest('[data-map-key-toggle]');
+  if(keyToggle){
+    const box=keyToggle.closest('[data-map-key]');
+    if(box){ const open=box.classList.toggle('open'); keyToggle.setAttribute('aria-expanded',open?'true':'false'); }
+    return;
+  }
+  const zbtn=e.target.closest('[data-map-zoom]');
+  if(zbtn){ mapZoomStep(zbtn.dataset.mapZoom==='in'?1.45:1/1.45); return; }
+  if(e.target.closest('[data-map-fit]')){ mapFitView(); return; }
+  if(e.target.closest('[data-map-here]')){ mapGoHere(); return; }
+  const mode=e.target.closest('[data-map-mode]'); if(mode){ World.map.mode=mode.dataset.mapMode; mapViewport=MapSystem.createCamera(); mapLastMode=null; mapScene=null; mapAnnoLast=null; renderMap(); return; }
+  /* Node/building selection is owned by the tap pipeline for pointer input;
+     detail===0 marks keyboard-synthesized clicks. */
+  const settlement=e.target.closest('[data-map-settlement]');
+  if(settlement){ if(!e.detail) activateMapTarget(settlement); return; }
+  const building=e.target.closest('[data-map-building]');
+  if(building){ if(!e.detail) activateMapTarget(building); return; }
+  const open=e.target.closest('[data-map-open]'); if(open){ World.map.selectedSettlementId=open.dataset.mapOpen; World.map.mode='settlement'; const s=settlementById(open.dataset.mapOpen); World.map.selectedBuildingId=s.buildings[0].id; mapViewport=MapSystem.createCamera(); mapLastMode=null; mapScene=null; mapAnnoLast=null; renderMap(); return; }
   const travel=e.target.closest('[data-map-travel]'); if(travel){ const result=scheduleTravel(travel.dataset.mapTravel); if(!result.ok) openNotice({title:'Travel Denied',body:result.reason+'. The map remains open; the route does not.'}); else renderMap(); return; }
 });
 $('#mapWrap').addEventListener('keydown',e=>{
@@ -1263,6 +1471,8 @@ function renderStage(){
   el.textContent=STAGE_INFO[S.stage].name;
   renderLifeRibbon();
 }
+// ENERGY: the year's budget for deliberate action. Same arithmetic the old
+// "hours" ran on, renamed to what it always meant -- vigor, not clock time.
 function computeHours(){
   if(S.age<6||S.jailUntil>S.age) return 0;
   let h=S.age<14?2:S.age<65?3:2;
@@ -1271,16 +1481,33 @@ function computeHours(){
   return clamp(h,0,4);
 }
 function planHours(){ const total=computeHours(); return Math.max(0,total-(S.autoTrain&&total>=1?1:0)); }
+function energyUsed(){
+  const done=doneActionsThisYear().reduce((a,id)=>{const d=PUR_MAP[id]?PUR_MAP[id].cost:(DEC_MAP[id]?DEC_MAP[id].cost:0);return a+(d||0);},0);
+  return done+S.queue.reduce((a,q)=>a+(PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0)),0);
+}
+// Actions performed directly this year (the LIVE sheet resolves instantly;
+// this ledger enforces once-per-year actions and feeds why-not reasons).
+function doneActionsThisYear(){
+  const y=currentYear();
+  if(!S.__doneActions||typeof S.__doneActions!=='object'||Array.isArray(S.__doneActions)) return [];
+  return Array.isArray(S.__doneActions[y])?S.__doneActions[y]:[];
+}
+function markActionDone(id){
+  const y=currentYear();
+  if(!S.__doneActions||typeof S.__doneActions!=='object'||Array.isArray(S.__doneActions)) S.__doneActions={};
+  (S.__doneActions[y]=S.__doneActions[y]||[]).push(id);
+  S.__actedThisYear=true;
+}
 function updateBar(){
-  const total=computeHours(), h=planHours(), used=S.queue.reduce((a,q)=>a+(PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0)),0);
+  const total=computeHours(), h=planHours(), used=energyUsed();
   const rem=Math.max(0,h-used), btn=$('#btn-plan'), lab=$('#plan-label'), pips=$('#plan-pips');
   pips.innerHTML=''; for(let i=0;i<h;i++){const e=document.createElement('i'); if(i<rem)e.className='on'; pips.appendChild(e);}
   const disabled = slipOpen || total===0 || !S.alive;
   btn.classList.toggle('disabled',disabled); btn.classList.toggle('ready',!disabled);
   if(slipOpen) lab.textContent='RESOLVE SLIP FIRST';
   else if(total===0) lab.textContent=(S.jailUntil>S.age?'IN CUSTODY':'NO AGENCY YET');
-  else lab.textContent='PLAN THE YEAR';
-  $('#bar-micro').textContent = h===0 ? (S.jailUntil>S.age?'in custody — stamp the years':'too young to choose — stamp the years') : 'plan the year · stamp it forward';
+  else lab.textContent='LIVE THE YEAR';
+  $('#bar-micro').textContent = h===0 ? (S.jailUntil>S.age?'in custody — stamp the years':'too young to choose — stamp the years') : 'act now · then stamp the year forward';
 }
 
 /* ================= PLAN SHEET ================= */
@@ -1290,7 +1517,8 @@ function openPlan(){
   snd('paper'); renderPlan(); $('#planWrap').classList.remove('hidden');
 }
 function closePlan(){ $('#planWrap').classList.add('hidden'); }
-function actionReservedThisYear(id){ return S.queue.some(q=>q.id===id)||(id==='practice'&&S.autoTrain); }
+function renderPlanIfOpen(){ const w=$('#planWrap'); if(w&&!w.classList.contains('hidden')) renderPlan(); }
+function actionReservedThisYear(id){ return doneActionsThisYear().includes(id)||S.queue.some(q=>q.id===id)||(id==='practice'&&S.autoTrain); }
 function actionReservedNote(id){ return id==='practice'&&S.autoTrain?'reserved for auto-training':'already filed this year'; }
 function oddsHint(id){
   try{
@@ -1321,19 +1549,21 @@ function planActionButton(def,type,rem){
   const label=isP?pursuitLabel(def):decisionLabel(def);
   const fxLine=(ok&&!dup)?fxPreviewHtmlSafe(def):'';
   const odds=ok&&!dup?oddsHint(id):null;
-  return '<button class="slipbtn'+(def.dark?' dark':'')+(cant?' cant':'')+(dup?' queued':'')+'" data-'+type+'="'+id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(def.icon?'<span class="sb-icon">'+def.icon+'</span> ':'')+fillLabel(label)+(odds?'<span class="sb-odds">'+odds+'</span>':'')+'</span><span class="sb-cost">'+(def.cost?def.cost+'h':'free')+'</span></div><div class="sb-note">'+planNoteText(def,type,id,ok,afford,dup)+'</div>'+fxLine+'</button>';
+  return '<button class="slipbtn'+(def.dark?' dark':'')+(cant?' cant':'')+'" data-'+type+'="'+id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(def.icon?'<span class="sb-icon">'+def.icon+'</span> ':'')+fillLabel(label)+(odds?'<span class="sb-odds">'+odds+'</span>':'')+'</span><span class="sb-cost">'+(def.cost?'⚡'+def.cost:'free')+'</span></div><div class="sb-note">'+planNoteText(def,type,id,ok,afford,dup)+'</div>'+fxLine+'</button>';
 }
 function fxPreviewHtmlSafe(def){
   try{const h=typeof def.fx==='object'&&def.fx?fxPreviewChips(def.fx):'';return h?'<div class="sb-fx">'+h+'</div>':'';}catch(e){return '';}
 }
 let planTab='pursuits';
 function renderPlan(){
-  const h=planHours(), used=S.queue.reduce((a,q)=>a+(PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0)),0);
+  const h=planHours(), used=energyUsed();
   const rem=Math.max(0,h-used);
   let qh='';
-  if(S.queue.length){ S.queue.forEach((q,i)=>{const d=PUR_MAP[q.id]||DEC_MAP[q.id]; qh+='<div class="qitem">'+(d.icon?d.icon+' ':'')+(d.dark?'⚑ ':'')+fillLabel(labelOf(q))+'<button class="qx" data-rm="'+i+'">✕</button></div>';}); }
-  else qh='<div class="qempty">Nothing filed yet.</div>';
-  const autoRow='<button class="autotrain-toggle'+(S.autoTrain?' on':'')+'" id="autoTrainBtn"><b>AUTO-TRAIN A SKILL</b><span>'+(S.autoTrain?'ON · best skill trains itself':'OFF · reserve 1h each year')+'</span></button>';
+  const doneList=doneActionsThisYear();
+  if(doneList.length){
+    qh='<div class="qempty">Already done this year: '+doneList.map(id=>{const d=PUR_MAP[id]||DEC_MAP[id];return d?fillLabel(pursuitLabel(d)||decisionLabel(d)):id;}).filter(Boolean).join(' · ')+'.</div>';
+  }
+  const autoRow='<button class="autotrain-toggle'+(S.autoTrain?' on':'')+'" id="autoTrainBtn"><b>AUTO-TRAIN A SKILL</b><span>'+(S.autoTrain?'ON · reserves ⚡1 for year-end practice':'OFF · keep all your energy for now')+'</span></button>';
   let ph='';
   PUR_CATS.forEach(cat=>{
     if(cat.id==='hold') return;
@@ -1341,7 +1571,7 @@ function renderPlan(){
     let ih='';
     items.forEach(p=>{const ok=p.avail(S); const afford=rem>=p.cost;
       const dup=actionReservedThisYear(p.id); const cant=!ok||!afford||dup;
-      ih+='<button class="slipbtn'+(p.dark?' dark':'')+(cant?' cant':'')+(dup?' queued':'')+'" data-p="'+p.id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(p.icon?'<span class="sb-icon">'+p.icon+'</span> ':'')+fillLabel(pursuitLabel(p))+'</span><span class="sb-cost">'+(p.cost?p.cost+'h':'free')+'</span></div><div class="sb-note">'+(ok?(dup?actionReservedNote(p.id):fillLabel(p.note(S))):'— not available this year')+'</div></button>';});
+      ih+='<button class="slipbtn'+(p.dark?' dark':'')+(cant?' cant':'')+'" data-p="'+p.id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(p.icon?'<span class="sb-icon">'+p.icon+'</span> ':'')+fillLabel(pursuitLabel(p))+'</span><span class="sb-cost">'+(p.cost?'⚡'+p.cost:'free')+'</span></div><div class="sb-note">'+(ok?(dup?actionReservedNote(p.id):fillLabel(p.note(S))):(dup?actionReservedNote(p.id):'— not available now'))+'</div></button>';});
     ph+='<div class="ps-catlab">'+cat.label+'</div><div class="sliplist">'+ih+'</div>';
   });
   let hh='';
@@ -1378,23 +1608,23 @@ function renderPlan(){
   }
   let body='';
   if(planTab==='decisions'){ body=dh+hh; }
-  else if(planTab==='desk'){ body=(lh?'<div class="ps-catlab">LIVING — NO HOURS</div>'+lh:'')+'<div class="ps-catlab">CLERK’S DISCRETION</div><div class="ps-clerk">'+ch+'</div>'; }
+  else if(planTab==='desk'){ body=(lh?'<div class="ps-catlab">LIVING — NO ENERGY</div>'+lh:'')+'<div class="ps-catlab">CLERK’S DISCRETION</div><div class="ps-clerk">'+ch+'</div>'; }
   else {
     const recChips=recommendedActions(rem);
     const recStrip=recChips.length?'<div class="rec-strip"><span class="rec-lab">SUGGESTED NOW</span>'+recChips.join('')+'</div>':'';
     body=recStrip+autoRow+ph;
   }
   $('#planSheet').innerHTML=
-    '<div class="ps-head"><span>SCHEDULE OF PURSUITS · FORM 7</span><span style="display:flex;align-items:center;gap:10px"><span class="hrs">'+rem+'/'+h+' HOURS '+pipsHTML(rem,h)+'</span><button class="ps-close" id="planClose" aria-label="Close">✕</button></span></div>'+
-    '<div class="ps-sub"><span>FILED THIS YEAR</span>'+(S.queue.length?'<button class="voidbtn" id="voidLast">VOID LAST</button>':'')+'</div>'+qh+
+    '<div class="ps-head"><span>DIRECT ORDERS · FORM 7</span><span style="display:flex;align-items:center;gap:10px"><span class="hrs">⚡ '+rem+'/'+h+' ENERGY '+pipsHTML(rem,h)+'</span><button class="ps-close" id="planClose" aria-label="Close">✕</button></span></div>'+
+    '<div class="ps-sub"><span>WHAT IS DONE IS DONE — ACTS LAND IMMEDIATELY</span></div>'+qh+
     '<div class="plan-tabs">'+
-      '<button class="ptab'+(planTab==='pursuits'?' on':'')+'" data-plan-tab="pursuits">PURSUITS</button>'+
+      '<button class="ptab'+(planTab==='pursuits'?' on':'')+'" data-plan-tab="pursuits">ACT NOW</button>'+
       '<button class="ptab'+(planTab==='decisions'?' on':'')+'" data-plan-tab="decisions">DECISIONS</button>'+
       '<button class="ptab'+(planTab==='desk'?' on':'')+'" data-plan-tab="desk">BUREAU DESK</button>'+
     '</div>'+
     body+
     projectionHtml(rem)+
-    '<div class="ps-foot sticky"><button class="btn" id="sealAdvance">Seal &amp; Advance the Year ▸</button></div>';
+    '<div class="ps-foot sticky"><button class="btn" id="sealAdvance">End the Year ▸</button></div>';
 }
 function pipsHTML(rem,h){let s='';for(let i=0;i<h;i++)s+='<i class="'+(i<rem?'on':'')+'"></i>';return s;}
 function lifeToggle(items,current,dataAttr,priceFn){
@@ -1430,20 +1660,38 @@ $('#planSheet').addEventListener('click',e=>{
     S.autoTrain=!S.autoTrain; snd('stamp'); renderPlan(); updateBar(); return;
   }
   const rm=e.target.closest('[data-rm]'); if(rm){S.queue.splice(+rm.dataset.rm,1);snd('paper');renderPlan();updateBar();return;}
-  const pb=e.target.closest('[data-p]'); if(pb&&!pb.classList.contains('cant')){ triggerAction('p',pb.dataset.p); return; }
+  const uiOpen=e.target.closest('[data-ui-open]');
+  if(uiOpen){ if(uiOpen.dataset.uiOpen==='household'){ snd('paper'); openHousehold(); } return; }
+  const pb=e.target.closest('[data-p]'); if(pb&&!pb.classList.contains('cant')){
+    let ex=null; try{ex=pb.dataset.extra?JSON.parse(pb.dataset.extra):null;}catch(err){ex=null;}
+    if(ex&&pb.dataset.p==='gig'&&ex.openingId){ performActionNow('p','gig',{gigId:ex.gigId||null,openingId:ex.openingId}); return; }
+    triggerAction('p',pb.dataset.p); return; }
   const db=e.target.closest('[data-d]'); if(db&&!db.classList.contains('cant')){ triggerAction('d',db.dataset.d); return; }
   const cb=e.target.closest('[data-c]'); if(cb&&cb.classList.contains('ready')){deskAction(cb.dataset.c);renderPlan();return;}
   if(e.target.closest('#openHousehold')){ snd('paper'); openHousehold(); return; }
   if(e.target.closest('#askMoveOut')){ snd('paper'); closePlan(); openLivingDilemma('leave-request'); return; }
-  if(e.target.id==='voidLast'){S.queue.pop();snd('paper');renderPlan();updateBar();return;}
   if(e.target.id==='sealAdvance'){coachSet('seal');closePlan();advance();return;}
 });
-function queueAdd(type,id,extra){
+// LIVE ACTIONS: clicking an action performs it immediately -- effects, log
+// line, and energy cost land right now, not at year's end. The old queue
+// survives only as the fast-forward autopilot's internal scratchpad.
+function performActionNow(type,id,extra){
+  if(!S||!S.alive||slipOpen) return;
   const d=type==='p'?PUR_MAP[id]:DEC_MAP[id]; if(!d) return;
   if(actionReservedThisYear(id)){ shake(); return; }
-  const h=planHours(), used=S.queue.reduce((a,q)=>a+(PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0)),0);
-  if(used+d.cost>h){shake();return;}
-  S.queue.push(Object.assign({id,type},extra||{})); snd('stamp'); renderPlan(); updateBar();
+  const total=planHours(), used=energyUsed();
+  if(used+(d.cost||0)>total){ shake(); snd('stamp'); return; }
+  window.C={}; S.acts++;
+  let r;
+  if(id==='learntrade'&&extra&&extra.program&&typeof educationCompleteProgram==='function'){
+    const result=educationCompleteProgram(extra.program);
+    r=result.ok?{fx:{happiness:2},text:'Subject completed '+result.program.name+'. '+result.program.desc+(result.shortfall?' The unpaid '+money(result.shortfall)+' was entered as education debt.':' The certificate was paid from assets.') }:{fx:{happiness:-1},text:'Subject reached for vocational training, but the course was not available on the current record.'};
+  } else r=d.apply(S,extra||{});
+  const chips=r&&r.fx?applyFx(r.fx):[];
+  if(r&&r.follow) pushFollow(r.follow);
+  logChips(r&&r.text?fill(r.text):'It was done.',chips,type==='p'?'plan':'decision',(type==='p'?'PURSUIT':'DECISION')+' · NOW');
+  markActionDone(id);
+  renderStats(window.C); updateBar(); renderPlanIfOpen();
 }
 const CONTACT_TARGET_ROLES={flirt:null,flirtsecret:'affair',tendcontact:'friend',cutcontact:null};
 function openContactTargetPicker(id){
@@ -1453,14 +1701,14 @@ function openContactTargetPicker(id){
     if(roles==='friend')return c.role==='friend';
     return true;
   });
-  if(!cands.length){queueAdd('p',id,{});return;}
+  if(!cands.length){performActionNow('p',id,{});return;}
   const rows=cands.map(c=>'<button class="chipbtn" data-cid="'+c.cid+'"><b>'+sexSym(c.sex)+' '+abbrevName(c.name,18)+'</b><span>'+moodPips(c.mood)+' · '+charmLabel(c.charm!=null?c.charm:50)+'</span></button>').join('');
   $('#skillSheet').innerHTML='<div class="ps-head"><span>'+fillLabel(pursuitLabel(def)).toUpperCase()+' — CHOOSE WHO</span></div>'+
     '<div class="chips">'+rows+'</div>'+
     '<div class="ps-foot"><button class="btn" id="skillCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
     const b=e.target.closest('[data-cid]');
-    if(b){queueAdd('p',id,{cid:b.dataset.cid});$('#skillWrap').classList.add('hidden');return;}
+    if(b){performActionNow('p',id,{cid:b.dataset.cid});$('#skillWrap').classList.add('hidden');return;}
     if(e.target.id==='skillCancel')$('#skillWrap').classList.add('hidden');
   };
   $('#skillWrap').classList.remove('hidden');
@@ -1474,11 +1722,11 @@ function triggerAction(type,id,extra){
     if(id==='gig'){openGigPicker();return;}
     if(id==='meetsomeone'){openMeetPicker();return;}
     if(Object.prototype.hasOwnProperty.call(CONTACT_TARGET_ROLES,id)){openContactTargetPicker(id);return;}
-    queueAdd('p',id,extra);
+    performActionNow('p',id,extra);
   } else {
     if(id==='learntrade'){openTrainingPicker();return;}
     if(id==='treatment'){openMedicalTreatmentPicker();return;}
-    queueAdd('d',id,extra);
+    performActionNow('d',id,extra);
   }
 }
 const PER_CONTACT_IDS=new Set(['flirt','flirtsecret','tendcontact','covertracks']);
@@ -1628,7 +1876,7 @@ function openSkillPick(){
     '<div style="margin:0 2px">'+ih+'</div>'+
     '<div class="ps-foot"><button class="btn" id="skillCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
-    const sb=e.target.closest('[data-skill]'); if(sb){queueAdd('p','practice',{skill:sb.dataset.skill}); $('#skillWrap').classList.add('hidden'); return;}
+    const sb=e.target.closest('[data-skill]'); if(sb){performActionNow('p','practice',{skill:sb.dataset.skill}); $('#skillWrap').classList.add('hidden'); return;}
     if(e.target.id==='skillCancel'){$('#skillWrap').classList.add('hidden');}
     const row=e.target.closest('[data-skill-row]'); if(row){openSkillDetail(row.dataset.skillRow);return;}
   };
@@ -1658,7 +1906,7 @@ function openSkillDetail(skillId){
     '<div style="margin:4px 2px 0">'+rows+'</div>'+
     '<div class="ps-foot">'+(canTrain?'<button class="btn" style="margin-bottom:8px" data-train="'+skillId+'">Train This Year ▸</button>':'')+'<button class="btn" id="skillDetailClose">Close ▸</button></div>';
   $('#jobDetailSheet').onclick=e=>{
-    const b=e.target.closest('[data-train]'); if(b){queueAdd('p','practice',{skill:b.dataset.train}); $('#jobDetailWrap').classList.add('hidden'); $('#skillWrap').classList.add('hidden'); return;}
+    const b=e.target.closest('[data-train]'); if(b){performActionNow('p','practice',{skill:b.dataset.train}); $('#jobDetailWrap').classList.add('hidden'); $('#skillWrap').classList.add('hidden'); return;}
     if(e.target.id==='skillDetailClose'){$('#jobDetailWrap').classList.add('hidden');}
   };
   $('#jobDetailWrap').classList.remove('hidden');
@@ -1676,7 +1924,7 @@ function openTrainingPicker(){
     '<div class="ps-foot"><button class="btn" id="trainingCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
     const b=e.target.closest('[data-training]');
-    if(b){queueAdd('d','learntrade',{program:b.dataset.training});$('#skillWrap').classList.add('hidden');return;}
+    if(b){performActionNow('d','learntrade',{program:b.dataset.training});$('#skillWrap').classList.add('hidden');return;}
     if(e.target.id==='trainingCancel')$('#skillWrap').classList.add('hidden');
   };
   $('#skillWrap').classList.remove('hidden');
@@ -1729,7 +1977,7 @@ function openJobPortal(){
     '<button class="household-tile" id="openGigs"><b>🕶 Off the Books</b><span>Paid in cash — maybe</span><i>No résumé required.</i></button>'+
     '<div class="ps-foot"><button class="btn" id="jobCancel">Keep Looking ▸</button></div>';
   $('#jobSheet').onclick=e=>{
-    const b=e.target.closest('[data-apply]'); if(b){ queueAdd('p','lookwork',{track:b.dataset.track,stage:+b.dataset.stage}); $('#jobWrap').classList.add('hidden'); return; }
+    const b=e.target.closest('[data-apply]'); if(b){ performActionNow('p','lookwork',{track:b.dataset.track,stage:+b.dataset.stage}); $('#jobWrap').classList.add('hidden'); return; }
     if(e.target.id==='jobCancel'){ $('#jobWrap').classList.add('hidden'); return; }
     if(e.target.closest('#openGigs')){ $('#jobWrap').classList.add('hidden'); openGigPicker(); return; }
     const row=e.target.closest('[data-track-row]'); if(row){ openJobDetail(row.dataset.trackRow); }
@@ -1778,7 +2026,7 @@ function openJobPortalPersistent(){
     '<button class="household-tile" id="openGigs"><b>🕶 Off the Books</b><span>Paid in cash — maybe</span><i>No résumé required.</i></button>'+
     '<div class="ps-foot"><button class="btn" id="jobCancel">Keep Looking ▸</button></div>';
   $('#jobSheet').onclick=e=>{
-    const b=e.target.closest('[data-apply]'); if(b){ queueAdd('p','lookwork',{vacancyId:b.dataset.vacancy}); $('#jobWrap').classList.add('hidden'); return; }
+    const b=e.target.closest('[data-apply]'); if(b){ performActionNow('p','lookwork',{vacancyId:b.dataset.vacancy}); $('#jobWrap').classList.add('hidden'); return; }
     if(e.target.id==='jobCancel'){ $('#jobWrap').classList.add('hidden'); return; }
     if(e.target.closest('#openGigs')){ $('#jobWrap').classList.add('hidden'); openGigPicker(); return; }
     const row=e.target.closest('[data-track-row]'); if(row&&row.dataset.trackRow){ openJobDetail(row.dataset.trackRow,row.dataset.vacancyRow); }
@@ -1807,7 +2055,7 @@ function openGigPicker(){
     ch+
     '<div class="ps-foot"><button class="btn" id="skillCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
-    const gb=e.target.closest('[data-gig]'); if(gb){queueAdd('p','gig',{gig:gb.dataset.gig}); $('#skillWrap').classList.add('hidden'); return;}
+    const gb=e.target.closest('[data-gig]'); if(gb){performActionNow('p','gig',{gig:gb.dataset.gig}); $('#skillWrap').classList.add('hidden'); return;}
     if(e.target.id==='skillCancel'){$('#skillWrap').classList.add('hidden');}
   };
   $('#skillWrap').classList.remove('hidden');
@@ -1826,7 +2074,7 @@ function openMeetPicker(){
     '<div class="chips">'+ch+'</div>'+
     '<div class="ps-foot"><button class="btn" id="skillCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
-    const vb=e.target.closest('[data-venue]'); if(vb){queueAdd('p','meetsomeone',{venue:vb.dataset.venue}); $('#skillWrap').classList.add('hidden'); return;}
+    const vb=e.target.closest('[data-venue]'); if(vb){performActionNow('p','meetsomeone',{venue:vb.dataset.venue}); $('#skillWrap').classList.add('hidden'); return;}
     if(e.target.id==='skillCancel'){$('#skillWrap').classList.add('hidden');}
   };
   $('#skillWrap').classList.remove('hidden');
@@ -1882,8 +2130,8 @@ function openJobDetail(trackId,vacancyId){
   $('#jobDetailSheet').onclick=e=>{
     const b=e.target.closest('[data-apply]');
     if(b){
-      if(b.dataset.vacancy) queueAdd('p','lookwork',{vacancyId:b.dataset.vacancy});
-      else queueAdd('p','lookwork',{track:b.dataset.track,stage:+b.dataset.stage});
+      if(b.dataset.vacancy) performActionNow('p','lookwork',{vacancyId:b.dataset.vacancy});
+      else performActionNow('p','lookwork',{track:b.dataset.track,stage:+b.dataset.stage});
       $('#jobDetailWrap').classList.add('hidden'); $('#jobWrap').classList.add('hidden'); return;
     }
     if(e.target.id==='jobDetailClose'){ $('#jobDetailWrap').classList.add('hidden'); }
@@ -1949,7 +2197,7 @@ function openMemberPick(){
   $('#skillSheet').innerHTML='<div class="ps-head"><span>CHOOSE WHO TO LOOK AFTER</span></div><div class="chips">'+ch+'</div>'+
     '<div class="ps-foot"><button class="btn" id="skillCancel">Never Mind ▸</button></div>';
   $('#skillSheet').onclick=e=>{
-    const mb=e.target.closest('[data-member]'); if(mb){queueAdd('p','tendmember',{member:mb.dataset.member}); $('#skillWrap').classList.add('hidden'); return;}
+    const mb=e.target.closest('[data-member]'); if(mb){performActionNow('p','tendmember',{member:mb.dataset.member}); $('#skillWrap').classList.add('hidden'); return;}
     if(e.target.id==='skillCancel'){$('#skillWrap').classList.add('hidden');}
   };
   $('#skillWrap').classList.remove('hidden');
@@ -2086,6 +2334,99 @@ function resolveNotice(n){
   }
 }
 
+/* ================= KARSEN FILES — VISUAL NOVEL WINDOW =================
+ * Episodes play as scenes of quoted dialogue: backdrop, colored speaker
+ * plate with monogram portrait, text advanced with NEXT ▸, branching
+ * choice cards (with "…will remember that" notes), and THE END card whose
+ * consequences have already landed on the real file. */
+function currentStoryChain(){
+  if(typeof StorySystem!=='object'||!StorySystem||typeof World==='undefined'||!World) return null;
+  try{ return StorySystem.currentView(World,{year:World.year}); }catch(e){ return null; }
+}
+const VN_SPEAKER_CLASS={narrator:'vn-narr',you:'vn-you'};
+function vnSpeakerClass(key){ return VN_SPEAKER_CLASS[key]||('vn-c'+Math.abs(String(key).split('').reduce((a,c)=>a+c.charCodeAt(0),0))%6); }
+function vnMonogram(label){
+  const initials=String(label||'?').trim().split(/\s+/).map(w=>w.charAt(0)).slice(0,2).join('').toUpperCase()||'?';
+  return '<span class="vn-portrait">'+initials+'</span>';
+}
+function runStoryYearTick(){
+  if(typeof StorySystem!=='object'||!StorySystem||typeof World==='undefined'||!World) return null;
+  let actorTone=null;
+  try{ actorTone=currentDisposition(S).it.id; }catch(e){}
+  const result=StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage,autoResolve:!!quietMode,actorTone});
+  if(quietMode&&result&&Array.isArray(result.resolved)){
+    result.resolved.forEach(entry=>{
+      ffRecordAction('EPISODE · '+entry.title+' — '+entry.endingTitle);
+      logEv(entry.logText,{},'story','KARSEN FILE · YEAR '+S.age);
+    });
+  }
+  return result;
+}
+let vnLastViewKey='';
+function openStorySlip(force){
+  const view=currentStoryChain(); if(!view) return;
+  const key=view.runId+':'+view.type+':'+(view.type==='line'?view.lineIndex:view.type==='choice'?'c':view.ending.id);
+  if(!force&&key===vnLastViewKey) return; // render exactly once per beat
+  vnLastViewKey=key;
+  slipOpen=true; document.body.classList.add('slip-open');
+  const card=$('#slipCard'); card.className='slipcard vn';
+  const echo=(typeof StorySystem.echoLineFor==='function')?StorySystem.echoLineFor(World):null;
+  let html='<div class="sl-head story"><span>KARSEN FILES</span><span class="sl-req">'+String(view.domain||'life').toUpperCase()+(view.sceneNo?' · SCENE '+view.sceneNo:'')+' · YEAR '+S.age+'</span></div>';
+  html+='<div class="vn-titlebar">'+fill(view.title||'AN EPISODE')+'</div>';
+  if(view.type==='ending'){
+    const e=view.ending;
+    html+='<div class="vn-backdrop vn-bg-'+(view.bg||'street')+' vn-endbg"><div class="vn-endstamp">THE END</div></div>';
+    html+='<div class="vn-titlebar endname">'+fill(e.title)+'</div>';
+    html+=e.epilogue.map(l=>'<p class="sl-body vn-epi">'+fill(l)+'</p>').join('');
+    html+='<div class="sl-note">The consequences are already on the file.</div>'+
+      '<div class="sl-actions"><button class="sl-btn ok" data-vn="file">File It Away ▸</button></div>';
+  } else {
+    html+='<div class="vn-backdrop vn-bg-'+(view.bg||'street')+'"></div>';
+    if(view.type==='line'){
+      const spk=view.speaker||{key:'narrator',label:''};
+      const isNarr=spk.key==='narrator';
+      html+='<div class="vn-stage">'+
+        (isNarr?'':'<div class="vn-plate '+vnSpeakerClass(spk.key)+'">'+vnMonogram(spk.label)+'<b>'+escapeHtml(spk.label)+'</b></div>')+
+        '<div class="vn-text'+(isNarr?' narr':'')+'">'+escapeHtml(fill(view.text))+'</div>'+
+        '</div>';
+      html+=(view.remember?'<div class="vn-remember">'+escapeHtml(view.remember)+' — that will be remembered.</div>':'');
+      html+='<div class="sl-actions"><button class="sl-btn ok" data-vn="next">'+(view.isLastLine?'The scene turns ▸':'NEXT ▸')+'</button></div>';
+    } else if(view.type==='choice'){
+      html+='<div class="vn-prompt">'+escapeHtml(fill(view.prompt||'Choose.'))+'</div>';
+      html+='<div class="vn-choices">'+view.options.map(o=>
+        '<button class="sl-btn '+(o.tone==='greedy'?'no':o.tone==='kind'?'ok':'maybe')+'" data-vn-opt="'+o.index+'"><span>'+escapeHtml(fill(o.t))+'</span>'+(o.note?'<small>'+escapeHtml(o.note)+' …will be remembered.</small>':'<small>…will be remembered.</small>')+'</button>'
+      ).join('')+'</div>';
+    }
+  }
+  void echo;
+  card.innerHTML=html;
+  card.onclick=e=>{
+    const nx=e.target.closest('[data-vn]');
+    if(nx){
+      if(nx.dataset.vn==='file'){ closeStorySlip(); return; }
+      const v2=StorySystem.next(World,{year:World.year,subject:S,lineage:Lineage});
+      snd(v2&&v2.type==='choice'?'paper':'tick');
+      openStorySlip(true); updateBar(); return;
+    }
+    const opt=e.target.closest('[data-vn-opt]');
+    if(opt){
+      const res=StorySystem.choose(World,+opt.dataset.vnOpt,{year:World.year,subject:S,lineage:Lineage});
+      snd('stamp');
+      if(res.applied){ window.C={}; renderStats(window.C); }
+      openStorySlip(true); updateBar(); return;
+    }
+  };
+  $('#slipWrap').classList.remove('hidden'); snd('paper'); updateBar();
+}
+function escapeHtml(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function closeStorySlip(){
+  try{ if(typeof StorySystem==='object'&&StorySystem&&currentStoryChain()&&currentStoryChain().type==='ending'){ StorySystem.fileAway(World,currentStoryChain().runId,{year:World.year}); } }catch(e){}
+  vnLastViewKey='';
+  $('#slipWrap').classList.add('hidden'); slipOpen=false; document.body.classList.remove('slip-open');
+  window.C={}; renderStats(window.C); updateBar();
+  drainNextSlip();
+}
+
 /* ================= YEAR RESOLUTION ================= */
 function vtext(e){
   S.usedV[e.id]=S.usedV[e.id]||[];
@@ -2093,7 +2434,15 @@ function vtext(e){
   if(!avail.length){S.usedV[e.id]=[];avail=e.v.map((_,i)=>i);}
   const i=pick(avail); S.usedV[e.id].push(i); return fill(e.v[i]);
 }
-function pushFollow(f){ if(f) followups.push({at:S.age+f.in,t:fill(f.t),fx:f.fx,side:f.side}); }
+function pushFollow(f){ if(!f) return;
+  const delta=Number(f.in), absolute=Number(f.at);
+  // Callers use two shapes: EVENTS pass a relative delay (`in:` years) while
+  // DECISIONS/CRISES pass an absolute subject age (`at:`). Honor both -- a
+  // bare f.at must never be re-based into S.age+f.in (NaN), which made the
+  // followup unfireable and leaked it in the queue forever.
+  const at=Number.isFinite(delta)?S.age+delta:(Number.isFinite(absolute)?absolute:S.age);
+  followups.push({at,t:fill(f.t),fx:f.fx,side:f.side});
+}
 function runFollowups(){ followups=followups.filter(f=>{ if(f.at<=S.age){ if(f.side)f.side(S); logEv(f.t,f.fx); return false;} return true; }); }
 
 /* ================= AFFAIRS / DISCOVERY ================= */
@@ -2395,6 +2744,8 @@ function runBudget(WAR){
 function resolvePlan(){
   const q=S.queue.slice(); S.queue=[];
   let autoTrained=false;
+  const actedDirectly=!!S.__actedThisYear;
+  S.__actedThisYear=false;
   if(S.autoTrain&&computeHours()>=1){
     const skillId=autoPickSkill();
     if(skillId){ autoTrained=true; window.C={}; const r=PUR_MAP['practice'].apply(S,{skill:skillId}); const chips=r.fx?applyFx(r.fx):[];
@@ -2402,7 +2753,7 @@ function resolvePlan(){
       logChips(fill(r.text)+' (auto-trained)',chips,'plan','PURSUIT · YEAR '+S.age);
       renderStats(window.C); }
   }
-  if(!q.length&&!autoTrained&&computeHours()>0){
+  if(!q.length&&!autoTrained&&!actedDirectly&&computeHours()>0){
     window.C={};
     logChips('A quiet year. Not every one needs a headline.',[],'idle','YEAR '+S.age);
   }
@@ -2422,12 +2773,19 @@ function resolvePlan(){
 function runRandomEvents(){
   if(typeof educationEventTick==='function') educationEventTick();
   let n=chance(.5)?1:0; if(S.age>10&&chance(.12))n++;
+  // Unpredictable pulse: some years are simply busier than others, and the
+  // per-year weighting below reshuffles which candidates rise to the top.
+  // Both draws come from an isolated stream keyed to (file, year) so the
+  // shared legacy Random sequence -- and anything pinned to it -- is untouched.
+  const pulse=Random.create(['event-pulse',S.id||'subject',currentYear()].join('|'));
+  if(pulse.chance()<(S.age>=16?0.08:0.05)) n=Math.min(3,n+1);
+  const jitter=Random.create(['event-weight',S.id||'subject',currentYear()].join('|'));
   const dispId=currentDisposition(S).it.id;
   const darkMult = dispId==='saint'?0.5:(dispId==='gambler'||dispId==='hustler')?1.4:1;
   for(let i=0;i<n;i++){
     const pool=EVENTS.filter(e=>S.age>=e.a[0]&&S.age<=e.a[1]&&(!e.if||e.if(S))&&(!S.cool[e.id]||S.age>=S.cool[e.id]));
     if(!pool.length) break;
-    const weighted=pool.map(e=>{let w=e.w||2; if(e.dark)w*=(0.3+S.vice*0.4+(S.happiness<40?1.1:0))*darkMult; return {e,w:Math.max(w,0.05)};});
+    const weighted=pool.map(e=>{let w=(e.w||2)*(0.6+jitter.next()*0.8); if(e.dark)w*=(0.3+S.vice*0.4+(S.happiness<40?1.1:0))*darkMult; return {e,w:Math.max(w,0.05)};});
     const tot=weighted.reduce((a,x)=>a+x.w,0); let r=Random.next()*tot, e=weighted[weighted.length-1].e;
     for(const x of weighted){r-=x.w; if(r<=0){e=x.e;break;}}
     if(e.medical&&typeof medicalEventExposure==='function') medicalEventExposure(e.medical,S);
@@ -2455,15 +2813,16 @@ function checkMortality(){
     // the more lethal each year on the bottom rung becomes. A mission meal
     // suppresses the hunger bump for the year it was eaten.
     const desperation=(typeof SurvivalSystem==='object'&&SurvivalSystem&&typeof World!=='undefined'&&World)?SurvivalSystem.desperationOf(World,S):0;
+    const MT=(typeof SurvivalSystem==='object'&&SurvivalSystem&&SurvivalSystem.MORTALITY_TUNING)||{povertyBaseHouseNone:.012,povertyMeagerFood:.003,povertyBoth:.01,povertyInsecurity:.006,desperationFloor:.4,desperationScale:1.2,childGuardFactor:1.6,elderFactor:1.6};
     const fedAtMission=S.soupKitchenYear===currentYear();
     let povRisk=0;
-    if(house.id==='none') povRisk+=0.012;
-    if(food.id==='meager'&&!fedAtMission) povRisk+=0.003;
-    if(house.id==='none'&&food.id==='meager'&&!fedAtMission) povRisk+=0.01;
-    if(S.age>=16&&Math.min(S.housingSecurity||50,S.financialSecurity||50)<25) povRisk+=0.006;
-    povRisk*=(0.4+1.2*desperation);
-    if(S.age<16||S.livingAtHome) povRisk*=1.6*(GUARD_MORT[guardTier()]||1);
-    else if(S.age>65) povRisk*=1.6;
+    if(house.id==='none') povRisk+=MT.povertyBaseHouseNone;
+    if(food.id==='meager'&&!fedAtMission) povRisk+=MT.povertyMeagerFood;
+    if(house.id==='none'&&food.id==='meager'&&!fedAtMission) povRisk+=MT.povertyBoth;
+    if(S.age>=16&&Math.min(S.housingSecurity||50,S.financialSecurity||50)<25) povRisk+=MT.povertyInsecurity;
+    povRisk*=(MT.desperationFloor+MT.desperationScale*desperation);
+    if(S.age<16||S.livingAtHome) povRisk*=MT.childGuardFactor*(GUARD_MORT[guardTier()]||1);
+    else if(S.age>65) povRisk*=MT.elderFactor;
     if(povRisk>0&&chance(povRisk)){ dead=true;
       cause = house.id==='none'
         ? pick(['exposure, found behind the depot at first light','a fever no shelter was there to catch','the kind of winter the streets do not forgive'])
@@ -2473,8 +2832,8 @@ function checkMortality(){
   const medicalMortality=typeof medicalMortalityRoll==='function'?medicalMortalityRoll(S):null;
   if(!dead&&medicalMortality&&medicalMortality.died){dead=true;cause=medicalMortality.cause||'complications from a long illness';}
   if(!dead&&S.health<=0){dead=true;cause=pick(['heart failure','a long illness, patiently endured','sudden collapse at the kitchen table']);}
-  else if(!dead&&S.happiness<=0&&chance(0.07)){dead=true;cause='a despair the file does not fully document';}
-  else if(!dead&&S.age>=56){const p=0.006*(S.age-55)+Math.max(0,70-S.health)*0.0012; if(chance(p)){dead=true;cause=S.age>=84?'natural causes, in sleep':'heart failure';}}
+  else if(!dead&&S.happiness<=0&&chance(0.04)){dead=true;cause='a despair the file does not fully document';}
+  else if(!dead&&S.age>=56){const p=0.0042*(S.age-55)+Math.max(0,70-S.health)*0.0008; if(chance(p)){dead=true;cause=S.age>=84?'natural causes, in sleep':'heart failure';}}
   if(!dead&&S.age>=104){dead=true;cause='the extreme and improbable age of '+S.age;}
   if(dead){S.alive=false;S.cause=cause; logEv('ENTRY TERMINATED. Subject deceased — '+cause+'. The record ends mid-sentence, as these things do.',{},'final','FINAL ENTRY · YEAR '+S.age);}
 }
@@ -3107,6 +3466,12 @@ function advanceYear(suppressBurst,quiet){
   if(!S||!S.alive||slipOpen) return;
   captureYearSnapshot();
   rpgTierBefore=S.jobTier||0;
+  // New year: prune old done-action years. The "acted this year" flag is
+  // consumed by the year-end resolution pass below, not reset here --
+  // direct acts performed before the stamp belong to the year being ended.
+  if(S.__doneActions&&typeof S.__doneActions==='object'&&!Array.isArray(S.__doneActions)){
+    Object.keys(S.__doneActions).forEach(k=>{ if(Number(k)<currentYear()-1) delete S.__doneActions[k]; });
+  }
   if(S.age>0) evaluateYearStreak(quiet);
   yearLog=[]; collectingYear=true;
   S.age++; World.year++;
@@ -3237,6 +3602,7 @@ function advanceYear(suppressBurst,quiet){
   guardianIncidentTick();
   schoolYearTick();
   runRandomEvents();
+  runStoryYearTick();
   if(S.alive) checkMortality();
   if(S.alive){ S.hapSum+=S.happiness; S.hapYears++; S.peakHap=Math.max(S.peakHap,S.happiness); }
   pushSparkPoint();
@@ -3251,6 +3617,7 @@ function advanceYear(suppressBurst,quiet){
     else if(S.__pendingReverseDiscovery){ const ctx=S.__pendingReverseDiscovery; S.__pendingReverseDiscovery=null; dispatchReverseDiscoveryReaction(ctx); }
     else if(S.__pendingTheirSpouseNotice){ const n=S.__pendingTheirSpouseNotice; S.__pendingTheirSpouseNotice=null; openNotice(n); }
     else if(S.__pendingGuardianNotice){ const gp=S.__pendingGuardianNotice; S.__pendingGuardianNotice=null; openGuardianNotice(gp); }
+    else if(!quietMode&&currentStoryChain()){ openStorySlip(); }
     else if(!checkGuardianEviction()&&!checkParentingStyleChoice()) maybeSlip();
   }
   if(!S.alive) handleDeath();
@@ -3326,6 +3693,17 @@ function handleDeath(){
   evaluateYearStreak(true);
   const g=grade(), ir=intentResult(), legacy=computeParentingLegacy();
   if(typeof NpcSystem==='object'&&NpcSystem&&typeof NpcSystem.markSubjectDeath==='function') NpcSystem.markSubjectDeath(World,S,Lineage);
+  // Death closes the subject's employment file. Without this, an active
+  // (or on_leave) contract survives into the successor's first year --
+  // contracts key on the literal personId 'subject', which the heir reuses
+  // -- and runEconomy() would then pay the predecessor's wage one final
+  // time to someone who never held the job.
+  if(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof World!=='undefined'&&World&&typeof EmploymentSystem.activeForPerson==='function'&&typeof EmploymentSystem.end==='function'){
+    EmploymentSystem.activeForPerson(World,'subject').slice().forEach(contract=>{
+      EmploymentSystem.end(World,contract.id,'terminated','subject_deceased',World.year,{subject:S});
+    });
+    if(typeof EmploymentSystem.syncAllBusinessEmployees==='function') EmploymentSystem.syncAllBusinessEmployees(World);
+  }
   Lineage.pastSubjects.push({name:S.first+' '+S.last,dob:S.dob,deathYear:currentYear(),age:S.age,cause:S.cause,grade:g.g,intentName:ir.lab,intentStars:ir.stars,
     parentWarmth:legacy.warmth,parentStability:legacy.stability,parentYears:legacy.years,
     education:S.education?{completed:Object.assign({},S.education.completed||{}),majorId:S.education.majorId||null,certificates:Object.keys(S.education.certificates||{})}:null});

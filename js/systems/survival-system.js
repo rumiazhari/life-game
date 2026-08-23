@@ -163,6 +163,20 @@
 
   /* ---- Desperation Index (pure; never stored) ---- */
 
+  // Tuning table for player-facing poverty mortality (ui.js checkMortality
+  // reads this). Exported so the "deaths should be rare" dial has one
+  // documented, testable home instead of magic numbers in UI code.
+  const MORTALITY_TUNING={
+    povertyBaseHouseNone:0.009,
+    povertyMeagerFood:0.002,
+    povertyBoth:0.007,
+    povertyInsecurity:0.004,
+    desperationFloor:0.30,
+    desperationScale:0.70,
+    childGuardFactor:1.35,
+    elderFactor:1.30
+  };
+
   function desperationOf(world,S){
     if(!S||typeof S!=='object') return 0;
     const age=Number(S.age)||0;
@@ -172,6 +186,96 @@
     const foodInsecurity=S.lifestyle&&S.lifestyle.food==='meager'?1:(S.lifestyle&&S.lifestyle.food==='basic'?.35:0);
     const fragility=clamp((60-(Number(S.health)||60))/60,0,1);
     return clamp(.30*jobless+.25*debtDepth+.20*housingRung+.15*foodInsecurity+.10*fragility,0,1);
+  }
+
+  /* ---- Ways Out: prioritized, actionable survival advice ----
+   *
+   * Pure read over authoritative state (S + World systems). Returns an array
+   * of {id,priority,title,why,risky,action} sorted by descending priority.
+   * `action` names a PURSUITS/DECISIONS entry by id (+type) -- the Plan sheet
+   * renders these as queueable chips and re-validates availability there, so
+   * guidance itself stays availability-loose but intent-exact. Risky steps
+   * (the underworld hatch) are flagged and never outrank honest ones unless
+   * desperation is genuinely extreme.
+   */
+  function guidanceFor(world,S,options){
+    if(!S||typeof S!=='object') return [];
+    const opts=options||{};
+    const out=[];
+    const add=(id,priority,title,why,action,risky)=>out.push({id,priority,title,why,risky:!!risky,action:action||null});
+    const age=Number(S.age)||0;
+    const desperate=desperationOf(world,S);
+    const jailed=S.jailUntil>age;
+    const adultWorkingAge=age>=16&&age<65&&!S.eduStage;
+    const jobless=adultWorkingAge&&(Number(S.jobTier)||0)<1;
+    const broke=(Number(S.assets)||0)<0;
+    const foodMeager=S.lifestyle&&S.lifestyle.food==='meager';
+    const housedWell=S.lifestyle&&['flat','house','townhouse','estate'].includes(S.lifestyle.housing);
+
+    if(jailed) return [];
+
+    // 1. Eat. A mission meal is free and blunts the hunger penalty outright.
+    if(foodMeager||(Number(S.assets)||0)<30&&age>=10){
+      add('eat',96,'The mission line','A hot meal costs nothing and quiets the hunger penalty for the year.',{type:'p',id:'soupkitchen'});
+    }
+    // 2. Work beats everything else that isn't eating.
+    if(jobless){
+      const settlementId=(S.location&&S.location.settlementId)||(typeof World!=='undefined'&&World?World.activeSettlementId:null);
+      let opening=null;
+      try{
+        opening=bestOpeningFor(world,S,{settlementId});
+      }catch(e){ opening=null; }
+      if(opening){
+        if(opening.kind==='gig'){
+          add('worklisting',92,'Take honest street work','A listed opening is open to you right now; it pays today and asks no papers.',{type:'p',id:'gig',extra:{openingId:opening.id,gigId:opening.gigId}});
+        }else{
+          add('workfixerlisting',88,'A fixer has work posted','Listed underworld work: better pay than the yard, and a heat all its own.',{type:'p',id:'gig',extra:{openingId:opening.id}},true);
+        }
+        void settlementId;
+      }else{
+        add('workportal',90,'Work the portal','A proper vacancy beats a hard year of drift. Apply even if the pickings look thin.',{type:'p',id:'lookwork'});
+      }
+      add('gigline',78,'Off-the-books labour','Nasty, unlicensed, no guarantee of pay -- but the yard always needs another pair of hands.',{type:'p',id:'gig'});
+      if((Number(S.relations)||0)>=70&&!foodMeager){
+        add('favor',70,'Call in a favor','Someone who owes you knows someone who is hiring. It spends a friendship cheaply, once.',{type:'p',id:'favor'});
+      }
+    }
+    // 3. Stop the bleeding: cut the lifestyle before the debt cuts you.
+    if(broke&&housedWell){
+      add('downsize',88,'Downsize the roof','Rent is the loudest envelope on the table. Move somewhere smaller before it writes cheques of its own.',{type:'ui',id:'household'});
+    }
+    if(broke&&(Number(S.jobTier)||0)>0){
+      add('overtime',76,'Work overtime','Extra shifts pay real coin and cost real body. Spend both deliberately.',{type:'p',id:'overtime'});
+      add('nightshift',62,'Take the night shift','Better money, worse hours, a permanent shadow under the eyes.',{type:'p',id:'nightshift'});
+    }
+    // 4. The body is an asset too; the dispensary bills what the poor can pay.
+    if((Number(S.health)||100)<42&&age>=10){
+      add('doctor',84,'See the doctor','Untreated conditions compound. When you are on the bottom rung the parish dispensary bills what you can actually pay.',{type:'p',id:'doctor'});
+    }
+    // 5. Mood keeps people alive; walking is free.
+    if((Number(S.happiness)||50)<32){
+      add('walk',52,'Walk it off','Costs nothing, helps more than the file will ever record.',{type:'p',id:'walk'});
+      add('rest',44,'Do nothing, on purpose','Recovery is also a plan.',{type:'p',id:'rest'});
+    }
+    // 6. Paper cleanup once there is slack.
+    if(S.record&&(Number(S.assets)||0)>=250){
+      add('expunge',54,'Expunge the record','A clean page widens every later door, and quiet files earn Bureau Favor.',{type:'d',id:'expunge'});
+    }
+    // 7. The underworld hatch -- real money, real heat, flagged as such.
+    if(desperate>=0.60&&age>=16&&!jailed){
+      if(S.holdMember){
+        add('fixerjob',60,'Work for the fixer','Organized pay, organized risk. Every capture raises the heat until the operation folds.',{type:'d',id:'fixerjob'},true);
+      }else{
+        const sid=(S.location&&S.location.settlementId)||(typeof World!=='undefined'&&World?World.activeSettlementId:null);
+        let fixers=0;
+        try{ fixers=activeLocalFixers(world,sid).length; }catch(e){ fixers=0; }
+        if(fixers>0){
+          add('seekfixer',58,'Meet a fixer','The fold has a door open to the desperate. What it charges later is not printed anywhere.',{type:'d',id:'seekfixer'},true);
+        }
+      }
+    }
+    void opts;
+    return out.sort((a,b)=>b.priority-a.priority||a.id.localeCompare(b.id)).slice(0,7);
   }
 
   /* ---- Settlement street-market profile ---- */
@@ -502,9 +606,11 @@
     FIXER_SECTORS,
     MAX_FIXERS_PER_SETTLEMENT,
     FIXER_HEAT_BURN,
+    MORTALITY_TUNING,
     ensure,
     migrate,
     desperationOf,
+    guidanceFor,
     settlementProfile,
     tickWorld,
     takeOpening,

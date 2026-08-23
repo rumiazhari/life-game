@@ -591,9 +591,15 @@
     });
   }
 
+  // Annual mortality base rates by age band, deliberately tuned on the rare
+  // side -- routine deaths made the long middle of a life feel like a dice
+  // roll rather than a story. Exported so tests can pin the dial.
+  const MORTALITY_TABLE=[.010,.0005,.0011,.0038,.012,.034,.085,.19];
+  const MORTALITY_COEFFICIENTS={perUnhealthyPoint:.06,perHealthPressure:.026};
   function mortalityProbability(npc,age,runtime){
-    let base=age<1?.012:age<16?.0008:age<45?.0015:age<60?.005:age<70?.016:age<80?.045:age<90?.11:.24;
-    base+=(100-npc.health.general)/100*.08+healthPressure(runtime)*.035;
+    const band=age<1?0:age<16?1:age<45?2:age<60?3:age<70?4:age<80?5:age<90?6:7;
+    let base=MORTALITY_TABLE[band];
+    base+=(100-npc.health.general)/100*MORTALITY_COEFFICIENTS.perUnhealthyPoint+healthPressure(runtime)*MORTALITY_COEFFICIENTS.perHealthPressure;
     return unit(base);
   }
 
@@ -1092,6 +1098,8 @@
   root.NpcSystem={
     SCHEMA_VERSION,
     MAX_NPCS,
+    MORTALITY_TABLE,
+    MORTALITY_COEFFICIENTS,
     ensure,
     normalize,
     upsert,

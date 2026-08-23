@@ -71,7 +71,7 @@
   const lifestyleId=(person,key)=>person&&person.lifestyle&&person.lifestyle[key]||'basic';
   function contextFor(world,person,options={}){const opts=Object.assign({},options),year=opts.year==null?yearOf(person,world):number(opts.year),age=opts.age==null?ageOf(person,year):number(opts.age),pressure=clamp(opts.healthcarePressure==null?0:opts.healthcarePressure,0,1);return {world,person,year,age,settlement:opts.settlement||null,runtime:opts.runtime||null,building:opts.building||null,housing:opts.housing||{id:lifestyleId(person,'housing')},food:opts.food||{id:lifestyleId(person,'food')},outbreak:opts.outbreak||null,healthcarePressure:pressure};}
   function accessFor(world,person,context){const ctx=context||contextFor(world,person),settlement=ctx.settlement||{},building=ctx.building,clinics=Array.isArray(settlement.buildings)?settlement.buildings.filter(item=>item&&item.type==='clinic'):[],selected=building&&building.type==='clinic'?building:clinics[0],atFacility=!!(building&&building.type==='clinic');let facility='No local care',quality=.12,costMultiplier=1.35,delay=1;if(selected){const hospital=/hospital/i.test(String(selected.name||'')),city=settlement.kind==='city',town=settlement.kind==='town';facility=selected.name||'Clinic';quality=hospital?.90:city?.74:town?.59:.45;costMultiplier=hospital?1.25:city?1:.78;delay=atFacility?0:quality<.55?1:0;}const pressure=ctx.healthcarePressure;return {facility,quality:clamp(quality*(1-pressure*.62),.03,1),costMultiplier:costMultiplier*(1+pressure*.90),delay:delay+(pressure>=.40?1:0),atFacility,exposureRisk:clamp(pressure*.55,0,.70),healthcarePressure:pressure};}
-  function exposureRisk(world,person,definitionId,context){const definition=root.ConditionRegistry.condition(definitionId);if(!definition)return 0;const state=ensureMedicalState(person,{world}),ctx=context||contextFor(world,person),housing=ctx.housing||{},food=ctx.food||{},age=ctx.age,career=String(person&&person.career||'');let risk=0;if(definitionId==='respiratory'||definitionId==='infection'){risk+=housing.id==='none'?.12:housing.id==='room'?.04:0;risk+=food.id==='meager'?.055:0;if(ctx.outbreak&&Array.isArray(ctx.outbreak.conditions)&&ctx.outbreak.conditions.includes(definitionId))risk+=.06*number(ctx.outbreak.severity,1);if(age<6||age>=65)risk+=.018;if(number(person&&person.kids)>0)risk+=.012;}if(definitionId==='strain'){risk+=number(person&&person.jobTier)>0?.012:0;risk+=number(person&&person.vice)>=4?.018:0;risk+=number(person&&person.happiness,100)<35?.018:0;risk+=career==='medicine'||career==='care'?.018:0;}if(definitionId==='injury'){if(/machin|carpent|factory|foundry|driver|transport|farm|athlet|warehouse|constr|conscript/.test(String(person&&person.jobName||'').toLowerCase()))risk+=.022;if(['trade','transport','athletics','agriculture'].includes(career))risk+=.018;}if(definitionId==='chronic'&&age>=45)risk+=.008+(age-45)*.0008;risk-=(state.resilience-50)*.0007;risk-=number(state.prevention.sanitation)*.008+number(state.prevention.vaccination)*.010;risk+=ctx.healthcarePressure*.12;return clamp(risk,0,.50);}
+  function exposureRisk(world,person,definitionId,context){const definition=root.ConditionRegistry.condition(definitionId);if(!definition)return 0;const state=ensureMedicalState(person,{world}),ctx=context||contextFor(world,person),housing=ctx.housing||{},food=ctx.food||{},age=ctx.age,career=String(person&&person.career||'');const LW=SICKNESS_TUNING.lifestyleWeight;let risk=0;if(definitionId==='respiratory'||definitionId==='infection'){/* the roof and the table are the cause, not fortune */risk+=(housing.id==='none'?.20:housing.id==='shelter'?.10:housing.id==='room'?.06:0)*LW;risk+=(food.id==='meager'?.09:food.id==='basic'?.015:0)*LW;if(ctx.outbreak&&Array.isArray(ctx.outbreak.conditions)&&ctx.outbreak.conditions.includes(definitionId))risk+=.06*number(ctx.outbreak.severity,1);if(age<6||age>=65)risk+=.018;if(number(person&&person.kids)>0)risk+=.012;}if(definitionId==='strain'){/* livelihood and vice, not dice */risk+=(number(person&&person.jobTier)>0?.016:0)*LW;risk+=(number(person&&person.vice)>=4?.03:0)*LW;risk+=(number(person&&person.happiness,100)<35?.024:0)*LW;risk+=career==='medicine'||career==='care'?.02:0;}if(definitionId==='injury'){if(/machin|carpent|factory|foundry|driver|transport|farm|athlet|warehouse|constr|conscript/.test(String(person&&person.jobName||'').toLowerCase()))risk+=.034*LW;if(['trade','transport','athletics','agriculture'].includes(career))risk+=.028*LW;}if(definitionId==='chronic'&&age>=45)risk+=.008+(age-45)*.0008;risk-=(state.resilience-50)*.0007;risk-=number(state.prevention.sanitation)*.008+number(state.prevention.vaccination)*.010;risk+=ctx.healthcarePressure*.12;return clamp(risk*SICKNESS_TUNING.globalScale,0,SICKNESS_TUNING.riskCap);}
   function expose(world,person,spec,context,options={}){const cfg=typeof spec==='string'?{conditionId:spec}:Object.assign({},spec||{}),id=cfg.conditionId||cfg.id,definition=root.ConditionRegistry.condition(id);if(!definition)return null;const ctx=context||contextFor(world,person),risk=cfg.force?1:Number.isFinite(Number(cfg.risk))?clamp(cfg.risk,0,1):exposureRisk(world,person,id,ctx);if(!cfg.force){const rng=actionStream(world,person,ctx.year,'exposure',id,options.rng);if(readRandom(rng)>=risk)return null;}const condition=addCondition(person,id,cfg.severity,{world,year:ctx.year,source:cfg.source||'exposure',exposureType:cfg.exposureType,incubation:cfg.incubation,known:cfg.known,state:cfg.state,contagious:cfg.contagious});const state=ensureMedicalState(person,{world,year:ctx.year});state.exposure={currentRisk:risk,lastSource:cfg.source||id,lastYear:ctx.year};return condition;}
   function examine(world,person,context,options={}){const ctx=context||contextFor(world,person),state=ensureMedicalState(person,{world,year:ctx.year}),access=accessFor(world,person,ctx),rng=actionStream(world,person,ctx.year,'examination','checkup',options.rng,options);person.medicalRecord=true;state.lastCheckupAge=ctx.age;let condition=activeConditions(person).filter(item=>!item.known).sort((a,b)=>b.severity-a.severity||a.onsetYear-b.onsetYear||String(a.instanceId).localeCompare(String(b.instanceId)))[0],created=false;if(!condition){const chance=clamp(.08+(getHealth(person)<58?.35:0)+(ctx.age>=45?.15:0)+(number(person.vice)>=4?.12:0)+(ctx.food.id==='meager'?.15:0)+number(state.exposure.currentRisk),0,.68);if(readRandom(rng)<chance){const eligible=root.ConditionRegistry.allConditions().filter(item=>ctx.age>=item.minAge&&!activeConditions(person).some(active=>active.definitionId===item.id));if(eligible.length){condition=eligible[Math.floor(readRandom(rng)*eligible.length)]||eligible[0];condition=addCondition(person,condition.id,getHealth(person)<38?4:undefined,{world,year:ctx.year,source:'screening examination'});created=true;}}}if(condition){condition.known=true;condition.diagnosedAge=ctx.age;condition.diagnosedYear=ctx.year;if(condition.state!=='chronic')condition.state='diagnosed';history(person,'diagnosis',condition,options.source||'doctor',{world,year:ctx.year});syncLegacy(person);return {condition,found:true,created,access};}return {condition:null,found:false,created:false,access};}
   // Natural (non-player) diagnosis pass for NPCs: unlike examine() (the
@@ -129,21 +129,34 @@
       return String(a.definitionId||'').localeCompare(String(b.definitionId||''));
     });
   }
+  // Annual sickness model tuning. Sickness is mostly CAUSED, not rolled:
+  // living conditions (housing, food), livelihood (occupation danger), and
+  // public-health pressure contribute deterministic weight, while the pure
+  // random residual is scaled down hard. Exported so tests can pin the dial.
+  const SICKNESS_TUNING={globalScale:.45,riskCap:.30,lifestyleWeight:1.6};
   function attemptAnnualExposures(world,person,ctx,year,options,state,newConditions){
+    // At most ONE new condition can arrive per year, and it is whichever
+    // exposure the subject's actual living conditions make most likely --
+    // a damp room gives you the cough, the foundry gives you the back,
+    // poverty gives you both. No shotgun of independent rolls.
+    let best=null,bestRisk=0;
     ['respiratory','infection','injury','strain','chronic'].forEach(definitionId=>{
       const alreadyActive=activeConditions(person).some(condition=>condition.definitionId===definitionId);
       if(alreadyActive)return;
       const definition=root.ConditionRegistry.condition(definitionId);
       if(!definition)return;
       const risk=exposureRisk(world,person,definitionId,ctx);
-      const rng=toRngStream(options.streamFor,world,person,year,'annual-exposure',definitionId);
-      if(readRandom(rng)>=risk)return;
-      const source=definitionId==='injury'?'occupational strain':(ctx.outbreak?'public-health outbreak':'living conditions');
-      const condition=addCondition(person,definitionId,undefined,{world,year,source,incubation:definition.incubation});
-      if(!condition)return;
-      newConditions.push(condition);
-      state.exposure={currentRisk:risk,lastSource:source,lastYear:year};
+      if(risk>bestRisk){bestRisk=risk;best=definitionId;}
     });
+    if(!best||bestRisk<=0)return;
+    const rng=toRngStream(options.streamFor,world,person,year,'annual-exposure',best);
+    if(readRandom(rng)>=bestRisk)return;
+    const definition=root.ConditionRegistry.condition(best);
+    const source=best==='injury'?'occupational strain':(ctx.outbreak?'public-health outbreak':'living conditions');
+    const condition=addCondition(person,best,undefined,{world,year,source,incubation:definition.incubation});
+    if(!condition)return;
+    newConditions.push(condition);
+    state.exposure={currentRisk:bestRisk,lastSource:source,lastYear:year};
   }
   function progressTreatedCondition(person,condition,ctx,year,transitions){
     if(condition.lastTreatmentYear===year){
@@ -282,10 +295,16 @@
     const info=root.ConditionRegistry.condition(definitionId);
     return info?'an untreated '+info.name.toLowerCase():'complications from an unrecognized condition';
   }
+  // Untreated-condition mortality weight. Tuned on the rare side: a severe
+  // untreated condition should loom over the story, not end it within a year
+  // or two of onset. Exported so tests can pin the dial.
+  const MORTALITY_CONTRIBUTION={perSeverityAboveThree:.0042,perActiveYear:.0009,cap:.10};
   function mortalityContribution(condition){
     if(condition.severity<4)return 0;
     if(condition.state==='treated'||condition.state==='remission')return 0;
-    return (condition.severity-3)*0.007+(condition.yearsActive||0)*0.0015;
+    return Math.min(MORTALITY_CONTRIBUTION.cap,
+      (condition.severity-3)*MORTALITY_CONTRIBUTION.perSeverityAboveThree
+      +(condition.yearsActive||0)*MORTALITY_CONTRIBUTION.perActiveYear);
   }
   function mortalityDetails(world,person,context){
     const conditions=activeConditions(person);
@@ -313,5 +332,5 @@
     return Object.assign({died:roll<details.risk,roll},details);
   }
   function checkInvariants(person){const state=ensureMedicalState(person),violations=[],key=personKey(person),pattern=new RegExp('^condition:'+key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+':-?\\d+:\\d+$');if(state.schemaVersion!==SCHEMA_VERSION)violations.push('medical schema must be version 2');if((subjectLike(person)?person.conditions:person.health.conditions)!==state.conditions)violations.push('compatibility condition array is not synchronized');const ids=new Set();state.conditions.forEach((condition,index)=>{const tag=condition.instanceId||'index '+index;if(!root.ConditionRegistry.isConditionId(condition.definitionId))violations.push('unknown condition definition: '+condition.definitionId);if(!pattern.test(String(condition.instanceId))||ids.has(condition.instanceId))violations.push('invalid or duplicate instance ID: '+tag);ids.add(condition.instanceId);if(!Number.isFinite(condition.severity)||condition.severity<0||condition.severity>5)violations.push('condition severity must be bounded: '+tag);if(!STATES.has(condition.state))violations.push('condition has invalid state: '+tag);if(condition.resolved!==(condition.state==='resolved')||condition.treated!==(condition.state==='treated')||(KNOWN_STATES.has(condition.state)&&condition.known!==true))violations.push('condition state flags inconsistent: '+tag);if(condition.years!==condition.yearsActive||!Number.isFinite(condition.yearsActive)||condition.yearsActive<0||!Number.isFinite(condition.incubationLeft)||condition.incubationLeft<0||!Array.isArray(condition.complications))violations.push('condition lifecycle fields invalid: '+tag);});if(!Array.isArray(state.history)||state.history.length>24)violations.push('medical history must contain at most 24 entries');if(!Number.isInteger(state.instanceCounter)||state.instanceCounter<0||!Number.isInteger(state.actionCounter)||state.actionCounter<0)violations.push('medical counters must be nonnegative integers');if(!Number.isFinite(getHealth(person))||getHealth(person)<0||getHealth(person)>getHealthCap(person))violations.push('health must be within bounds');if(state.lastTickYear!==null&&!Number.isInteger(state.lastTickYear))violations.push('medical.lastTickYear must be null or a finite integer');state.conditions.forEach((condition,index)=>{const tag=condition.instanceId||'index '+index;if(condition.lastProgressionYear!==null&&!Number.isInteger(condition.lastProgressionYear))violations.push('condition.lastProgressionYear must be null or a finite integer: '+tag);if(state.lastTickYear!=null&&condition.lastProgressionYear!=null&&condition.lastProgressionYear>state.lastTickYear)violations.push('condition.lastProgressionYear cannot be later than medical.lastTickYear: '+tag);});if(activeConditions(person).filter(condition=>condition.definitionId==='chronic').length>1)violations.push('multiple active chronic conditions');return violations;}
-  root.MedicalSystem={SCHEMA_VERSION,personKey,ageOf,yearOf,isSubjectLike:subjectLike,getHealth,getHealthCap,setHealth,applyHealthDelta:(person,amount,source,worldOrYear)=>setHealth(person,getHealth(person)+amount,source,worldOrYear),ensureMedicalState,normalizeCondition,syncLegacy,migrate:ensureMedicalState,checkInvariants,activeConditions,conditionByRef,addCondition,history,stream,contextFor,accessFor,exposureRisk,expose,examine,naturalDiagnosis,treatmentOptions,treatmentCost,treat,hoursPenalty,educationPenalty,workPenalty,summary,tickPerson,mortalityDetails,rollMortality};
+  root.MedicalSystem={SCHEMA_VERSION,MORTALITY_CONTRIBUTION,SICKNESS_TUNING,personKey,ageOf,yearOf,isSubjectLike:subjectLike,getHealth,getHealthCap,setHealth,applyHealthDelta:(person,amount,source,worldOrYear)=>setHealth(person,getHealth(person)+amount,source,worldOrYear),ensureMedicalState,normalizeCondition,syncLegacy,migrate:ensureMedicalState,checkInvariants,activeConditions,conditionByRef,addCondition,history,stream,contextFor,accessFor,exposureRisk,expose,examine,naturalDiagnosis,treatmentOptions,treatmentCost,treat,hoursPenalty,educationPenalty,workPenalty,summary,tickPerson,mortalityDetails,mortalityContribution,rollMortality};
 })(globalThis);

@@ -950,3 +950,208 @@ body{background:var(--olive);color:var(--ink)}
 .proj-strip{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 10px;padding-top:8px;border-top:1px dashed rgba(74,65,50,.3)}
 .proj-strip b{margin-left:auto;font:700 8.5px 'Archivo';letter-spacing:.08em;color:#75653f}
 .proj-none{font:10px 'Special Elite';color:#8a7a55;font-style:italic}
+
+/* ================= MAP OVERHAUL v2 ================= */
+.map-controls{position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:4px;z-index:5}
+.map-ctl{width:26px;height:26px;border:1px solid #765f43;border-radius:3px;background:rgba(242,232,199,.92);color:#5a4726;font:700 15px 'Archivo';line-height:1;cursor:pointer;box-shadow:0 1px 3px rgba(60,45,20,.25);display:flex;align-items:center;justify-content:center;padding:0}
+.map-ctl.ctl-wide{font:700 8px 'Archivo';letter-spacing:.08em}
+.map-ctl:hover{background:#e7cc73}
+.map-ctl:active{transform:translateY(1px)}
+.map-cartouche{position:absolute;top:8px;right:34px;z-index:5;background:rgba(242,232,199,.94);border:1px solid #765f43;outline:2px solid rgba(242,232,199,.94);outline-offset:-4px;box-shadow:0 1px 4px rgba(60,45,20,.25);padding:4px 10px;text-align:center;pointer-events:none}
+.map-cartouche b{display:block;font:700 9px 'Stardos Stencil';letter-spacing:.14em;color:#7a4a1f}
+.map-cartouche span{font:700 6.5px 'Archivo';letter-spacing:.16em;color:#8a7a55}
+.map-scalebar{position:absolute;left:8px;bottom:8px;z-index:5;display:flex;flex-direction:column;gap:2px;background:rgba(242,232,199,.85);border:1px solid rgba(118,95,67,.5);padding:3px 7px;pointer-events:none}
+.sb-bar{display:flex;width:84px;height:5px;border:1px solid #5f512f}.sb-bar i{flex:1}.sb-bar i:nth-child(odd){background:#3a2d14}.sb-bar i:nth-child(even){background:#f2e7c7}
+.map-scalebar b{font:700 7.5px 'Archivo';letter-spacing:.1em;color:#3a2d14}
+.map-scalebar em{font:6.5px 'Special Elite';color:#75653f;font-style:normal}
+.map-compass{z-index:5}
+/* district geography */
+.plan-districts{pointer-events:none}
+.plan-district-area{fill:rgba(120,105,70,.05);stroke:none}
+.plan-district-boundary{fill:none;stroke:#9c8b64;stroke-width:.35;stroke-dasharray:1.6 1.1;opacity:.55}
+.plan-district-label{font:700 2.1px 'Archivo';letter-spacing:.22em;fill:#8d7d58;opacity:.62;text-anchor:middle;paint-order:stroke;stroke:#efe8cf;stroke-width:.5px}
+/* land use parcels */
+.plan-landuse path.lu-texture~path, .plan-landuse path{stroke:rgba(110,95,60,.28);stroke-width:.22}
+.lu-texture{fill:none;stroke-width:.3!important;opacity:.9}
+.lu-tex-furrow{stroke:#c9c083;stroke-dasharray:.7 .8}
+.lu-tex-hatch{stroke:#b0977c;stroke-dasharray:.9 .9}
+.lu-tex-trees{stroke:#a9c2a4;stroke-dasharray:.2 1.3;stroke-linecap:round}
+.lu-tex-orchard{stroke:#b7cfa2;stroke-dasharray:.2 1.1;stroke-linecap:round}
+.lu-urban{fill:url(#lf-hatch) #e3e0cd}
+.lu-farmland{fill:url(#lf-furrow) #eae6c4}
+.lu-meadow{fill:#e0e7c7}
+.lu-gardens{fill:#dbe4cf}
+.lu-estate{fill:#dde6d3}
+.lu-industrial{fill:url(#lf-hatch) #ddd8ca}
+.lu-yard{fill:url(#lf-hatch) #ded9c9}
+.lu-institutional{fill:#e2ddce}
+.lu-orchard{fill:url(#lf-orchard) #e2e8c9}
+.lu-harbor{fill:#cfe0e4}
+.lu-forest{fill:url(#lf-trees) #cbdcc9}
+/* water */
+.plan-water-area{fill:#bcd9e0;stroke:#7fa9b5;stroke-width:.3}
+.plan-river-line,.plan-stream-line{fill:none;stroke:#78c5d4;stroke-linecap:round}
+.plan-river-line{stroke-width:2.6;opacity:.9}
+.plan-stream-line{stroke-width:1;opacity:.85}
+.plan-coast-line{fill:none;stroke:#5f93a3;stroke-width:.5;opacity:.9}
+.plan-quay-line{fill:none;stroke:#6f5f42;stroke-width:.55;opacity:.85}
+/* streets and rail (per-settlement authored geometry) */
+.plan-streets{pointer-events:none}
+.plan-road{fill:none;stroke:#b79d6d;stroke-width:1.7;opacity:.9}
+.plan-road.minor{stroke:#cbbb90;stroke-width:.7;stroke-dasharray:1.4 1}
+.plan-rail-casing{fill:none;stroke:#e8e2cc;stroke-width:1.1;opacity:.9}
+.plan-rail{fill:none;stroke:#4c4438;stroke-width:.85}
+.plan-rail.spur{stroke-width:.55;stroke-dasharray:1 .8;opacity:.8}
+.plan-bridge{fill:#e8dfc5;stroke:#6f5f42;stroke-width:.45}
+.plan-relief{pointer-events:none}
+.plan-contour{fill:none;stroke:#c3ad8d;stroke-width:.32;opacity:.7}
+.plan-fabric{pointer-events:none}
+.plan-fabric rect{fill:#d8cba6;stroke:#a89272;stroke-width:.14;opacity:.85}
+/* POI symbols */
+.map-poi{pointer-events:none}
+.map-poi .sym-fill{fill:#59472c;stroke:none}
+.map-poi .sym-core{fill:#f2e7c7;stroke:none}
+.map-poi .sym-line{fill:none;stroke:#59472c;stroke-width:.34;stroke-linejoin:round}
+.map-poi .sym-heavy{fill:none;stroke:#59472c;stroke-width:.55;stroke-linecap:round}
+.poi-bureau .sym-fill{fill:#8b3027}
+.poi-clinic .sym-heavy{stroke:#3f7048}
+.poi-worship .sym-heavy,.poi-worship .sym-line{stroke:#6d5a86}
+.poi-transport .sym-fill{fill:#2c4f8f}
+/* full-name POI labels */
+.plan-labels{pointer-events:none}
+.map-poi-label{font:700 2.35px 'Archivo';letter-spacing:.02em;fill:#3a2d14;paint-order:stroke;stroke:#efe8cf;stroke-width:.75px;stroke-linejoin:round}
+.map-poi-leader{fill:none;stroke:#82949b;stroke-width:.28;stroke-dasharray:.7 .55;opacity:.85}
+.map-building.current rect{stroke:#2c63b5;stroke-width:1.1}
+.map-building.current::after{content:''}
+/* route emphasis */
+.map-route.route-selected{stroke:#b23327;stroke-width:1.7}
+.map-route-glow{fill:none;stroke:#e4c04e;stroke-width:.55;stroke-dasharray:2.6 1.6;opacity:.95;pointer-events:none}
+.map-route-distance{font:700 1.7px 'Archivo';letter-spacing:.06em;fill:#5a6b76;text-anchor:middle;paint-order:stroke;stroke:#eef4f4;stroke-width:.5px;pointer-events:none}
+/* illustrated legend key */
+.map-key{margin:6px 2px;border:1px solid rgba(74,65,50,.4);background:rgba(255,255,255,.4)}
+.map-key-toggle{width:100%;border:0;background:none;font:700 8px 'Archivo';letter-spacing:.14em;color:#6d5c3a;cursor:pointer;padding:5px 8px;text-align:left}
+.map-key-toggle::after{content:' \25BE'}
+.map-key.open .map-key-toggle::after{content:' \25B4'}
+.key-grid{display:none;flex-wrap:wrap;gap:2px 14px;padding:0 8px 6px;font:10px 'Special Elite';color:#5c4a28}
+.map-key.open .key-grid{display:flex}
+@media(min-width:701px){.key-grid{display:flex}.map-key-toggle{cursor:default}.map-key-toggle::after{content:''}}
+.key-row{display:inline-flex;align-items:center;gap:4px}
+.lg-svg{width:20px;height:12px}
+.lg-capital{fill:none;stroke:#8b3027;stroke-width:1.6}.lg-capital-core{fill:#8b3027}
+.lg-city{fill:#d36a51}.lg-town{fill:#768d9b}.lg-village{fill:#8da477}
+.lg-rail{stroke:#4c4438;stroke-width:2;stroke-dasharray:4 2}
+.lg-road{stroke:#b79d6d;stroke-width:2.4}
+.lg-minor{stroke:#cbbb90;stroke-width:1.2;stroke-dasharray:3 2}
+.lg-river{fill:none;stroke:#78c5d4;stroke-width:1.8}
+.lg-route{stroke:#c5cdd3;stroke-width:2.4}
+.lg-route-selected{stroke:#b23327;stroke-width:2.6}
+.lg-forest{fill:#cbdcc9;stroke:#a6c0ad}
+.lg-farmland{fill:#eae6c4;stroke:#c4bd8a}
+.lg-industrial{fill:url(#lf-hatch) #ddd8ca;stroke:#aaa99d}
+.lg-urban{fill:url(#lf-hatch) #e3e0cd;stroke:#a89272}
+.lg-district{fill:rgba(120,105,70,.06);stroke:#9c8b64;stroke-dasharray:3 2}
+#mapWrap .map-controls{top:auto;bottom:52px;left:8px;flex-direction:row}
+#mapWrap .map-key{flex:0 0 auto}
+
+/* ================= MAP v3: LARGE NAVIGABLE SHEETS ================= */
+/* geometry line work at map-unit scale */
+.plan-road{fill:none;stroke:#c9b184;stroke-width:26;opacity:.95;stroke-linecap:round;stroke-linejoin:round}
+.plan-road.secondary{stroke-width:16;stroke:#cdb890}
+.plan-road.lane{stroke-width:9;stroke:#d6c7a2}
+.plan-rail-casing{stroke-width:15;stroke:#e8e2cc;opacity:.9}
+.plan-rail{stroke-width:6.5;stroke-dasharray:18 14}
+.plan-rail.spur{stroke-width:4;stroke-dasharray:10 10;opacity:.85}
+.plan-river-line{stroke-width:20}.plan-stream-line{stroke-width:9}
+.plan-coast-line{stroke-width:5;stroke:#5f93a3}
+.plan-quay-line{stroke-width:7;stroke:#6f5f42}
+.plan-steps-line{stroke-width:9;stroke:#6f5f42;stroke-dasharray:12 9}
+.plan-water-area{stroke:#7fa9b5;stroke-width:4}
+.plan-contour{stroke-width:3.5;stroke-dasharray:none}
+.plan-bridge{stroke:#6f5a3e;stroke-width:4}
+.lu-texture{vector-effect:non-scaling-stroke;stroke-width:1px!important}
+.plan-district-boundary{stroke-width:1.6px;vector-effect:non-scaling-stroke;stroke-dasharray:7 4}
+/* generated urban fabric: one path per morphology class */
+.plan-fabric path{fill:#d8cba6;stroke:#9d8867;stroke-width:1px;vector-effect:non-scaling-stroke;opacity:.92}
+.fabric-core{fill:#d5c194}
+.fabric-expansion{fill:#dbcda9}
+.fabric-ring{fill:#d9caa2}
+.fabric-village{fill:#ddcfa6}
+.fabric-industrial{fill:#cdc7b6}
+.fabric-military{fill:#cfc4ad}
+.fabric-rural{fill:#dfd2ab}
+.fabric-landmark{fill:#cdb98f}
+/* canonical gameplay buildings are real footprints in the fabric */
+.plan-canonical{pointer-events:all}
+.plan-canonical .map-building{cursor:pointer;fill:#c9b285;stroke:#66513a;stroke-width:2.5px;vector-effect:non-scaling-stroke}
+.plan-canonical .map-building.selected{fill:#e7cc73;stroke:#b23327;stroke-width:4px}
+.plan-canonical .map-building.current{fill:#c7d5ea;stroke:#2c63b5;stroke-width:4px}
+/* annotation layer: screen-space readable labels and icons */
+#mapAnnoLayer,#mapLeaderLines{pointer-events:none}
+.map-poi-leader{stroke:#67757f;stroke-width:1.6px;vector-effect:non-scaling-stroke;opacity:.85}
+.map-anno text{paint-order:stroke fill;stroke:rgba(246,240,216,.95);stroke-linejoin:round}
+.map-label{font:700 11px 'Archivo';letter-spacing:.02em;fill:#33280f;paint-order:stroke fill;stroke:rgba(246,240,216,.95);stroke-width:3.2px;stroke-linejoin:round}
+.map-label.street{font-size:9.5px;font-style:italic;fill:#53646e;letter-spacing:.16em;stroke-width:2.6px}
+.map-label.emphasized{font-size:13px;fill:#7a1f16;stroke-width:4.2px}
+.map-district-label{font:700 15px 'Archivo';letter-spacing:.38em;fill:#8d7d58;opacity:.55;text-anchor:middle;paint-order:stroke fill;stroke:rgba(246,240,216,.75);stroke-width:2.4px}
+.poi-icon .sym-fill{fill:#59472c}.poi-icon .sym-core{fill:#f2e7c7}
+.poi-icon .sym-line{stroke:#59472c;fill:none;stroke-width:1.6}
+.poi-icon .sym-heavy{stroke:#59472c;fill:none;stroke-width:2.6;stroke-linecap:round}
+.poi-icon.emphasized .sym-fill{fill:#8b3027}
+.poi-icon.emphasized .sym-heavy,.poi-icon.emphasized .sym-line{stroke:#8b3027}
+
+/* ================= MAP v4: DENSITY + GESTURE/ANNO FIXES ================ */
+.map-building-hit{fill:none;stroke:none;pointer-events:all;cursor:pointer}
+#mapAnnoLayer{transform:none}
+.plan-road{stroke-width:30}
+.plan-road.secondary{stroke-width:18}
+.plan-road.lane{stroke-width:9}
+
+/* ================= MAP v5: FIXED VIEWPORT + REALISTIC SCALE ============ */
+.settlement-canvas{aspect-ratio:1.5!important}
+.plan-road{stroke-width:12}
+.plan-road.secondary{stroke-width:8}
+.plan-road.lane{stroke-width:4.5}
+.plan-rail-casing{stroke-width:10}
+.plan-rail{stroke-width:4.5;stroke-dasharray:14 10}
+.plan-rail.spur{stroke-width:3;stroke-dasharray:8 8}
+.plan-river-line{stroke-width:14}
+.plan-stream-line{stroke-width:6}
+.plan-quay-line{stroke-width:4}
+.plan-steps-line{stroke-width:6;stroke-dasharray:9 7}
+.plan-bridge{stroke-width:2px;vector-effect:non-scaling-stroke}
+#mapScreenAnnotations text{paint-order:stroke fill;stroke:rgba(246,240,216,.95);stroke-linejoin:round}
+
+/* ================= KARSEN FILES — VISUAL NOVEL ================= */
+.slipcard.vn{max-width:640px}
+.vn-titlebar{font-weight:700;letter-spacing:.14em;font-size:.95em;margin:10px 2px 2px;color:#3a2c1a;border-bottom:2px solid rgba(58,44,26,.25);padding-bottom:4px}
+.vn-titlebar.endname{text-align:center;letter-spacing:.22em;margin-top:12px}
+.vn-backdrop{position:relative;height:110px;border-radius:8px;border:1px solid rgba(58,44,26,.35);overflow:hidden;margin:8px 0 4px;background:#20242c}
+.vn-backdrop::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(246,240,216,0) 40%,rgba(20,16,10,.55));pointer-events:none}
+.vn-endbg{height:150px;display:flex;align-items:center;justify-content:center}
+.vn-endstamp{font-size:2.1rem;letter-spacing:.5em;text-indent:.5em;color:#f6f0d8;opacity:.92;text-shadow:0 2px 10px #000,0 0 30px rgba(0,0,0,.7);border:3px double #f6f0d8;padding:10px 22px;background:rgba(15,12,8,.35)}
+.vn-bg-night_flat{background:radial-gradient(120% 90% at 70% 20%,#3b3f52 0%,#23273a 45%,#12131f 100%)}
+.vn-bg-night_flat::before{content:"";position:absolute;right:18%;top:18%;width:46px;height:46px;border-radius:50%;background:#e8e2c9;box-shadow:0 0 34px 10px rgba(232,226,201,.35)}
+.vn-bg-factory_floor{background:linear-gradient(180deg,#4a3324 0%,#2d1f16 55%,#191008 100%)}
+.vn-bg-factory_floor::before{content:"";position:absolute;left:12%;top:30%;width:120px;height:60px;border-radius:50%;background:radial-gradient(closest-side,#ffb75e,#ff7b39cc 60%,transparent);filter:blur(6px);opacity:.8}
+.vn-bg-schoolyard{background:linear-gradient(180deg,#9fb59a 0%,#6d856b 60%,#3f5040 100%)}
+.vn-bg-schoolyard::before{content:"";position:absolute;left:8%;bottom:0;width:64px;height:74px;background:#5c4a33;border-radius:6px 6px 0 0;box-shadow:90px 0 0 -8px #54432e,190px -6px 0 -4px #5c4a33}
+.vn-bg-dock_night{background:linear-gradient(180deg,#1c2733 0%,#101821 62%,#0a0f15 100%)}
+.vn-bg-dock_night::before{content:"";position:absolute;left:0;right:0;bottom:26px;height:26px;background:repeating-linear-gradient(90deg,#0d141b 0 26px,#16202b 26px 54px);opacity:.9}
+.vn-bg-office{background:linear-gradient(180deg,#5a5346 0%,#3a352c 60%,#241f19 100%)}
+.vn-bg-office::before{content:"";position:absolute;inset:auto 12% 18% 12%;height:44px;background:repeating-linear-gradient(90deg,#2c2820 0 8px,#3c362b 8px 16px);border-radius:4px;opacity:.85}
+.vn-bg-street{background:linear-gradient(180deg,#57607a 0%,#33394d 55%,#1b1f2c 100%)}
+.vn-bg-street::before{content:"";position:absolute;left:16%;top:24%;width:10px;height:10px;border-radius:50%;background:#ffe9a8;box-shadow:60px 30px 0 #ffd97a66,-40px 44px 0 #ffd97a55,140px 12px 0 #ffe9a877}
+.vn-stage{margin:6px 0 2px}
+.vn-plate{display:inline-flex;align-items:center;gap:8px;background:rgba(24,18,10,.88);color:#f3ecd4;padding:5px 14px 5px 6px;border-radius:999px;border:1px solid rgba(243,236,212,.4);box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.vn-plate b{letter-spacing:.08em;font-size:.86em}
+.vn-portrait{width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:.72em;background:#c9b98f;color:#241a0d;border:2px solid #efe6cd;flex:none}
+.vn-c0 .vn-portrait,.vn-c0{--pc:#7d5ba6}.vn-c1{--pc:#3f7d6d}.vn-c2{--pc:#a65b47}.vn-c3{--pc:#47679e}.vn-c4{--pc:#8a6d3b}.vn-c5{--pc:#5b8a3c}
+.vn-plate.c0,.vn-plate.vn-c0{background:#4b3a63}.vn-plate.vn-c1{background:#2e574c}.vn-plate.vn-c2{background:#6e3f33}.vn-plate.vn-c3{background:#37517a}.vn-plate.vn-c4{background:#5c4a2b}.vn-plate.vn-c5{background:#425c2f}
+.vn-text{margin-top:8px;font-size:1.02em;line-height:1.55;color:#241a0d;background:rgba(255,252,240,.72);border-left:4px solid var(--pc,#8a6d3b);padding:10px 14px;border-radius:0 8px 8px 0;min-height:52px}
+.vn-text.narr{border-left-color:#8b8577;font-style:italic;color:#3d382e;background:rgba(250,247,235,.6)}
+.vn-prompt{margin:10px 2px 4px;font-weight:700;letter-spacing:.05em;color:#3a2c1a}
+.vn-choices{display:flex;flex-direction:column;gap:8px;margin-top:4px}
+.vn-choices .sl-btn{text-align:left}
+.vn-choices small{display:block;opacity:.75;font-style:italic}
+.vn-remember{margin:8px 2px 0;font-size:.82em;letter-spacing:.06em;color:#6b3f2e;font-style:italic}
+.vn-epi{font-size:1.02em}

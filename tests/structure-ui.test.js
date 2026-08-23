@@ -50,7 +50,7 @@ test('plan sheet renders three tabs with the sticky seal always present',()=>{
       tabs:['pursuits','decisions','desk'].every(t=>html.includes('data-plan-tab="'+t+'"')),
       activePursuits:html.includes('ptab on" data-plan-tab="pursuits"'),
       seal:html.includes('id="sealAdvance"'),
-      queueDock:html.includes('FILED THIS YEAR'),
+      queueDock:html.includes('ACTS LAND IMMEDIATELY'),
       noDecisionsYet:!html.includes('data-d="presspromo"')
     });
   })()`));
@@ -178,5 +178,5 @@ test('action-bar micro copy uses the tightened phrasing',()=>{
     updateBar();
     return document.getElementById('bar-micro').textContent;
   })()`);
-  assert.equal(micro,'plan the year · stamp it forward');
+  assert.equal(micro,'act now · then stamp the year forward');
 });
