@@ -490,14 +490,40 @@ function planNoteText(def,type,id,ok,afford,dup){
 }
 function recommendedActions(rem){
   const out=[];
-  const add=(type,id,label)=>{
+  const add=(type,id,label,extra)=>{
     const d=type==='p'?PUR_MAP[id]:DEC_MAP[id];
     if(!d||actionReservedThisYear(id))return;
     if(typeof d.avail==='function'&&!d.avail(S))return;
     if(d.cost&&rem<d.cost)return;
-    out.push('<button class="rec-chip" data-'+type+'="'+id+'" title="'+label+'"><b>'+label+'</b><span>'+clipText(fillLabel(d.note?d.note(S):''),46)+'</span></button>');
+    out.push('<button class="rec-chip" data-'+type+'="'+id+'" '+(extra?'data-extra=\''+JSON.stringify(extra).replace(/'/g,'&#39;')+'\'':'')+' title="'+label+'"><b>'+label+'</b><span>'+clipText(fillLabel(d.note?d.note(S):''),46)+'</span></button>');
+  };
+  const addUi=(id,label,note)=>{
+    if(actionReservedThisYear('openHousehold')&&id==='household')return;
+    out.push('<button class="rec-chip" data-ui-open="'+id+'" title="'+label+'"><b>'+label+'</b><span>'+clipText(note,46)+'</span></button>');
   };
   if(S.jailUntil>S.age)return out;
+  // The Ways Out advisor: when the file is genuinely struggling, the Bureau
+  // (for once) shows its work -- concrete, prioritized steps off the bottom
+  // rung, each queueable exactly like a normal suggestion.
+  let struggling=false;
+  if(typeof SurvivalSystem==='object'&&SurvivalSystem&&typeof World!=='undefined'&&World&&typeof SurvivalSystem.guidanceFor==='function'){
+    const desperate=SurvivalSystem.desperationOf(World,S);
+    struggling=desperate>=0.45||(Number(S.assets)||0)<0||(Number(S.health)||100)<35;
+    if(struggling){
+      SurvivalSystem.guidanceFor(World,S).forEach(g=>{
+        if(out.length>=4)return;
+        if(!g.action)return;
+        if(g.action.type==='ui'){
+          addUi(g.action.id,g.title+(g.risky?' ⚑':''),g.why);
+          return;
+        }
+        const before=out.length;
+        add(g.action.type,g.action.id,g.title+(g.risky?' ⚑':''),g.action.extra);
+        if(out.length>before&&g.risky){ /* flagged in its label */ }
+      });
+      if(out.length)return out;
+    }
+  }
   if(S.age>=16&&S.jobTier<1)add('p','lookwork','Find work');
   else if(S.assets<-500)add('p','overtime','Earn overtime');
   if(S.health<45)add('p','doctor','See the doctor');
@@ -1612,7 +1638,12 @@ $('#planSheet').addEventListener('click',e=>{
     S.autoTrain=!S.autoTrain; snd('stamp'); renderPlan(); updateBar(); return;
   }
   const rm=e.target.closest('[data-rm]'); if(rm){S.queue.splice(+rm.dataset.rm,1);snd('paper');renderPlan();updateBar();return;}
-  const pb=e.target.closest('[data-p]'); if(pb&&!pb.classList.contains('cant')){ triggerAction('p',pb.dataset.p); return; }
+  const uiOpen=e.target.closest('[data-ui-open]');
+  if(uiOpen){ if(uiOpen.dataset.uiOpen==='household'){ snd('paper'); openHousehold(); } return; }
+  const pb=e.target.closest('[data-p]'); if(pb&&!pb.classList.contains('cant')){
+    let ex=null; try{ex=pb.dataset.extra?JSON.parse(pb.dataset.extra):null;}catch(err){ex=null;}
+    if(ex&&pb.dataset.p==='gig'&&ex.openingId){ queueAdd('p','gig',{gigId:ex.gigId||null,openingId:ex.openingId}); return; }
+    triggerAction('p',pb.dataset.p); return; }
   const db=e.target.closest('[data-d]'); if(db&&!db.classList.contains('cant')){ triggerAction('d',db.dataset.d); return; }
   const cb=e.target.closest('[data-c]'); if(cb&&cb.classList.contains('ready')){deskAction(cb.dataset.c);renderPlan();return;}
   if(e.target.closest('#openHousehold')){ snd('paper'); openHousehold(); return; }
@@ -2652,15 +2683,16 @@ function checkMortality(){
     // the more lethal each year on the bottom rung becomes. A mission meal
     // suppresses the hunger bump for the year it was eaten.
     const desperation=(typeof SurvivalSystem==='object'&&SurvivalSystem&&typeof World!=='undefined'&&World)?SurvivalSystem.desperationOf(World,S):0;
+    const MT=(typeof SurvivalSystem==='object'&&SurvivalSystem&&SurvivalSystem.MORTALITY_TUNING)||{povertyBaseHouseNone:.012,povertyMeagerFood:.003,povertyBoth:.01,povertyInsecurity:.006,desperationFloor:.4,desperationScale:1.2,childGuardFactor:1.6,elderFactor:1.6};
     const fedAtMission=S.soupKitchenYear===currentYear();
     let povRisk=0;
-    if(house.id==='none') povRisk+=0.012;
-    if(food.id==='meager'&&!fedAtMission) povRisk+=0.003;
-    if(house.id==='none'&&food.id==='meager'&&!fedAtMission) povRisk+=0.01;
-    if(S.age>=16&&Math.min(S.housingSecurity||50,S.financialSecurity||50)<25) povRisk+=0.006;
-    povRisk*=(0.4+1.2*desperation);
-    if(S.age<16||S.livingAtHome) povRisk*=1.6*(GUARD_MORT[guardTier()]||1);
-    else if(S.age>65) povRisk*=1.6;
+    if(house.id==='none') povRisk+=MT.povertyBaseHouseNone;
+    if(food.id==='meager'&&!fedAtMission) povRisk+=MT.povertyMeagerFood;
+    if(house.id==='none'&&food.id==='meager'&&!fedAtMission) povRisk+=MT.povertyBoth;
+    if(S.age>=16&&Math.min(S.housingSecurity||50,S.financialSecurity||50)<25) povRisk+=MT.povertyInsecurity;
+    povRisk*=(MT.desperationFloor+MT.desperationScale*desperation);
+    if(S.age<16||S.livingAtHome) povRisk*=MT.childGuardFactor*(GUARD_MORT[guardTier()]||1);
+    else if(S.age>65) povRisk*=MT.elderFactor;
     if(povRisk>0&&chance(povRisk)){ dead=true;
       cause = house.id==='none'
         ? pick(['exposure, found behind the depot at first light','a fever no shelter was there to catch','the kind of winter the streets do not forgive'])
@@ -2670,8 +2702,8 @@ function checkMortality(){
   const medicalMortality=typeof medicalMortalityRoll==='function'?medicalMortalityRoll(S):null;
   if(!dead&&medicalMortality&&medicalMortality.died){dead=true;cause=medicalMortality.cause||'complications from a long illness';}
   if(!dead&&S.health<=0){dead=true;cause=pick(['heart failure','a long illness, patiently endured','sudden collapse at the kitchen table']);}
-  else if(!dead&&S.happiness<=0&&chance(0.07)){dead=true;cause='a despair the file does not fully document';}
-  else if(!dead&&S.age>=56){const p=0.006*(S.age-55)+Math.max(0,70-S.health)*0.0012; if(chance(p)){dead=true;cause=S.age>=84?'natural causes, in sleep':'heart failure';}}
+  else if(!dead&&S.happiness<=0&&chance(0.04)){dead=true;cause='a despair the file does not fully document';}
+  else if(!dead&&S.age>=56){const p=0.0042*(S.age-55)+Math.max(0,70-S.health)*0.0008; if(chance(p)){dead=true;cause=S.age>=84?'natural causes, in sleep':'heart failure';}}
   if(!dead&&S.age>=104){dead=true;cause='the extreme and improbable age of '+S.age;}
   if(dead){S.alive=false;S.cause=cause; logEv('ENTRY TERMINATED. Subject deceased — '+cause+'. The record ends mid-sentence, as these things do.',{},'final','FINAL ENTRY · YEAR '+S.age);}
 }
