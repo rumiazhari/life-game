@@ -2343,6 +2343,31 @@ function currentStoryChain(){
   if(typeof StorySystem!=='object'||!StorySystem||typeof World==='undefined'||!World) return null;
   try{ return StorySystem.currentView(World,{year:World.year}); }catch(e){ return null; }
 }
+// STATE CARE (Form 11-C): annual intake sweep + ward upkeep.
+function stateCareActive(){
+  return typeof StateCareSystem==='object'&&StateCareSystem&&typeof World!=='undefined'&&World
+    &&StateCareSystem.active(World);
+}
+function runStateCareYearTick(){
+  if(typeof StateCareSystem!=='object'||!StateCareSystem||typeof World==='undefined'||!World||!S) return null;
+  const result=StateCareSystem.tickWorld(World,{year:World.year,subject:S});
+  // A new hearing jumps the queue: open the episode immediately after the tick.
+  if(result&&result.intake==='pending_hearing'&&!quietMode){
+    S.__pendingForm11C=true;
+    logEv('FORM 11-C. The Ministry of Guardianship has assumed responsibility for the subject\u2019s upbringing, education, and opinions. An assessment is scheduled before nightfall.',{},'ruling','GUARDIANSHIP FILE · YEAR '+S.age);
+  } else if(result&&result.intake==='pending_hearing'&&quietMode){
+    // Fast-forward: let the story engine resolve it this same year.
+    const sr=typeof StorySystem==='object'&&StorySystem?StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage,autoResolve:true,actorTone:(function(){try{return currentDisposition(S).it.id;}catch(e){return null;}})()}):null;
+    if(sr&&Array.isArray(sr.resolved)) sr.resolved.forEach(en=>logEv(en.logText,{},'story','KARSEN FILE · YEAR '+S.age));
+  }
+  const ward=result&&result.ward;
+  if(ward&&ward.applied&&Array.isArray(ward.chips)&&ward.chips.length){
+    const label=(typeof StateCareSystem.summaryLabel==='function')?StateCareSystem.summaryLabel(World):'STATE CARE';
+    logChips('The '+label.toLowerCase()+' filed its yearly account.',ward.chips,'plan','WARD UPKEEP · YEAR '+S.age);
+    renderStats(window.C);
+  }
+  return result;
+}
 const VN_SPEAKER_CLASS={narrator:'vn-narr',you:'vn-you'};
 function vnSpeakerClass(key){ return VN_SPEAKER_CLASS[key]||('vn-c'+Math.abs(String(key).split('').reduce((a,c)=>a+c.charCodeAt(0),0))%6); }
 function vnMonogram(label){
@@ -2377,6 +2402,9 @@ function openStorySlip(force){
     const e=view.ending;
     html+='<div class="vn-backdrop vn-bg-'+(view.bg||'street')+' vn-endbg"><div class="vn-endstamp">THE END</div></div>';
     html+='<div class="vn-titlebar endname">'+fill(e.title)+'</div>';
+    if(Array.isArray(view.chips)&&view.chips.length){
+      html+='<div class="sl-chips">'+view.chips.map(c=>'<span class="fx '+(c.plus?'plus':'minus')+'">'+c.txt+'</span>').join('')+'</div>';
+    }
     html+=e.epilogue.map(l=>'<p class="sl-body vn-epi">'+fill(l)+'</p>').join('');
     html+='<div class="sl-note">The consequences are already on the file.</div>'+
       '<div class="sl-actions"><button class="sl-btn ok" data-vn="file">File It Away ▸</button></div>';
@@ -2726,6 +2754,9 @@ function runBudget(WAR){
   applyAmbient(fedAtMission?{}:food.fx,childScale);
   if(S.kids>0){ applyAmbient(currentChildcare().fx,childScale); }
   if(atHome) return;
+  // A ward of the state has no rent and no grocery bill — the Ministry
+  // keeps its charges alive; comfort was never in the appropriation.
+  if(stateCareActive()){ S.__householdSubjectExpensesPaid=0; return; }
   const household=typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.findByMember==='function'?HouseholdSystem.findByMember(World,S.npcId):null;
   const projection=typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.estimateOutlay==='function'?HouseholdSystem.estimateOutlay(World,household,S,{year:currentYear()}):null;
   const outlay=projection?projection.personalLifestyleOutlay:Math.round((house.rent+food.cost+(S.kids>0?currentChildcare().costPerKid*S.kids:0)+S.liabilities.reduce((sum,l)=>sum+l.annualPayment,0))*(WAR?1.15:1));
@@ -2808,7 +2839,10 @@ function runPersonalStandingYearTick(){
 function checkMortality(){
   let dead=false, cause='';
   const MT=(typeof SurvivalSystem==='object'&&SurvivalSystem&&SurvivalSystem.MORTALITY_TUNING)||{povertyBaseHouseNone:.012,povertyMeagerFood:.003,povertyBoth:.01,povertyInsecurity:.006,desperationFloor:.4,desperationScale:1.2,childGuardFactor:1.6,elderFactor:1.6,povertyHardCap:.05,despairChance:.04,criticalYearsToDie:1,criticalFloorHealth:8,guaranteedDeathAge:104};
-  if(S.jailUntil<=S.age){
+  // A ward of the state cannot die of poverty: the Ministry keeps its
+  // charges fed and roofed. (It keeps them for reasons of its own.)
+  const inCare=stateCareActive();
+  if(!inCare&&S.jailUntil<=S.age){
     const house=currentHousing(), food=currentFood();
     // Desperation Index scales poverty mortality: the deeper the spiral,
     // the more lethal each year on the bottom rung becomes. A mission meal
@@ -3618,6 +3652,7 @@ function advanceYear(suppressBurst,quiet){
   schoolYearTick();
   runRandomEvents();
   runStoryYearTick();
+  runStateCareYearTick();
   if(S.alive) checkMortality();
   if(S.alive){ S.hapSum+=S.happiness; S.hapYears++; S.peakHap=Math.max(S.peakHap,S.happiness); }
   pushSparkPoint();
@@ -3632,6 +3667,7 @@ function advanceYear(suppressBurst,quiet){
     else if(S.__pendingReverseDiscovery){ const ctx=S.__pendingReverseDiscovery; S.__pendingReverseDiscovery=null; dispatchReverseDiscoveryReaction(ctx); }
     else if(S.__pendingTheirSpouseNotice){ const n=S.__pendingTheirSpouseNotice; S.__pendingTheirSpouseNotice=null; openNotice(n); }
     else if(S.__pendingGuardianNotice){ const gp=S.__pendingGuardianNotice; S.__pendingGuardianNotice=null; openGuardianNotice(gp); }
+    else if(S.__pendingForm11C&&!quietMode){ S.__pendingForm11C=false; if(currentStoryChain()){ openStorySlip(true); } }
     else if(!quietMode&&currentStoryChain()){ openStorySlip(); }
     else if(!checkGuardianEviction()&&!checkParentingStyleChoice()) maybeSlip();
   }

@@ -166,9 +166,16 @@
           }
           break;
         }
+        case 'setStateCare': {
+          if(root.StateCareSystem&&typeof root.StateCareSystem.place==='function'){
+            const r=root.StateCareSystem.place(world,String(op.track||'foster'),op.quality||null,year,S);
+            if(r&&r.placed) chips.push({txt:'FORM 11-C FILED',plus:true});
+          }
+          break;
+        }
         case 'memory': {
           if(root.RelationshipMemory&&typeof root.RelationshipMemory.add==='function'){
-            const participants=[...new Set([String(S.npcId||'subject')].concat((op.participants||[]).filter(Boolean).map(String)))];
+            const participants=[...new Set([String((S&&S.npcId)||'subject')].concat((op.participants||[]).filter(Boolean).map(String)))];
             while(participants.length<2) participants.push('karsen');
             root.RelationshipMemory.add(world,{
               year, type:String(op.type||'life_story').slice(0,48),
@@ -229,45 +236,58 @@
   /* ================= RUN LIFECYCLE ================= */
 
   function startRun(world,selection,year,rng){
-    // Scripts address their cast by key (bind.spouse, bind.fixer ...);
-    // convert the resolver's ordered list into that map here.
-    const bindMap={};
-    (selection.bind||[]).forEach(b=>{ if(b&&b.key!=null) bindMap[b.key]=b; });
-    const body=selection.def.build(bindMap,rng||null);
+    // Delegate to the shared constructor; the rng rides along so scripts
+    // that randomize details (sums, streets) do so deterministically.
     const id='story:'+String(++world.storyCounter).padStart(5,'0');
+    const run=buildRun(world,selection.def,selection.bind||{},selection.castKey,id,null,year,rng);
+    return run;
+  }
+
+  /* Shared run constructor (also used by the Form 11-C fast path). */
+  function buildRun(world,def,bindListOrMap,castKey,id,salt,year,rng){
+    const bindMap=Array.isArray(bindListOrMap)
+      ?bindListOrMap.reduce((m,b)=>{if(b&&b.key!=null)m[b.key]=b;return m;},{})
+      :(bindListOrMap||{});
+    let body;
+    try{ body=def.build(bindMap,rng||null)||{}; }catch(e){ body={title:'AN UNLABELED CHAPTER',bg:'street',scenes:{a:{lines:[{sp:'narrator',t:'The file is illegible.'}]}}}; }
     const castMap={};
-    (selection.bind||[]).forEach(b=>{castMap[b.key]={label:b.label,bind:b.bind,npcId:b.npcId};});
-    world.storyRuns[id]={
-      id, episodeId:selection.def.id, domain:selection.def.domain||'life',
-      title:body.title, bg:body.bg||'street',
-      castKey:selection.castKey, signature:signatureKey(selection.def.id,selection.castKey),
+    Object.keys(bindMap).forEach(k=>{const b=bindMap[k];castMap[k]={label:b.label||k,bind:b.bind,npcId:b.npcId};});
+    const run={
+      id, episodeId:def.id, domain:def.domain||'life',
+      title:String(body.title||'AN UNLABELED CHAPTER'), bg:body.bg||'street',
+      castKey, signature:signatureKey(def.id,castKey),
       cast:castMap,
-      scenes:body.scenes, startScene:body.startScene||Object.keys(body.scenes)[0],
+      scenes:body.scenes||{}, startScene:body.startScene||Object.keys(body.scenes||{})[0]||'a',
       sceneId:null, lineIndex:0,
       flags:{}, tones:[], rememberNote:null,
       startedYear:year, status:'playing',
       finalizedEndingId:null, history:[]
     };
-    // Enter the first scene immediately so currentView() is valid.
-    enterScene(world.storyRuns[id],world.storyRuns[id].startScene,year);
+    world.storyRuns[id]=run;
+    enterScene(run,run.startScene,year,null);
     trimArchive(world);
-    return world.storyRuns[id];
+    return run;
   }
 
-  function enterScene(run,sceneId,year){
+  function enterScene(run,sceneId,year,ctx){
     if(!run.scenes[sceneId]) { run.sceneId=null; run.status='ended'; return; }
     run.sceneId=sceneId; run.lineIndex=0;
     const scene=run.scenes[sceneId];
     if(scene.ending&&!run.finalizedEndingId){
-      finalizeEnding(sceneId,scene,run,year);
+      finalizeEnding(sceneId,scene,run,year,ctx);
     }
   }
 
-  function finalizeEnding(sceneId,scene,run,year){
+  function finalizeEnding(sceneId,scene,run,year,ctx){
     const e=scene.ending;
     run.finalizedEndingId=e.id;
     run.status='ended';
     run.ending={id:e.id,title:e.title,tone:e.tone||'prudent',epilogue:(e.epilogue||[]).slice(0,4)};
+    // Ending consequences land HERE, exactly once, guarded by the
+    // finalized flag -- whether or not any UI ever opens the card.
+    const chips=[];
+    applyOps(ctx&&ctx.world?ctx.world:null,ctx?ctx.S:null,ctx?ctx.lineage:null,e.effects,chips,year);
+    run.pendingChips=chips;
   }
 
   function liveRun(world){
@@ -302,7 +322,7 @@
     if(scene.choice){
       return {type:'choice',runId:run.id,title:run.title,bg:run.bg,domain:run.domain,
         prompt:scene.choice.prompt,
-        options:scene.choice.options.map((o,i)=>({index:i,t:o.t,note:o.note||'',tone:o.tone||'prudent'})),
+        options:scene.choice.options.map((o,i)=>({index:i,t:o.t,note:o.note||'',tone:o.tone||'prudent',flag:o.flag||null})),
         sceneNo:sceneNumber(run)};
     }
     if(scene.goto){
@@ -338,7 +358,7 @@
       run.lineIndex++; // move past lines into choice/transition zone
     }
     if(scene.goto&&!scene.choice){
-      enterScene(run,scene.goto,year);
+      enterScene(run,scene.goto,year,{world,S:options?options.subject:null,lineage:options?options.lineage:null});
       return currentView(world,{year});
     }
     return currentView(world,{year});
@@ -361,7 +381,7 @@
     run.tones.push(option.tone||'prudent');
     run.rememberNote=option.note||null;
     run.history.push({type:'choice',sceneId:run.sceneId,option:index,tone:option.tone||'prudent'});
-    if(option.goto&&run.scenes[option.goto]) enterScene(run,option.goto,year);
+    if(option.goto&&run.scenes[option.goto]) enterScene(run,option.goto,year,{world,S:options?options.subject:null,lineage:options?options.lineage:null});
     else run.status='ended';
     return {applied:true,chips,view:currentView(world,{year})};
   }
@@ -440,11 +460,28 @@
     }
 
     // Spawn at most one new episode, and only when nothing is live.
+    // A pending Form 11-C hearing jumps the queue entirely: the state does
+    // not wait for narrative scheduling to collect a child.
     if(S&&S.alive!==false&&!liveRun(world)){
+      const pendingHearing=root.StateCareSystem&&typeof root.StateCareSystem.awaitingHearing==='function'
+        &&root.StateCareSystem.awaitingHearing(world);
       const rng=root.WorldSimulation&&root.WorldSimulation.streamFor
         ?root.WorldSimulation.streamFor(world,year,'story-spawn','story')
         :root.Random.create([world.seed,year,'story-spawn','story'].join('|'));
-      if(rng.chance(SPAWN_CHANCE)){
+      if(pendingHearing){
+        const def=episodes().find(e=>e.id==='ep_form_11c');
+        if(def){
+          let bind=null;
+          try{ bind=def.cast?def.cast.call(def,world,S,lineage):{}; }catch(e){ bind={}; }
+          if(bind!=null){
+            const castKey=def.id+'|pending';
+            const salt=++world.storyCounter;
+            const id='story:'+String(salt).padStart(5,'0');
+            world.storyRuns[id]=buildRun(world,def,bind,castKey,id,null,year,rng);
+            result.spawned=id;
+          }
+        }
+      } else if(rng.chance(SPAWN_CHANCE)){
         const sel=selectEpisode(world,S,lineage,year,rng);
         if(sel){ const run=startRun(world,sel,year,rng); result.spawned=run.id; }
       }

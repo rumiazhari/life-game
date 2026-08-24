@@ -1147,6 +1147,171 @@
     }
   },
 
+  /* ================================================================
+     EPISODE 11 — FORM 11-C: THE CHILD'S BEST INTERESTS
+     The state finds an unguarded child. The state is not kind; it is
+     thorough. The hearing decides which drawer the child is filed into.
+     ================================================================ */
+  {
+    id:'ep_form_11c',
+    domain:'bureau',
+    cast(){
+      return [
+        {key:'assessor',label:'Assessor Klemm, Ministry of Guardianship'},
+        {key:'warden',label:'Placement Warden Duval'}
+      ];
+    },
+    eligible(world){ return !!(root.StateCareSystem&&root.StateCareSystem.awaitingHearing(world)); },
+    weight(){ return 100; },
+    build(bind,rng){
+      const as=bind.assessor, wd=bind.warden;
+      return {
+      title:'FORM 11-C: THE CHILD\u2019S BEST INTERESTS',
+      bg:'office',
+      scenes:{
+        opening:{
+          lines:[
+            {sp:'narrator',t:'The intake office keeps its lights on all night, which the pamphlet calls compassion and the budget calls overtime. You sit on a chair built for somebody smaller, holding a numbered card. The card says 11-C. Nobody has said your name in nine hours.'},
+            {sp:as.key,t:'Assessor Klemm turns a page without reading it. "No guardian of record. No address of substance." A stamp hovers. "The Ministry assumes responsibility for your upbringing, your education, and your opinions. Sign here \u2014 or the alternative to signing is also signing, later, with worse chairs."'},
+            {sp:'you',t:'"And if I sign?"'}
+          ],
+          choice:{
+            prompt:'Klemm looks up for the first time. Assessment begins.',
+            options:[
+              {t:'Sit up straight. Answer crisply. Give them nothing to correct.',note:'Composure is currency',tone:'prudent',flag:'composed',goto:'impressed',effects:[{kind:'stat',stat:'smarts',delta:1}]},
+              {t:'Cry. You are, technically, a child.',note:'Honest, at least',tone:'kind',flag:'wept',goto:'pigeonholed',effects:[{kind:'stat',stat:'happiness',delta:-1}]},
+              {t:'Ask what\u2019s for dinner. Loudly. Twice.',note:'Priorities, declared',tone:'greedy',flag:'asked_food',goto:'fed_and_filed',effects:[]}
+            ]
+          }
+        },
+
+        impressed:{
+          lines:[
+            {sp:as.key,t:'Klemm writes one word on your card. You will spend years wondering whether it was "composed" or "dangerous." He rises and opens the door marked PLACEMENTS.'},
+            {sp:as.key,t:'"Warden Duval handles children who can be used carefully. Do make use of being used carefully."'}
+          ],
+          goto:'placement'
+        },
+
+        pigeonholed:{
+          lines:[
+            {sp:as.key,t:'The word Klemm writes is shorter. The stamp comes down anyway \u2014 tears are just water with paperwork attached. "Duval," he calls. "Standard stock."'}
+          ],
+          goto:'placement'
+        },
+
+        fed_and_filed:{
+          lines:[
+            {sp:'narrator',t:'They feed you first. Bread, cheese, an apple with a Ministry sticker on it. It is the best meal of your year, which the form records under APPETITE: GOOD. Then Duval collects you from the canteen like a tray.'}
+          ],
+          goto:'placement'
+        },
+
+        placement:{
+          lines:[
+            {sp:wd.key,t:'Warden Duval\u2019s office has three doors and she introduces them like a menu. "The foster registry" \u2014 door one \u2014 "households approved by this ministry, inspected at intervals ranging from frequent to fictional."'},
+            {sp:wd.key,t:'"Door two, the Cadet Corps: uniform, meals, trade, drums at six. Door two is why the Ministry never runs short of drummers or infantry." A glance at your file. "Door three does not exist for most files. Proving Meadow \u2014 room, board, wages triple a porter\u2019s, and a confidentiality schedule thicker than the bed. They test things there. Vitamins, mostly. Probably vitamins."'},
+            {sp:wd.key,t:'(leaning in, one warden to one ward) "Off the record? Door one is a lottery where the prizes are people. If you can read a room, child, read me: say the word and I\u2019ll steer the paper. I steer it either way \u2014 the only question is whose hand I feel pulling."'}
+          ],
+          choice:{
+            prompt:'Three doors. One warden\u2019s ear. Choose your words.',
+            options:[
+              {t:'"A family. Even a borrowed one. Please."',note:'The lottery, entered',tone:'kind',flag:'asked_family',goto:'foster_lottery',effects:[{kind:'stat',stat:'happiness',delta:2}]},
+              {t:'"The Cadet Corps. I want the uniform before the state decides my size."',note:'Drums at six, chosen',tone:'prudent',flag:'chose_cadet',goto:'cadet_path',effects:[{kind:'stat',stat:'health',delta:1}]},
+              {t:'"The Meadow pays triple. I\u2019m told I\u2019m durable."',note:'Vitamins, probably',tone:'greedy',flag:'chose_meadow',goto:'meadow_path',effects:[{kind:'money',delta:40}]},
+              {t:'Watch Duval\u2019s hands instead of answering.',note:'Read the steered paper',tone:'cold',flag:'read_warden',goto:'watchful',effects:[{kind:'stat',stat:'smarts',delta:1}]}
+            ]
+          }
+        },
+
+        foster_lottery:{
+          lines:[
+            {sp:wd.key,t:'"Family it is." Duval spins the registry wheel \u2014 an actual wheel, brass-riveted, with household numbers where numbers should be. It clatters like a tiny guillotine and stops on a name.'},
+            {sp:'narrator',t:'What the wheel cannot weigh: whether that name prays before dinner or after, whether the pantry locks, whether "approved by this ministry" ever once meant warm.'}
+          ],
+          choice:{
+            prompt:'Duval\u2019s hand rests on the wheel, waiting to be felt pulling.',
+            options:[
+              {t:'"Spin it honest, Warden."',note:'Luck over leverage',tone:'prudent',flag:'honest_spin',goto:'ending_lottery',effects:[]},
+              {t:'"You promised your hand felt pulled. Feel mine."',note:'Steer toward kindness',tone:'kind',flag:'steered_kind',goto:'ending_goodshelf',effects:[{kind:'stat',stat:'relations',delta:2}]},
+              {t:'Say nothing. Let the wheel confess whatever wheels know.',note:'Silence, entered as evidence',tone:'cold',flag:'silent_spin',goto:'ending_cruelshelf',effects:[{kind:'stat',stat:'happiness',delta:-1}]}
+            ]
+          }
+        },
+
+        cadet_path:{
+          lines:[
+            {sp:wd.key,t:'"Cadet Corps." Duval stamps it almost fondly. "Boots by Friday. They\u2019ll feed you like a furnace and drill you like a clock, and in four years you\u2019ll be able to march in your sleep and field-strip a lamp blindfolded. Useful man, useful state. Same thing here."'}
+          ],
+          goto:'ending_cadet'
+        },
+
+        meadow_path:{
+          lines:[
+            {sp:wd.key,t:'Duval goes still, the way people do when a child volunteers for the thing they were bribed not to mention. "The Meadow takes volunteers at ten and releases them at sixteen. The pay is real. The food is real. The doctors measure everything twice and tell you nothing once." She signs. "Welcome to the best-paid childhood in Karsen."'}
+          ],
+          goto:'ending_meadow'
+        },
+
+        watchful:{
+          lines:[
+            {sp:'narrator',t:'Duval\u2019s fingers rest on the registry, but her eyes flick \u2014 once, professionally \u2014 to a different door entirely. Not the Meadow. Not the Corps. A grey door with no number, only a crest: a child\u2019s silhouette inside an eye.'},
+            {sp:wd.key,t:'"You watch hands," she murmurs. "That\u2019s the entire entrance examination, as it happens." She crosses out one line on Form 11-C and writes another. "Ward of the Bureau. Direct track. Congratulations are neither appropriate nor expected."'}
+          ],
+          goto:'ending_bureauward'
+        },
+
+        ending_lottery:{
+          ending:{
+            id:'lottery',title:'THE WHEEL DECIDES WHO LOVES YOU',tone:'prudent',
+            epilogue:['The wheel stops. The household it names is neither cruel nor kind \u2014 it is a household, which after this year counts as weather rather than fate.','You learn the family\u2019s rules, their saints, which floorboard hides the good jam. The Ministry inspects annually and finds what it sent: a ward, fed, filed, and \u2014 on paper \u2014 protected.'],
+            effects:[{kind:'setStateCare',track:'foster',quality:'cold'},{kind:'memory',type:'episode_11c_lottery',valence:.1,intensity:.6,summary:'FORM 11-C ended at the wheel: Subject took their chances on the foster registry.'}]
+          }
+        },
+
+        ending_goodshelf:{
+          ending:{
+            id:'goodshelf',title:'THE GOOD SHELF',tone:'kind',
+            epilogue:['Duval\u2019s hand pulls, gently, against the spin. The name it lands on belongs to a widow with a bakery oven and no sons, who reads your file once and your hunger immediately.','Not every inspection is fiction. Some nights the house smells of bread for no reason except that someone remembered you exist. The Bureau will take credit anyway; let it. You know which shelf the warmth came from.'],
+            effects:[{kind:'setStateCare',track:'foster',quality:'kind'},{kind:'memory',type:'episode_11c_goodshelf',valence:.8,intensity:.7,summary:'FORM 11-C ended on the Good Shelf: Warden Duval steered Subject to a kind hearth.'}]
+          }
+        },
+
+        ending_cadet:{
+          ending:{
+            id:'cadet',title:'HIS MAJESTY\u2019S COAT',tone:'prudent',
+            epilogue:['The coat fits by Friday, as promised. Mornings begin with drums and end with muscles you didn\u2019t order arriving anyway.','Letters home have no home to go to, so you write them anyway and keep them in the footlocker. The state feeds you, drills you, and calls you son in chorus \u2014 and the terrible secret, some nights, is how much of that is enough.'],
+            effects:[{kind:'setStateCare',track:'cadet'},{kind:'memory',type:'episode_11c_cadet',valence:.3,intensity:.65,summary:'FORM 11-C chose the Cadet Corps for Subject: boots, drums, and a state-sized family.'}]
+          }
+        },
+
+        ending_meadow:{
+          ending:{
+            id:'meadow',title:'THE PROVING MEADOW',tone:'greedy',
+            epilogue:['White coats, white fences, wages in a white envelope. The vitamins are enormous. So is the ledger they keep of everything your body does next.','At sixteen they hold a small ceremony, pay a large purse, and seal your file with wax. You leave taller, richer, and fluent in a symptom vocabulary no child should need.'],
+            effects:[{kind:'setStateCare',track:'proving'},{kind:'memory',type:'episode_11c_meadow',valence:-.15,intensity:.7,summary:'FORM 11-C sold Subject\u2019s childhood to the Proving Meadow at triple wages.'}]
+          }
+        },
+
+        ending_bureauward:{
+          ending:{
+            id:'bureauward',title:'WARD OF THE BUREAU',tone:'cold',
+            epilogue:['The grey door opens on tutors, tailors, and a stipend drawn from an account with no name. Your scrubbed file now reads like a saint\u2019s \u2014 because the Bureau writes its saints itself.','You are educated, watched, and owned in the polite way secrets own people. Years later, when a favor is needed, the Bureau will know exactly which drawer it kept you in. So will you.'],
+            effects:[{kind:'setStateCare',track:'bureau_ward'},{kind:'scrutiny',delta:-10},{kind:'memory',type:'episode_11c_bureauward',tags:['underworld'],valence:.05,intensity:.75,summary:'FORM 11-C ended behind the grey door: Subject became a Ward of the Bureau.'}]
+          }
+        },
+
+        ending_cruelshelf:{
+          ending:{
+            id:'cruelshelf',title:'THE SHELF THAT LOCKS',tone:'cold',
+            epilogue:['The wheel is honest and the district is poor and the house that takes you has rules about speaking after eight and eating standing.','The Ministry\u2019s inspector comes yearly, is shown the good room, and signs. You learn early what every ward learns eventually: protection and custody share a spelling, and only the context knows which was meant.'],
+            effects:[{kind:'setStateCare',track:'foster',quality:'cruel'},{kind:'memory',type:'episode_11c_cruelshelf',valence:-.5,intensity:.65,summary:'FORM 11-C ended badly: an honest wheel placed Subject in a house that locked its shelves.'}]
+          }
+        }
+      }};
+    }
+  },
+
   {
     id:'ep_hold_ledger',
     domain:'hold',
