@@ -1121,7 +1121,7 @@ body{background:var(--olive);color:var(--ink)}
 .plan-bridge{stroke-width:2px;vector-effect:non-scaling-stroke}
 #mapScreenAnnotations text{paint-order:stroke fill;stroke:rgba(246,240,216,.95);stroke-linejoin:round}
 
-/* ================= KARSEN FILES — VISUAL NOVEL ================= */
+/* ================= KARSEN FILES ï¿½ VISUAL NOVEL ================= */
 .slipcard.vn{max-width:640px}
 .vn-titlebar{font-weight:700;letter-spacing:.14em;font-size:.95em;margin:10px 2px 2px;color:#3a2c1a;border-bottom:2px solid rgba(58,44,26,.25);padding-bottom:4px}
 .vn-titlebar.endname{text-align:center;letter-spacing:.22em;margin-top:12px}
@@ -1198,8 +1198,12 @@ body{background:var(--olive);color:var(--ink)}
 .intro-cine::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(255,255,255,.02) 0 1px,transparent 1px 3px);pointer-events:none}
 .ic-beat{max-width:660px;text-align:center;padding:0 26px;opacity:0;transform:translateY(16px);transition:opacity .8s ease,transform .8s ease}
 .ic-beat.on{opacity:1;transform:none}
+.ic-art{width:200px;height:120px;margin:0 auto 20px;opacity:.75}
+.ic-art svg{width:100%;height:100%}
 .ic-main{font-family:var(--font-stamp);font-size:clamp(20px,4.6vw,38px);letter-spacing:.2em;line-height:1.35;text-transform:uppercase}
 .ic-sub{margin-top:16px;font-family:var(--font-file);font-size:clamp(13px,1.8vw,16px);line-height:1.8;color:#b6aa8d;white-space:pre-line}
+.ic-click-hint{margin-top:28px;font-family:var(--font-stamp);font-size:11px;letter-spacing:.28em;color:#5c5443;animation:pulseHint 2.4s ease-in-out infinite}
+@keyframes pulseHint{0%,100%{opacity:.4}50%{opacity:.9}}
 .ic-dots{position:absolute;bottom:30px;left:0;right:0;display:flex;gap:9px;justify-content:center}
 .ic-dot{width:8px;height:8px;border-radius:50%;background:#37322a}
 .ic-dot.on{background:#b23327}

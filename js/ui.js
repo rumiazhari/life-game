@@ -2336,17 +2336,19 @@ function resolveNotice(n){
 
 /* ================= NEW-GAME CINEMATIC =================
  * Bureau-voiced cold open: inspirational in cadence, cruel in content.
- * Runs once per "Open a New File" click; skippable; hands off to Form 0. */
+ * Runs once per "Open a New File" click; skippable; hands off to Form 0.
+ * Slides advance ONLY on click — never on a timer. Each beat carries an
+ * illustrated SVG vignette. */
 const INTRO_BEATS=[
- {main:'EVERY CENTURY BEGINS THE SAME WAY.',sub:'With a form.'},
- {main:'YOU ARE BORN WITHOUT A FILE.',sub:'Within the hour, the Bureau corrects this oversight.'},
- {main:'IT WILL RECORD WHAT YOU EAT.',sub:'What you love. What you fear. What you are worth.\nIt will outlive you.'},
- {main:'THE STATE IS NOT YOUR MOTHER.',sub:'It is something rarer: an institution that\nnever forgets, and never forgives.'},
- {main:'WHAT WILL YOU BE?',sub:'A name on a list? A number in a drawer?\nA stamp that outlives the hand that carved it?'},
- {main:'CHOOSE YOUR LIES CAREFULLY.',sub:'The ledger keeps even the ones you tell yourself.'},
- {main:'TONIGHT, IN KARSEN, A CHILD IS BORN.',sub:'No title. No fortune.\nOne blank page \u2014 and a century hungry to write on it.'},
- {main:'THE LAMP IS LIT.',sub:'THE PEN IS DIPPED.'},
- {stamp:'FILE OPENED',main:'YOUR LIFE HAS BEEN ASSIGNED A NUMBER.'}
+ {main:'EVERY CENTURY BEGINS THE SAME WAY.',sub:'With a form.',art:'form'},
+ {main:'YOU ARE BORN WITHOUT A FILE.',sub:'Within the hour, the Bureau corrects this oversight.',art:'infant'},
+ {main:'IT WILL RECORD WHAT YOU EAT.',sub:'What you love. What you fear. What you are worth.\nIt will outlive you.',art:'drawer'},
+ {main:'THE STATE IS NOT YOUR MOTHER.',sub:'It is something rarer: an institution that\nnever forgets, and never forgives.',art:'eye'},
+ {main:'WHAT WILL YOU BE?',sub:'A name on a list? A number in a drawer?\nA stamp that outlives the hand that carved it?',art:'crossroads'},
+ {main:'CHOOSE YOUR LIES CAREFULLY.',sub:'The ledger keeps even the ones you tell yourself.',art:'pen'},
+ {main:'TONIGHT, IN KARSEN, A CHILD IS BORN.',sub:'No title. No fortune.\nOne blank page \u2014 and a century hungry to write on it.',art:'window'},
+ {main:'THE LAMP IS LIT.',sub:'THE PEN IS DIPPED.',art:'lamp'},
+ {stamp:'FILE OPENED',main:'YOUR LIFE HAS BEEN ASSIGNED A NUMBER.',art:'seal'}
 ];
 function icSealSVG(){
  return '<svg viewBox="0 0 120 120" aria-hidden="true">'
@@ -2357,42 +2359,130 @@ function icSealSVG(){
   +'<circle cx="60" cy="60" r="17" fill="none" stroke="#b23327" stroke-width="2.6"/>'
   +'<circle cx="60" cy="60" r="6.5" fill="#b23327"/></svg>';
 }
+function icArt(kind){
+ var S='<svg viewBox="0 0 200 120" preserveAspectRatio="xMidYMid meet" aria-hidden="true">';
+ var E='</svg>';
+ var stroke='#8f8674',fill='#3a352c',accent='#b23327',pale='#c4b894';
+ switch(kind){
+  case 'form': return S
+   +'<rect x="55" y="10" width="90" height="100" fill="#e8e0cc" stroke="#5a4d38" rx="2"/>'
+   +'<line x1="66" y1="26" x2="134" y2="26" stroke="#5a4d38" stroke-width="3"/>'
+   +'<line x1="66" y1="38" x2="120" y2="38" stroke="'+pale+'"/>'
+   +'<line x1="66" y1="48" x2="130" y2="48" stroke="'+pale+'"/>'
+   +'<line x1="66" y1="58" x2="110" y2="58" stroke="'+pale+'"/>'
+   +'<line x1="66" y1="72" x2="128" y2="72" stroke="'+pale+'"/>'
+   +'<line x1="66" y1="82" x2="118" y2="82" stroke="'+pale+'"/>'
+   +'<rect x="98" y="88" width="40" height="16" fill="none" stroke="'+accent+'" stroke-width="2" transform="rotate(-6 118 96)"/>'
+   +'<text x="102" y="99" font-size="8" fill="'+accent+'" font-family="serif" transform="rotate(-6 118 96)">FILED</text>'
+   +E;
+  case 'infant': return S
+   +'<circle cx="100" cy="60" r="46" fill="none" stroke="'+stroke+'" stroke-width="1" stroke-dasharray="3 3"/>'
+   +'<ellipse cx="100" cy="66" rx="28" ry="34" fill="'+fill+'"/>'
+   +'<circle cx="100" cy="38" r="14" fill="'+fill+'"/>'
+   +'<path d="M86 52 Q100 60 114 52" fill="none" stroke="'+pale+'" stroke-width="1.5"/>'
+   +'<line x1="72" y1="60" x2="128" y2="60" stroke="'+stroke+'" stroke-width=".5" stroke-dasharray="2 4"/>'
+   +E;
+  case 'drawer': return S
+   +'<rect x="50" y="20" width="100" height="80" fill="none" stroke="'+stroke+'" stroke-width="2"/>'
+   +'<line x1="50" y1="60" x2="150" y2="60" stroke="'+stroke+'" stroke-width="1"/>'
+   +'<rect x="62" y="30" width="30" height="24" fill="'+fill+'" stroke="'+pale+'"/>'
+   +'<rect x="98" y="30" width="30" height="24" fill="'+fill+'" stroke="'+pale+'"/>'
+   +'<rect x="62" y="70" width="30" height="24" fill="'+fill+'" stroke="'+pale+'"/>'
+   +'<rect x="98" y="70" width="30" height="24" fill="'+fill+'" stroke="'+pale+'"/>'
+   +'<rect x="66" y="26" width="14" height="6" fill="'+accent+'" opacity=".7"/>'
+   +'<rect x="102" y="26" width="14" height="6" fill="'+pale+'" opacity=".5"/>'
+   +'<circle cx="100" cy="58" r="3" fill="'+stroke+'"/>'
+   +E;
+  case 'eye': return S
+   +'<g stroke="'+stroke+'" stroke-width="1.5" fill="none">'
+   +'<circle cx="100" cy="60" r="42"/>'
+   +'<path d="M100 14 v8 M100 98 v8 M54 60 h8 M138 60 h8 M67 27 l6 6 M127 93 l6 6 M133 27 l-6 6 M73 93 l-6 6"/>'
+   +'</g>'
+   +'<path d="M68 60 Q100 36 132 60 Q100 84 68 60 Z" fill="'+fill+'" stroke="'+pale+'" stroke-width="1.5"/>'
+   +'<circle cx="100" cy="60" r="12" fill="'+accent+'"/><circle cx="100" cy="60" r="5" fill="#0c0b08"/>'
+   +'<circle cx="104" cy="56" r="2" fill="#e8e0cc" opacity=".7"/>'
+   +E;
+  case 'crossroads': return S
+   +'<text x="100" y="34" text-anchor="middle" font-size="28" fill="'+pale+'" font-family="serif">?</text>'
+   +'<path d="M100 100 L100 70 M100 70 L60 44 M100 70 L140 44" stroke="'+stroke+'" stroke-width="2.5" fill="none"/>'
+   +'<circle cx="60" cy="44" r="5" fill="'+accent+'"/>'
+   +'<circle cx="140" cy="44" r="5" fill="'+pale+'"/>'
+   +'<circle cx="100" cy="100" r="4" fill="'+stroke+'"/>'
+   +'<line x1="30" y1="106" x2="170" y2="106" stroke="'+stroke+'" stroke-width="1" stroke-dasharray="4 3"/>'
+   +E;
+  case 'pen': return S
+   +'<path d="M100 16 L112 52 L100 72 L88 52 Z" fill="'+pale+'" stroke="'+stroke+'" stroke-width="1.5"/>'
+   +'<circle cx="100" cy="50" r="3.5" fill="'+fill+'"/>'
+   +'<line x1="100" y1="72" x2="100" y2="88" stroke="'+stroke+'" stroke-width="1"/>'
+   +'<circle cx="97" cy="96" r="3" fill="'+accent+'" opacity=".8"/>'
+   +'<circle cx="106" cy="102" r="2" fill="'+accent+'" opacity=".5"/>'
+   +'<line x1="60" y1="106" x2="140" y2="106" stroke="'+stroke+'" stroke-width="1" stroke-dasharray="6 3"/>'
+   +E;
+  case 'window': return S
+   +'<rect x="62" y="14" width="76" height="92" fill="#1a1c2e" stroke="'+stroke+'" stroke-width="3"/>'
+   +'<line x1="100" y1="14" x2="100" y2="106" stroke="'+stroke+'" stroke-width="2"/>'
+   +'<line x1="62" y1="60" x2="138" y2="60" stroke="'+stroke+'" stroke-width="2"/>'
+   +'<circle class="glowp" cx="118" cy="32" r="6" fill="'+pale+'"/>'
+   +'<rect x="30" y="80" width="30" height="30" fill="'+fill+'"/><rect x="140" y="72" width="28" height="38" fill="'+fill+'"/>'
+   +'<rect x="36" y="86" width="5" height="5" fill="'+pale+'" opacity=".6"/><rect x="146" y="80" width="5" height="5" fill="'+pale+'" opacity=".6"/>'
+   +'<circle cx="82" cy="88" r="3" fill="'+accent+'"/>'
+   +E;
+  case 'lamp': return S
+   +'<polygon points="100,20 160,100 40,100" fill="#ffe9b0" opacity=".12"/>'
+   +'<path d="M76 36 Q100 16 124 36 L118 44 Q100 30 82 44 Z" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.5"/>'
+   +'<ellipse class="glowp" cx="100" cy="42" rx="20" ry="5" fill="#ffe9b0"/>'
+   +'<line x1="100" y1="44" x2="100" y2="72" stroke="'+stroke+'" stroke-width="3"/>'
+   +'<rect x="80" y="72" width="40" height="6" fill="'+fill+'" stroke="'+stroke+'"/>'
+   +'<line x1="60" y1="106" x2="140" y2="106" stroke="'+stroke+'" stroke-width="1" stroke-dasharray="6 3"/>'
+   +E;
+  case 'seal': return S
+   +'<g transform="translate(40,0) scale(0.6)">'+icSealSVG().replace(/<svg[^>]*>/,'').replace(/<\/svg>/,'')+'</g>'
+   +E;
+  default: return S+E;
+ }
+}
 function playIntroCinematic(done){
  if(typeof done!=='function') done=function(){};
- const ov=document.createElement('section');
- ov.className='intro-cine'; ov.setAttribute('role','dialog');
- document.body.appendChild(ov);
- let i=0,timer=null,closed=false;
- function clearTimer(){ if(timer){ clearTimeout(timer); timer=null; } }
- function finish(){ if(closed) return; closed=true; clearTimer(); try{ov.remove();}catch(e){} done(); }
- function beatHTML(b){
+ // Fail open: any error here must hand off to the game, never leave a
+ // blank overlay covering the screen.
+ try{
+  const ov=document.createElement('section');
+  ov.className='intro-cine'; ov.setAttribute('role','dialog');
+  document.body.appendChild(ov);
+  let i=0,closed=false;
+  function finish(){ if(closed) return; closed=true; try{ov.remove();}catch(e){} done(); }
+  // NOTE: beat text is static — it must NOT pass through fill(), which
+  // reads S (null until newFile() runs after the cinematic ends).
+  // Slides advance ONLY on click — no timers whatsoever.
+  function beatHTML(b){
    let inner='<div class="ic-beat on">';
-   if(b.stamp) inner+='<div class="ic-sealwrap">'+icSealSVG()+'</div>';
-   inner+='<div class="ic-main">'+fill(b.main)+'</div>';
-   if(b.sub) inner+='<div class="ic-sub">'+fill(b.sub)+'</div>';
-   if(b.stamp) inner+='<div class="ic-stampopen">'+fill(b.stamp)+'</div>';
+   inner+='<div class="ic-art">'+icArt(b.art)+'</div>';
+   inner+='<div class="ic-main">'+b.main+'</div>';
+   if(b.sub) inner+='<div class="ic-sub">'+b.sub+'</div>';
+   if(b.stamp) inner+='<div class="ic-stampopen">'+b.stamp+'</div>';
+   inner+='<div class="ic-click-hint">CLICK TO CONTINUE \u25B8</div>';
    return inner+'</div>';
- }
- function render(){
+  }
+  function render(){
    const b=INTRO_BEATS[i];
    let html='<button class="ic-skip" data-ic="skip">SKIP \u25B8</button>'
-     +(i===INTRO_BEATS.length-1?'<div class="ic-sealwrap">'+icSealSVG()+'</div>':'')
      +beatHTML(b)
      +'<div class="ic-dots">'+INTRO_BEATS.map((_,d)=>'<span class="ic-dot'+(d<=i?' on':'')+'"></span>').join('')+'</div>';
-   if(i===0&&document.body&&document.body.firstElementChild===null){}
    ov.innerHTML=html;
    if(typeof snd==='function'){ try{ snd(i===INTRO_BEATS.length-1?'stamp':'paper'); }catch(e){} }
-   clearTimer();
-   if(i===INTRO_BEATS.length-1) timer=setTimeout(finish,2100);
-   else timer=setTimeout(advance,2600);
- }
- function advance(){ i++; if(i>=INTRO_BEATS.length){ finish(); return; } render(); }
- ov.addEventListener('click',e=>{
+  }
+  function advance(){ i++; if(i>=INTRO_BEATS.length){ finish(); return; } render(); }
+  ov.addEventListener('click',e=>{
    if(e.target&&e.target.dataset&&e.target.dataset.ic==='skip'){ finish(); return; }
    advance();
- });
- render();
- return {skip:finish,advance:advance,get index(){return i;},beatCount:INTRO_BEATS.length};
+  });
+  render();
+  return {skip:finish,advance:advance,get index(){return i;},beatCount:INTRO_BEATS.length};
+ }catch(err){
+  try{ const bad=document.querySelector('.intro-cine'); if(bad) bad.remove(); }catch(e2){}
+  done();
+  return {skip:function(){done();},advance:function(){},get index(){return 0;},beatCount:INTRO_BEATS.length};
+ }
 }
 function startNewLife(){ playIntroCinematic(function(){ newFile(); }); }
 /* Dress the main-menu cover with the animated Bureau seal and drifting files. */
