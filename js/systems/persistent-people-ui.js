@@ -55,15 +55,28 @@
     const more=conditions.length>2?'<span class="persistent-person-conditions-more">+'+(conditions.length-2)+' more</span>':'';
     return '<div class="persistent-person-conditions">'+shown+more+'</div>';
   }
+  /* Presentation-only portrait for a person card. Reads existing state,
+   * never mutates anything; falls back to no artwork when the illustration
+   * system is unavailable (older loaders, focused test contexts, etc.). */
+  function memberPortrait(npc,world){
+    try{
+      if(!root.IllustrationSystem||typeof root.IllustrationSystem.npcDescriptor!=='function') return '';
+      const d=root.IllustrationSystem.npcDescriptor(npc,world);
+      return d?root.IllustrationSystem.personPortrait(d):'';
+    }catch(e){ return ''; }
+  }
   function memberCard(npc,world,subjectId){
     const rel=npc.relationships&&npc.relationships[subjectId];
     const bond=rel?Math.round(rel.closeness):null;
-    return '<div class="persistent-person '+(npc.alive?'':'is-deceased')+'">'+
-      '<div class="persistent-person-head"><b>'+esc(root.NpcSystem.fullName(npc))+'</b><span>'+esc(relationLabel(npc.roleTags))+'</span></div>'+
+    const art=memberPortrait(npc,world);
+    const body='<div class="persistent-person-head"><b>'+esc(root.NpcSystem.fullName(npc))+'</b><span>'+esc(relationLabel(npc.roleTags))+'</span></div>'+
       '<div class="persistent-person-meta"><span>age '+ageOf(npc,world)+'</span><span>'+esc(locationName(npc))+'</span><span>'+esc(healthLabel(npc.health&&npc.health.general))+'</span></div>'+
       '<div class="persistent-person-work">'+esc(occupation(npc))+(bond==null?'':' · bond '+bond)+'</div>'+
       (npc.alive?conditionTags(npc):'')+
-      (!npc.alive&&npc.deathYear?'<div class="persistent-person-note">died '+esc(npc.deathYear)+(npc.deathCause?' · '+esc(npc.deathCause):'')+'</div>':'')+
+      (!npc.alive&&npc.deathYear?'<div class="persistent-person-note">died '+esc(npc.deathYear)+(npc.deathCause?' · '+esc(npc.deathCause):'')+'</div>':'');
+    return '<div class="persistent-person '+(npc.alive?'':'is-deceased')+'">'+
+      (art?'<div class="pp-portrait">'+art+(!npc.alive?'<span class="pp-filed">Filed</span>':'')+'</div>':'')+
+      '<div class="pp-body">'+body+'</div>'+
     '</div>';
   }
   function householdPanel(world,subject){

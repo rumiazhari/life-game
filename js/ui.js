@@ -103,8 +103,13 @@ function buildYearReportHtml(){
   const chips=done?yearReceiptChips():[];
   let h='<div class="rr-yearstamp"><b>ANNUAL REPORT · YEAR '+reportAge+'</b><i class="rr-filed'+(done?' show':'')+'">FILED</i></div>';
   if(chips.length)h+='<div class="rr-receipt">'+chips.map(c=>'<span class="fx '+(c.plus?'plus':'minus')+'">'+c.txt+'</span>').join('')+'</div>';
+  let artShown=false;
   reportEntries.forEach((e,i)=>{
-    h+='<div class="yr-entry'+(i<reportIdx?'':' yr-pending')+'"><span class="yr-head">'+e.head+'</span><div class="etext">'+e.text+'</div>'+
+    // At most one illustrated evidence plate per annual report: the first
+    // major milestone earns it. Presentation only; quietMode renders none.
+    let art='';
+    if(!artShown&&e.cls==='milestone'){ art=milestoneArt(e.text); if(art)artShown=true; }
+    h+='<div class="yr-entry'+(i<reportIdx?'':' yr-pending')+'"><span class="yr-head">'+e.head+'</span>'+art+'<div class="etext">'+e.text+'</div>'+
       (e.chips&&e.chips.length?'<div class="yr-chips">'+e.chips.map(c=>'<span class="fx '+(c.plus?'plus':'minus')+'">'+c.txt+'</span>').join('')+'</div>':'')+'</div>';
   });
   if(reportExtra>0&&done)h+='<div class="yr-more">+'+reportExtra+' more filed in CASE LOG</div>';
@@ -629,13 +634,38 @@ function typeNext(){
 
 /* ================= RENDER ================= */
 function syncHoldTab(){ const b=$('#btn-hold'); if(b) b.classList.toggle('hidden',!S.holdMember); }
+let __photoBand=''; let __photoSwapTimer=null;
 function renderIdentity(){
   $('#id-name').textContent=S.last.toUpperCase()+', '+S.first;
   $('#id-file').textContent=S.sex+' · '+S.id;
   $('#id-dob').textContent=S.dob+' · '+S.place;
   $('#tab-name').textContent='FILE: '+S.last.toUpperCase()+', '+S.first.toUpperCase();
-  $('#photo-art').innerHTML=portraitSVG(S.sex,S.photoSeed,S.photoTint,S.age);
+  // The file photo ages with the subject. When the age BAND changes (a real
+  // life-stage transition, not every birthday), the clerk swaps it with a
+  // brief lift-and-develop ceremony and a replacement mark.
+  const photoEl=document.querySelector('.photo');
+  const newArt=illusAvailable()
+    ?IllustrationSystem.personPortrait(IllustrationSystem.subjectDescriptor(S))
+    :portraitSVG(S.sex,S.photoSeed,S.photoTint,S.age);
+  $('#photo-art').innerHTML=newArt;
   $('#photo-cap').textContent='FILE PHOTO · '+S.dob;
+  if(photoEl&&illusAvailable()&&!quietMode){
+    const band=IllustrationSystem.ageBandOf(S.age);
+    if(__photoBand&&__photoBand!==band){
+      photoEl.classList.remove('photo-swap');
+      void photoEl.offsetWidth;
+      photoEl.classList.add('photo-swap');
+      let mark=photoEl.querySelector('.photo-replace-mark');
+      if(!mark){ mark=document.createElement('span'); mark.className='photo-replace-mark'; photoEl.appendChild(mark); }
+      mark.textContent='REPLACED '+currentYear();
+      if(__photoSwapTimer)clearTimeout(__photoSwapTimer);
+      __photoSwapTimer=setTimeout(()=>{
+        photoEl.classList.remove('photo-swap');
+        const m=photoEl.querySelector('.photo-replace-mark'); if(m)m.remove();
+      },2400);
+    }
+    __photoBand=band;
+  }
 }
 function viceText(v){return v===0?'none on record':v<=2?'minor notations':v<=5?'a pattern':'the Bureau has a folder on the folder';}
 function standingText(v){return v<25?'a name people avoid':v<45?'unremarkable':v<65?'well liked':v<85?'well regarded':'the toast of the district';}
@@ -2310,8 +2340,10 @@ function openNotice(n){
   const card=$('#slipCard'); card.className='slipcard notice';
   const title=fill(n.title||'For The Record');
   const chipsHtml=(n.chips&&n.chips.length)?'<div class="sl-chips">'+n.chips.map(c=>'<span class="fx '+(c.plus?'plus':'minus')+'">'+c.txt+'</span>').join('')+'</div>':'';
+  let art=''; try{ const key=n.__sceneKey||(illusAvailable()?IllustrationSystem.sceneKeyFromText(title+' '+(n.body||'')):''); if(key) art=evPlate(key,'FILED EVIDENCE · '+S.age); }catch(e){}
   card.innerHTML='<div class="sl-head notice"><span>NOTICE · YEAR '+S.age+'</span><span class="sl-req">FOR THE RECORD</span></div>'+
     '<div class="sl-title notice">'+title+'</div>'+
+    art+
     '<p class="sl-body">'+fill(n.body)+'</p>'+chipsHtml+'<p class="sl-note">Nothing to decide here. Just to know.</p>'+
     '<div class="sl-actions"><button class="sl-btn ok" data-ack="1">Acknowledge ▸</button></div>';
   card.onclick=e=>{ if(e.target.closest('[data-ack]')) resolveNotice(n); };
@@ -2322,7 +2354,7 @@ function resolveNotice(n){
   $('#slipWrap').classList.add('hidden'); slipOpen=false; document.body.classList.remove('slip-open');
   window.C={};
   if(n.onAck) n.onAck(S);
-  logEv(fill(n.body),{},'crisis','NOTICE · YEAR '+S.age);
+  logEv(fill(n.body),{},'crisis','NOTICE · YEAR '+S.age,n.__sceneKey||null);
   renderStats(window.C); updateBar();
   checkAchievements('live');
   if(!S.alive){ handleDeath(); return; }
@@ -2620,6 +2652,37 @@ function vnMonogram(label){
   const initials=String(label||'?').trim().split(/\s+/).map(w=>w.charAt(0)).slice(0,2).join('').toUpperCase()||'?';
   return '<span class="vn-portrait">'+initials+'</span>';
 }
+/* ================= PRESENTATION HELPERS (illustration layer) ==============
+ * Thin, fail-safe bridges to IllustrationSystem. Every consumer guards on
+ * quietMode and on the module's presence, so gameplay and tests never depend
+ * on artwork being available. These functions never mutate game state. */
+function illusAvailable(){ return typeof IllustrationSystem==='object'&&!!IllustrationSystem; }
+function sceneContextFor(extra){
+  let settlementId='';
+  try{ if(typeof World!=='undefined'&&World&&World.activeSettlementId) settlementId=String(World.activeSettlementId); }catch(e){}
+  return Object.assign({seed:(typeof S!=='undefined'&&S&&S.id)||'lf',settlementId:settlementId,
+    age:(typeof S!=='undefined'&&S)?S.age:null,year:(typeof World!=='undefined'&&World)?World.year:null},extra||{});
+}
+/* Illustrated evidence plate for a Notice-like slip. */
+function evPlate(sceneKey,labelText,rightLabel){
+  if(!illusAvailable()||quietMode) return '';
+  try{
+    const svg=IllustrationSystem.eventScene(sceneKey,sceneContextFor());
+    if(!svg) return '';
+    return '<div class="ev-plate">'+svg+'<div class="ev-cap"><span>'+escapeHtml(labelText||'FILED EVIDENCE')+'</span>'+
+      '<span>'+(rightLabel?'№ '+escapeHtml(rightLabel):'EXHIBIT')+'</span></div></div>';
+  }catch(e){ return ''; }
+}
+/* Scene art for a milestone log line (used inside annual report entries). */
+function milestoneArt(text){
+  if(!illusAvailable()||quietMode) return '';
+  try{
+    const key=IllustrationSystem.sceneKeyFromText(text);
+    if(!key) return '';
+    const svg=IllustrationSystem.eventScene(key,sceneContextFor());
+    return svg?'<div class="ev-plate">'+svg+'</div>':'';
+  }catch(e){ return ''; }
+}
 function runStoryYearTick(){
   if(typeof StorySystem!=='object'||!StorySystem||typeof World==='undefined'||!World) return null;
   let actorTone=null;
@@ -2634,6 +2697,36 @@ function runStoryYearTick(){
   return result;
 }
 let vnLastViewKey='';
+function vnCastBusts(view){
+  if(!illusAvailable()) return '';
+  try{
+    const world=(typeof World!=='undefined')?World:null;
+    const subject=(typeof S!=='undefined')?S:null;
+    const run=world&&StorySystem?StorySystem.liveRun(world):null;
+    if(!run||!run.cast) return '';
+    // Current speaker always takes the left seat; the rest of the cast fills
+    // the right one. "you" resolves to the subject's persistent portrait even
+    // though it is not a literal cast member.
+    const speakerKey=view.type==='line'&&view.speaker?view.speaker.key:'';
+    let keys=[];
+    if(speakerKey&&speakerKey!=='narrator') keys.push(speakerKey);
+    Object.keys(run.cast).forEach(k=>{
+      if(k&&k!=='narrator'&&keys.length<2&&keys.indexOf(k)<0) keys.push(k);
+    });
+    keys=keys.slice(0,2);
+    let html='';
+    keys.forEach((key,i)=>{
+      const label=(run.cast[key]&&run.cast[key].label)||key;
+      const d=key==='you'?IllustrationSystem.subjectDescriptor(subject)
+        :IllustrationSystem.storyPortraitDescriptor(run,key,label,world,subject);
+      if(!d) return; // unresolved cast keeps the classic plate/monogram only
+      const art=IllustrationSystem.personPortrait(d,{bust:true});
+      const cls='vn-bust slot-'+(i===0?'l':'r')+(key===speakerKey?' active':' dim');
+      html+='<div class="'+cls+'" data-bust-key="'+escapeHtml(String(key))+'"><div class="vn-bust-frame">'+art+'</div></div>';
+    });
+    return html;
+  }catch(e){ return ''; }
+}
 function openStorySlip(force){
   const view=currentStoryChain(); if(!view) return;
   const key=view.runId+':'+view.type+':'+(view.type==='line'?view.lineIndex:view.type==='choice'?'c':view.ending.id);
@@ -2655,10 +2748,14 @@ function openStorySlip(force){
     html+='<div class="sl-note">The consequences are already on the file.</div>'+
       '<div class="sl-actions"><button class="sl-btn ok" data-vn="file">File It Away ▸</button></div>';
   } else {
-    html+='<div class="vn-backdrop vn-bg-'+(view.bg||'street')+'">'+vnBackdropArt(view.bg||'street')+'</div>';
+    const hasBusts=view.type==='line';
+    html+='<div class="vn-backdrop vn-bg-'+(view.bg||'street')+(hasBusts?' with-cast':'')+'">'+vnBackdropArt(view.bg||'street');
+    if(hasBusts) html+=vnCastBusts(view);
+    html+='</div>';
     if(view.type==='line'){
       const spk=view.speaker||{key:'narrator',label:''};
       const isNarr=spk.key==='narrator';
+      if(!isNarr&&hasBusts&&view.speaker.label) html+='<div class="vn-speaker-tag">'+escapeHtml(view.speaker.label)+'</div>';
       html+='<div class="vn-stage">'+
         (isNarr?'':'<div class="vn-plate '+vnSpeakerClass(spk.key)+'">'+vnMonogram(spk.label)+'<b>'+escapeHtml(spk.label)+'</b></div>')+
         '<div class="vn-text'+(isNarr?' narr':'')+'">'+escapeHtml(fill(view.text))+'</div>'+
@@ -3952,8 +4049,18 @@ function showNextToast(){
   if(item.type==='chapter'){
     const st=item.data;
     const unlocksHtml=st.unlocks.length?'<div class="achieve-unlocks">Now open: '+st.unlocks.slice(0,5).join(', ')+(st.unlocks.length>5?'…':'')+'</div>':'';
+    let chapterArt='';
+    if(illusAvailable()){
+      try{
+        const key={childhood:'childhood',adolescence:'school',youngadult:'firstjob',adulthood:'workplace',elder:'oldage'}[st.id];
+        if(key){
+          const svg=IllustrationSystem.eventScene(key,sceneContextFor());
+          if(svg) chapterArt='<div class="ev-plate">'+svg+'</div>';
+        }
+      }catch(e){}
+    }
     card.innerHTML='<div class="achieve-kicker">Section Opened</div>'+
-      '<div class="achieve-name">'+st.info.name+'</div><div class="achieve-desc">'+st.info.blurb+'</div>'+unlocksHtml+'<div class="achieve-ribbon"></div>';
+      '<div class="achieve-name">'+st.info.name+'</div><div class="achieve-desc">'+st.info.blurb+'</div>'+unlocksHtml+chapterArt+'<div class="achieve-ribbon"></div>';
     card.classList.remove('promotion','discovery'); wrap.classList.remove('promotion','discovery');
     card.classList.add('chapter'); wrap.classList.add('chapter');
     wrap.classList.remove('hidden');
@@ -3961,8 +4068,15 @@ function showNextToast(){
     if(navigator.vibrate) navigator.vibrate([20,30,20,30,50]);
   } else if(item.type==='promotion'){
     const {track,stage}=item.data;
+    let promoArt='';
+    if(illusAvailable()){
+      try{
+        const svg=IllustrationSystem.eventScene('promotion',sceneContextFor());
+        if(svg) promoArt='<div class="ev-plate">'+svg+'</div>';
+      }catch(e){}
+    }
     card.innerHTML='<div class="achieve-kicker">Promoted</div>'+
-      '<div class="achieve-name">'+stage.name+'</div><div class="achieve-desc">'+track.name+' · '+money(stage.salary)+'/yr</div><div class="achieve-ribbon"></div>';
+      '<div class="achieve-name">'+stage.name+'</div><div class="achieve-desc">'+track.name+' · '+money(stage.salary)+'/yr</div>'+promoArt+'<div class="achieve-ribbon"></div>';
     card.classList.remove('chapter'); card.classList.add('promotion'); wrap.classList.remove('chapter'); wrap.classList.add('promotion');
     wrap.classList.remove('hidden');
     snd('fanfare'); spawnParticles('large',true,true);
@@ -4080,7 +4194,11 @@ function openSuccession(candidates){
   const ranked=candidates.slice().sort((a,b)=>(b.bond||50)-(a.bond||50));
   const choices=ranked.map(m=>{
     const age=currentYear()-m.dob;
-    return '<button class="chipbtn" data-mid="'+m.mid+'"><b>'+m.first+' '+m.last+'</b><span>'+relationLabel(m.relation)+' · age '+age+' · family bond '+(m.bond||50)+'</span></button>';
+    let art='';
+    if(illusAvailable()){
+      try{ art='<div class="pp-portrait">'+IllustrationSystem.personPortrait(IllustrationSystem.kinDescriptor(m,currentYear()))+'</div>'; }catch(e){}
+    }
+    return '<button class="chipbtn" data-mid="'+m.mid+'">'+art+'<span class="chipbtn-text"><b>'+m.first+' '+m.last+'</b><span>'+relationLabel(m.relation)+' · age '+age+' · family bond '+(m.bond||50)+'</span></span></button>';
   }).join('');
   slip.innerHTML='<div class="is-head">SUCCESSION · FORM 0-S</div>'+
     '<p class="is-name">The family record continues.</p>'+
@@ -4144,6 +4262,20 @@ function closeFile(){
     let stars=''; for(let i=0;i<5;i++) stars+=i<ir.stars?'*':'<span class="off">o</span>';
     $('#c-stars').innerHTML=stars; $('#c-intent-lab').textContent='BY THEIR OWN MEASURE · '+ir.lab.toUpperCase(); $('#c-intent-line').textContent=ir.line;
     const lineageEl=$('#c-lineage'); if(lineageEl) lineageEl.textContent=(Lineage.name||'Unnamed Family')+' · generation '+Lineage.generation+' · founded '+Lineage.founded;
+    // The final evidence plate: the closed file's last illustration.
+    let finalArt='';
+    if(illusAvailable()){
+      try{
+        const svg=IllustrationSystem.eventScene('death',sceneContextFor());
+        if(svg) finalArt='<div class="ev-plate ev-final" id="c-finalPlate">'+svg+'<div class="ev-cap"><span>FINAL RECORD · '+S.dob+'–'+currentYear()+'</span><span>FILE CLOSED</span></div></div>';
+      }catch(e){}
+    }
+    const closedEl=document.querySelector('.closedfile');
+    const oldPlate=document.getElementById('c-finalPlate'); if(oldPlate) oldPlate.remove();
+    const sumcard=closedEl?closedEl.querySelector('.sumcard'):null;
+    if(sumcard&&finalArt) sumcard.insertAdjacentHTML('afterend',finalArt);
+    // The Bureau's assessment and self-assessment rows yield to the image.
+    if(closedEl){ closedEl.classList.toggle('is-final',!!finalArt); }
     const order=['F','D','C','B','A'], grades=past.map(x=>x.grade).concat([g.g]);
     const bestGrade=grades.reduce((best,value)=>order.indexOf(value)>order.indexOf(best)?value:best,'F');
     const bestAge=Math.max(S.age,...past.map(x=>x.age),0);

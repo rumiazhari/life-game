@@ -1258,3 +1258,104 @@ body{background:var(--olive);color:var(--ink)}
 @media (prefers-reduced-motion:reduce){
   *,*:before,*:after{animation-duration:.001s!important;animation-iteration-count:1!important;transition:none!important}
 }
+
+/* ================= ILLUSTRATION SYSTEM — PRESENTATION LAYER ==============
+   Portraits in people cards, KARSEN FILES character busts, illustrated
+   evidence plates, subject photo updates. All decorative; every rule here
+   degrades safely when IllustrationSystem produces no markup. */
+
+/* ---- persistent people cards: portrait + identity ---- */
+.persistent-person{display:flex;gap:8px;align-items:flex-start}
+.pp-portrait{width:52px;min-width:52px;height:62px;border:1px solid rgba(74,65,50,.5);
+  background:#e9dfc2;overflow:hidden;flex:none;position:relative;
+  box-shadow:1px 1px 3px rgba(0,0,0,.22);transform:rotate(-1.2deg)}
+.pp-portrait svg{display:block;width:100%;height:100%}
+.pp-body{flex:1;min-width:0}
+.pp-body .persistent-person-head,.pp-body .persistent-person-meta,
+.pp-body .persistent-person-work,.pp-body .persistent-person-note,
+.pp-body .persistent-person-conditions{margin-top:0}
+.pp-body .persistent-person-head b{font-size:11.5px}
+.pp-filed{position:absolute;right:-4px;bottom:2px;font:700 6.5px 'Stardos Stencil';
+  letter-spacing:.12em;color:#a83226;border:1.5px solid currentColor;border-radius:2px;
+  padding:1px 3px 0;background:rgba(239,230,205,.82);transform:rotate(-9deg);
+  mix-blend-mode:multiply;pointer-events:none;text-transform:uppercase}
+.persistent-person.is-deceased .pp-portrait{filter:grayscale(.88) sepia(.16) contrast(.94);opacity:.78}
+.persistent-person.is-deceased .pp-filed{color:#7a4035}
+
+/* ---- subject file photo: replacement ceremony ---- */
+.photo.photo-swap{animation:photoLift .62s cubic-bezier(.25,.8,.3,1) both}
+@keyframes photoLift{
+  0%{transform:rotate(-1.4deg) translateY(0)}
+  38%{transform:rotate(-4deg) translateY(-9px);box-shadow:2px 8px 14px rgba(0,0,0,.34)}
+  100%{transform:rotate(-1.4deg) translateY(0)}}
+.photo-replace-mark{position:absolute;left:4px;bottom:3px;z-index:3;
+  font:700 5.5px 'Archivo';letter-spacing:.08em;color:#a83226;
+  border:1px solid currentColor;border-radius:2px;padding:1px 3px 0;
+  background:rgba(239,230,205,.85);mix-blend-mode:multiply;transform:rotate(-4deg);
+  animation:fadeInUp .5s ease .35s both}
+
+/* ---- KARSEN FILES: character busts over the backdrop ---- */
+.vn-backdrop.with-cast{height:158px}
+.vn-bust{position:absolute;bottom:-2px;width:118px;height:138px;pointer-events:none;
+  transform-origin:50% 100%;transition:opacity .32s ease,filter .32s ease,transform .32s ease;
+  opacity:0}
+.vn-bust.on{animation:bustIn .42s cubic-bezier(.2,.9,.3,1.1) both}
+@keyframes bustIn{from{opacity:0;transform:translateY(14px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+.vn-bust.slot-l{left:8px}
+.vn-bust.slot-r{right:8px}
+.vn-bust .vn-bust-frame{width:100%;height:100%;border:2px solid rgba(239,230,205,.5);
+  border-bottom:none;overflow:hidden;background:#1c1710;
+  box-shadow:0 -2px 12px rgba(0,0,0,.45)}
+.vn-bust .vn-bust-frame svg{display:block;width:100%;height:100%}
+.vn-bust.active{opacity:1;filter:none;z-index:2}
+.vn-bust.active .vn-bust-frame{border-color:rgba(240,220,140,.75)}
+.vn-bust.dim{opacity:.44;filter:grayscale(.45) brightness(.82)}
+.vn-speaker-tag{position:absolute;top:6px;left:8px;z-index:3;
+  font-family:'Stardos Stencil';font-size:9px;letter-spacing:.18em;color:#f3ecd4;
+  background:rgba(24,18,10,.72);padding:2px 8px 1px;border-radius:999px;
+  border:1px solid rgba(243,236,212,.35)}
+
+/* ---- illustrated evidence plates (notices, reports, chapters) ---- */
+.ev-plate{margin:2px 2px 10px;padding:5px 5px 4px;background:#efe6cd;
+  border:1px solid rgba(74,65,50,.5);transform:rotate(-.6deg);
+  box-shadow:1px 2px 5px rgba(0,0,0,.22);animation:evInsert .5s cubic-bezier(.2,.9,.3,1) both}
+@keyframes evInsert{from{opacity:0;transform:translateY(-10px) rotate(-3.4deg) scale(.96)}
+  to{opacity:1;transform:translateY(0) rotate(-.6deg) scale(1)}}
+.ev-plate svg{display:block;width:100%;height:auto;border:1px solid rgba(74,65,50,.35)}
+.ev-cap{display:flex;justify-content:space-between;gap:8px;margin-top:4px;
+  font:600 6.5px 'Archivo';letter-spacing:.14em;color:#7a6a48;text-transform:uppercase}
+.ev-plate.ev-final{max-width:300px;margin:6px auto 12px;transform:rotate(-1.1deg)}
+.ev-plate.ev-final svg{border-width:2px}
+.ev-plate.ev-report{margin:0 0 8px}
+.yr-entry .ev-plate{animation:none}
+
+/* ---- chapter / promotion toast artwork ---- */
+.toastcard .ev-plate,.achievecard .ev-plate{margin:8px 0 10px}
+.chapter-art .ev-plate{animation-duration:.45s}
+
+/* ---- succession slip portraits ---- */
+.chipbtn{display:flex;align-items:center;gap:8px;text-align:left}
+.chipbtn .pp-portrait{width:40px;min-width:40px;height:48px;transform:rotate(-1deg)}
+
+/* ---- final file: the last evidence plate carries the verdict ---- */
+.closedfile .assess,.closedfile .selfrow{display:none}
+.closedfile:not(.is-final) .assess,.closedfile:not(.is-final) .selfrow{display:block}
+
+/* ---- mobile ---- */
+@media(max-width:560px){
+  .pp-portrait{width:46px;min-width:46px;height:56px}
+  .vn-backdrop.with-cast{height:128px}
+  .vn-bust{width:86px;height:104px}
+  .vn-bust.slot-l{left:4px}
+  .vn-bust.slot-r{right:4px}
+  .ev-plate{margin:2px 0 8px}
+  .ev-plate.ev-final{max-width:100%}
+}
+
+/* ---- reduced motion: art still displays, movement becomes instant ---- */
+@media (prefers-reduced-motion:reduce){
+  .ev-plate,.vn-bust,.photo.photo-swap,.photo-replace-mark{animation:none!important;transition:none!important}
+  .vn-bust{opacity:1!important}
+  .vn-bust.dim{opacity:.55!important}
+  .vn-bust.active{opacity:1!important}
+}
