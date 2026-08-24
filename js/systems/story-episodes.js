@@ -33,12 +33,9 @@
     return S.contacts.find(c=>c&&c.role==='friend'&&c.alive!==false)||null;
   }
   function motherOf(S){ return S&&S.mother&&S.mother.alive&&!S.mother.estranged?S.mother:null; }
+  function fatherOf(S){ return S&&S.father&&S.father.alive&&!S.father.estranged?S.father:null; }
 
   /* Small helper used by episode 9's cast binding. */
-  function rngName(){
-    const names=['Old','Young','Auntie','Widow'];
-    return names[(typeof Random!=='undefined'&&Random.hashSeed?Random.hashSeed('novak'):3)%names.length];
-  }
   function contractOf(world){
     try{ return root.EmploymentSystem&&root.EmploymentSystem.activeForPerson?root.EmploymentSystem.activeForPerson(world,'subject')[0]||null:null; }
     catch(e){ return null; }
@@ -931,12 +928,13 @@
     domain:'neighbor',
     cast(world,S){
       if(S.age<16) return null;
+      const f=friendOf(S); if(!f) return null;
       return [
-        {key:'neighbor',label:(rngName('N'))+' Novak'},
+        {key:'neighbor',label:f.name,bind:f.cid},
         {key:'watcher',label:'Inspector Pelz'}
       ];
     },
-    eligible(world,S){ return S.age>=16; },
+    eligible(world,S){ return S.age>=16&&!!friendOf(S); },
     weight(){ return 2; },
     build(bind,rng){
       const nb=bind.neighbor, insp=bind.watcher;
@@ -946,9 +944,9 @@
       scenes:{
         opening:{
           lines:[
-            {sp:'narrator',t:'The wall between your flats is thin as bureaucracy. Most nights it delivers arguments and accordion practice. Lately, after midnight, it delivers something else: static, then a voice reading shipping tonnages in a foreign accent, then jazz — actual, forbidden, glorious jazz.'},
+            {sp:'narrator',t:'The wall between your flats is thin as bureaucracy. Most nights it delivers arguments and accordion practice from '+nb.label+'. Lately, after midnight, it delivers something else: static, then a voice reading shipping tonnages in a foreign accent, then jazz — actual, forbidden, glorious jazz.'},
             {sp:'neighbor',t:'(through the wall, muffled, unaware) "...and if the fish catch holds, brother, we hold too. Over."'},
-            {sp:'narrator',t:'A shortwave set. A fish-market network. And you, one plaster thickness from becoming either a witness or a wall yourself.'}
+            {sp:'narrator',t:'A shortwave set. A fish-market network reaching the coast where '+nb.label+'\'s brothers work. And you, one plaster thickness from becoming either a witness or a wall yourself.'}
           ],
           choice:{
             prompt:'The set crackles on, oblivious.',
@@ -962,7 +960,7 @@
 
         joined:{
           lines:[
-            {sp:'neighbor',t:'Novak pours tea like contraband and explains in half-sentences: brothers along the coast, prices, weather, songs the radio here forgot existed. "We don\'t plot," they say. "We count. Counting is legal." Their eyes add: usually.'},
+            {sp:'neighbor',t:nb.label+' pours tea like contraband and explains in half-sentences: brothers along the coast, prices, weather, songs the radio here forgot existed. "We don\'t plot," they say. "We count. Counting is legal." Their eyes add: usually.'},
             {sp:'narrator',t:'The jazz comes through clear that night. You own no opinion on jazz. You develop one immediately and permanently.'}
           ],
           goto:'inspector'
@@ -992,24 +990,24 @@
         ending_shield:{
           ending:{
             id:'shield',title:'THE ACCORDION ALIBI',tone:'kind',
-            epilogue:['Pelz departs unsatisfied but unfurnished. That night, the jazz plays a fraction louder — a thank-you at broadcast strength.','For years the wall carries music and fish futures and, once, your birthday requested over the air from three hundred kilometers away by strangers who know you only as "the accordion neighbor."'],
-            effects:[{kind:'stat',stat:'happiness',delta:5},{kind:'memory',type:'episode_wall_shield',valence:.7,intensity:.6,summary:'STATIC AFTER MIDNIGHT ended behind plaster: Subject shielded Novak\u2019s coast network from Inspector Pelz.'}]
+            epilogue:['Pelz departs unsatisfied but unfurnished. That night, the jazz plays a fraction louder — a thank-you at broadcast strength.','For years the wall carries music and fish futures and, once, your birthday requested over the air from three hundred kilometers away by strangers who know you only as "'+nb.label+'\'s neighbor." Some titles are earned twice.'],
+            effects:[{kind:'contactMood',cid:nb.bind,delta:12},{kind:'stat',stat:'happiness',delta:5},{kind:'memory',type:'episode_wall_shield',valence:.7,intensity:.6,summary:'STATIC AFTER MIDNIGHT ended behind plaster: Subject shielded '+nb.label+'\u2019s coast network from Inspector Pelz.'}]
           }
         },
 
         ending_report:{
           ending:{
             id:'report',title:'EXHIBIT A: FREQUENCIES',tone:'cold',
-            epilogue:['The raid is polite and total. The set goes in a evidence bag; Novak goes in a van, waving at no one, counting on no one.','The reward voucher spends fine. The jazz, however, has ruined other music for you permanently — every shop song now sounds like testimony.'],
-            effects:[{kind:'stat',stat:'happiness',delta:-6},{kind:'memory',type:'episode_wall_report',valence:-.55,intensity:.7,summary:'STATIC AFTER MIDNIGHT ended in exhibits: Subject reported Novak\u2019s network and took the voucher.'}]
+            epilogue:['The raid is polite and total. The set goes in an evidence bag; '+nb.label+' goes into a van, waving at no one, counting on no one.','The reward voucher spends fine. The friendship does not survive the paperwork, and the jazz has ruined other music for you permanently — every shop song now sounds like testimony.'],
+            effects:[{kind:'contactMood',cid:nb.bind,delta:-30},{kind:'stat',stat:'happiness',delta:-6},{kind:'memory',type:'episode_wall_report',valence:-.55,intensity:.7,summary:'STATIC AFTER MIDNIGHT ended in exhibits: Subject reported '+nb.label+'\u2019s network and took the voucher.'}]
           }
         },
 
         ending_ghost:{
           ending:{
             id:'ghost',title:'GHOSTS UPSTAIRS, GHOSTS DOWNSTAIRS',tone:'greedy',
-            epilogue:['Pelz finds the antenna and loses the operator — Novak, warned by the very visit your ambiguity caused, has gone visiting cousins indefinitely.','The bureau logs GHOSTS, PROBABLE. Novak sends no postcard. The wall stays silent at midnight now, and you discover you had grown fond of the traffic — of being adjacent, safely, to other people\'s courage.'],
-            effects:[{kind:'stat',stat:'happiness',delta:-2},{kind:'stat',stat:'smarts',delta:1},{kind:'memory',type:'episode_wall_ghost',valence:-.1,intensity:.55,summary:'STATIC AFTER MIDNIGHT ended in ghosts: Subject nudged the inspection and emptied the flat upstairs.'}]
+            epilogue:['Pelz finds the antenna and loses the operator — '+nb.label+', warned by the very visit your ambiguity caused, has gone visiting cousins indefinitely.','The bureau logs GHOSTS, PROBABLE. No postcard comes. The wall stays silent at midnight now, and you discover you had grown fond of the traffic — of being adjacent, safely, to other people\'s courage.'],
+            effects:[{kind:'contactMood',cid:nb.bind,delta:-8},{kind:'stat',stat:'happiness',delta:-2},{kind:'stat',stat:'smarts',delta:1},{kind:'memory',type:'episode_wall_ghost',valence:-.1,intensity:.55,summary:'STATIC AFTER MIDNIGHT ended in ghosts: Subject nudged the inspection and emptied '+nb.label+'\u2019s flat.'}]
           }
         },
 
@@ -1315,16 +1313,30 @@
   {
     id:'ep_hold_ledger',
     domain:'hold',
-    cast(world,S){
+    cast(world,S,lineage){
       if(!S.holdMember) return null;
       const settlementId=(S.location&&S.location.settlementId)||world.activeSettlementId;
       const fx=fixerOf(world,settlementId);
+      // The accused must be someone the subject actually loves: an adult
+      // child first, otherwise a real friend. Never a invented relative.
+      const year=(typeof World!=='undefined'&&World&&World.year)||0;
+      const members=lineage&&Array.isArray(lineage.members)?lineage.members:[];
+      const adultKids=members.filter(m=>m&&m.alive!==false&&m.relation==='child'&&(year-m.dob)>=16);
+      let outsider=null;
+      if(adultKids.length){
+        const k=adultKids[0];
+        outsider={key:'outsider',label:(k.first||'kin')+' '+((S&&S.last)||''),bind:k.mid,npcId:k.npcId||null};
+      }else{
+        const f=friendOf(S);
+        if(f) outsider={key:'outsider',label:f.name,bind:f.cid,npcId:f.npcId||null};
+      }
+      if(!outsider) return null;
       return [
-        {key:'elder',label:'Uncle Vasik, the fold\'s elder'},
-        {key:'outsider',label:S.first?S.first+"'s own "+(S.kids>0?'brother':'cousin'):'a relative'}
+        {key:'elder',label:'Uncle Vasik, the fold\u2019s elder'},
+        outsider
       ].concat(fx?[{key:'fixer',label:fx.name,bind:fx.id}]:[]);
     },
-    eligible(world,S){ return !!S.holdMember&&S.age>=17; },
+    eligible(world,S,lineage){ return !!S.holdMember&&S.age>=17; },
     weight(){ return 2.5; },
     build(bind){
       const el=bind.elder;

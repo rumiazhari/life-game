@@ -12,8 +12,9 @@
  *
  * World-persistent state (owned here, bounded, migrated):
  * - World.storyRuns      ('story:NNNNN')  at most ONE live episode run
- * - World.storyArchive   ('story-archive:NNNNN') completed episodes:
- *   ending ids, tones, and an echo line later episodes can quote
+ * - World.storyArchive   ('story-archive:NNNNN') completed episodes. Each
+ *   episode may fire ONCE per life; the archive is how that is remembered.
+ *   Entries carry ending ids, tones, and echo lines for later prologues.
  * - counters + schema version + lastTickYear
  *
  * Rules honored: deterministic selection via WorldSimulation.streamFor;
@@ -28,7 +29,6 @@
   const MAX_ARCHIVE=64;
   const SPAWN_CHANCE=0.5;
   const SIGNATURE_FRESH_YEARS=8;
-  const SIGNATURE_REUSE_CHANCE=0.12;
   const MIN_YEAR=-5000;
   const MAX_YEAR=5000;
 
@@ -208,10 +208,19 @@
     }
     return false;
   }
+  // An episode may fire ONCE per life. No reuse rolls, no fresh windows:
+  // once its ending is filed, that chapter of this bloodline is closed.
+  function episodeAlreadyLived(world,episodeId){
+    for(const entry of Object.values(world.storyArchive)){
+      if(entry.episodeId===episodeId) return true;
+    }
+    return false;
+  }
 
   function selectEpisode(world,S,lineage,year,rng){
     const candidates=[];
     episodes().forEach(def=>{
+      if(episodeAlreadyLived(world,def.id)) return;
       if(typeof def.eligible!=='function') return;
       let bind=null;
       try{ bind=def.cast?def.cast.call(def,world,S,lineage):{}; }catch(e){ bind=null; }
@@ -220,9 +229,6 @@
       try{ ok=!!def.eligible(world,S,lineage); }catch(e){ ok=false; }
       if(!ok) return;
       const castKey=(bind&&bind.length)?bind.map(b=>b.key+':'+(b.bind==null?'':b.bind)).join('|'):def.id;
-      if(signatureBlocked(world,signatureKey(def.id,castKey),year)){
-        if(!rng.chance(SIGNATURE_REUSE_CHANCE)) return;
-      }
       let w=1; try{ w=Math.max(.05,def.weight?def.weight():1); }catch(e){}
       candidates.push({def,bind,castKey,w});
     });

@@ -192,3 +192,66 @@ test('the old popup-era APIs are gone from the runtime surface',()=>{
   assert.ok(!src.includes('pendingDecisionForUi'));
   assert.ok(!src.includes('applyEffects'));
 });
+
+test('every episode fires at most once per life',()=>{
+  const context=storyContext('once-only');
+  installTestEpisode(context);
+  let first=null;
+  for(let i=0;i<8&&!first;i++){
+    expose(context,"World.year+=1;");
+    first=expose(context,"(function(){var r=StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage});return r.spawned||null;})()");
+  }
+  assert.ok(first,'first spawn happens');
+  // Play it to an ending and file it away.
+  let guard=0;
+  while(expose(context,'StorySystem.hasLiveRun(World)')&&guard++<40){
+    const v=JSON.parse(expose(context,"JSON.stringify(StorySystem.currentView(World,{year:World.year}))"));
+    if(v.type==='choice') expose(context,"StorySystem.choose(World,0,{year:World.year,subject:S,lineage:Lineage});");
+    else if(v.type==='ending') expose(context,"StorySystem.fileAway(World,'"+v.runId+"',{year:World.year});");
+    else expose(context,"StorySystem.next(World,{year:World.year});");
+  }
+  assert.equal(expose(context,"Object.values(World.storyArchive).filter(function(a){return a.episodeId==='ep_zztest';}).length"),1);
+  // Years pass; the test episode remains eligible and dominant. It must
+  // never spawn again.
+  for(let i=0;i<10;i++){
+    expose(context,"World.year+=1;");
+    const spawned=expose(context,"(function(){var r=StorySystem.tickWorld(World,{year:World.year,subject:S,lineage:Lineage});return r.spawned||null;})()");
+    if(spawned){
+      assert.notEqual(expose(context,"World.storyRuns['"+spawned+"'].episodeId"),'ep_zztest','a filed episode can never respawn');
+    }
+  }
+});
+
+test('personal cast binds only to real relationships -- no invented strangers',()=>{
+  const src=fs.readFileSync('js/systems/story-episodes.js','utf8');
+  // The old fabricated neighbor is gone entirely.
+  assert.ok(!src.includes('Novak'),'no fabricated surnames remain');
+  // Every episode that names a personal character resolves them through a
+  // live relationship lookup (partner/parent/kin/friend/colleague/fixer).
+  const context=storyContext('cast-binding');
+  const results=JSON.parse(expose(context,`(function(){
+    function probe(id,setup){
+      var def=null;
+      for(var i=0;i<StoryEpisodes.length;i++)if(StoryEpisodes[i].id===id)def=StoryEpisodes[i];
+      if(!def)return 'missing:'+id;
+      var before={married:S.married,mother:S.mother,father:S.father,contacts:S.contacts.slice(),holdMember:S.holdMember,kids:S.kids};
+      try{
+        setup();
+        var bind=def.cast?def.cast.call(def,World,S,Lineage):{};
+        S.married=before.married;S.mother=before.mother;S.father=before.father;S.contacts=before.contacts;S.holdMember=before.holdMember;S.kids=before.kids;
+        return id+':'+(bind==null?'unbound':'bound');
+      }catch(e){S.married=before.married;S.mother=before.mother;S.father=before.father;S.contacts=before.contacts;S.holdMember=before.holdMember;S.kids=before.kids;return id+':error:'+e.message;}
+    }
+    return JSON.stringify([
+      probe('ep_voss_letter',function(){S.married=false;S.contacts=[];}),
+      probe('ep_empty_chair',function(){S.married=false;S.contacts=[];}),
+      probe('ep_friend_ward',function(){S.contacts=S.contacts.filter(function(c){return c.role!=='friend';});}),
+      probe('ep_wall_ears',function(){S.contacts=S.contacts.filter(function(c){return c.role!=='friend';});}),
+      probe('ep_mother_silence',function(){if(S.mother)S.mother.alive=false;}),
+      probe('ep_father_hands',function(){if(S.father)S.father.alive=false;}),
+      probe('ep_hold_ledger',function(){S.holdMember=false;})
+    ]);
+  })()`));
+  const parsed=Array.isArray(results)?results:[results];
+  parsed.forEach(r=>assert.match(r,/:unbound$/,'missing relationship must unbind the episode: '+r));
+});
