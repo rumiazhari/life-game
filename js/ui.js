@@ -2334,6 +2334,91 @@ function resolveNotice(n){
   }
 }
 
+/* ================= NEW-GAME CINEMATIC =================
+ * Bureau-voiced cold open: inspirational in cadence, cruel in content.
+ * Runs once per "Open a New File" click; skippable; hands off to Form 0. */
+const INTRO_BEATS=[
+ {main:'EVERY CENTURY BEGINS THE SAME WAY.',sub:'With a form.'},
+ {main:'YOU ARE BORN WITHOUT A FILE.',sub:'Within the hour, the Bureau corrects this oversight.'},
+ {main:'IT WILL RECORD WHAT YOU EAT.',sub:'What you love. What you fear. What you are worth.\nIt will outlive you.'},
+ {main:'THE STATE IS NOT YOUR MOTHER.',sub:'It is something rarer: an institution that\nnever forgets, and never forgives.'},
+ {main:'WHAT WILL YOU BE?',sub:'A name on a list? A number in a drawer?\nA stamp that outlives the hand that carved it?'},
+ {main:'CHOOSE YOUR LIES CAREFULLY.',sub:'The ledger keeps even the ones you tell yourself.'},
+ {main:'TONIGHT, IN KARSEN, A CHILD IS BORN.',sub:'No title. No fortune.\nOne blank page \u2014 and a century hungry to write on it.'},
+ {main:'THE LAMP IS LIT.',sub:'THE PEN IS DIPPED.'},
+ {stamp:'FILE OPENED',main:'YOUR LIFE HAS BEEN ASSIGNED A NUMBER.'}
+];
+function icSealSVG(){
+ return '<svg viewBox="0 0 120 120" aria-hidden="true">'
+  +'<g class="ring-a"><circle cx="60" cy="60" r="52" fill="none" stroke="#6d6250" stroke-width="2" stroke-dasharray="6 5"/>'
+  +'<circle cx="60" cy="60" r="46" fill="none" stroke="#6d6250" stroke-width="1" stroke-dasharray="2 4"/></g>'
+  +'<g class="ring-b"><rect x="26" y="26" width="68" height="68" fill="none" stroke="#6d6250" stroke-width="1.4"/>'
+  +'<path d="M60 20 v10 M60 90 v10 M20 60 h10 M90 60 h10" stroke="#6d6250" stroke-width="2"/></g>'
+  +'<circle cx="60" cy="60" r="17" fill="none" stroke="#b23327" stroke-width="2.6"/>'
+  +'<circle cx="60" cy="60" r="6.5" fill="#b23327"/></svg>';
+}
+function playIntroCinematic(done){
+ if(typeof done!=='function') done=function(){};
+ const ov=document.createElement('section');
+ ov.className='intro-cine'; ov.setAttribute('role','dialog');
+ document.body.appendChild(ov);
+ let i=0,timer=null,closed=false;
+ function clearTimer(){ if(timer){ clearTimeout(timer); timer=null; } }
+ function finish(){ if(closed) return; closed=true; clearTimer(); try{ov.remove();}catch(e){} done(); }
+ function beatHTML(b){
+   let inner='<div class="ic-beat on">';
+   if(b.stamp) inner+='<div class="ic-sealwrap">'+icSealSVG()+'</div>';
+   inner+='<div class="ic-main">'+fill(b.main)+'</div>';
+   if(b.sub) inner+='<div class="ic-sub">'+fill(b.sub)+'</div>';
+   if(b.stamp) inner+='<div class="ic-stampopen">'+fill(b.stamp)+'</div>';
+   return inner+'</div>';
+ }
+ function render(){
+   const b=INTRO_BEATS[i];
+   let html='<button class="ic-skip" data-ic="skip">SKIP \u25B8</button>'
+     +(i===INTRO_BEATS.length-1?'<div class="ic-sealwrap">'+icSealSVG()+'</div>':'')
+     +beatHTML(b)
+     +'<div class="ic-dots">'+INTRO_BEATS.map((_,d)=>'<span class="ic-dot'+(d<=i?' on':'')+'"></span>').join('')+'</div>';
+   if(i===0&&document.body&&document.body.firstElementChild===null){}
+   ov.innerHTML=html;
+   if(typeof snd==='function'){ try{ snd(i===INTRO_BEATS.length-1?'stamp':'paper'); }catch(e){} }
+   clearTimer();
+   if(i===INTRO_BEATS.length-1) timer=setTimeout(finish,2100);
+   else timer=setTimeout(advance,2600);
+ }
+ function advance(){ i++; if(i>=INTRO_BEATS.length){ finish(); return; } render(); }
+ ov.addEventListener('click',e=>{
+   if(e.target&&e.target.dataset&&e.target.dataset.ic==='skip'){ finish(); return; }
+   advance();
+ });
+ render();
+ return {skip:finish,advance:advance,get index(){return i;},beatCount:INTRO_BEATS.length};
+}
+function startNewLife(){ playIntroCinematic(function(){ newFile(); }); }
+/* Dress the main-menu cover with the animated Bureau seal and drifting files. */
+(function dressCover(){
+  function sealSVG(){
+    return '<svg viewBox="0 0 200 200" aria-hidden="true">'
+     +'<g class="ring-a"><circle cx="100" cy="100" r="88" fill="none" stroke="#6b5a35" stroke-width="3" stroke-dasharray="10 7"/>'
+     +'<circle cx="100" cy="100" r="76" fill="none" stroke="#6b5a35" stroke-width="1.6" stroke-dasharray="3 6"/></g>'
+     +'<g class="ring-b"><rect x="34" y="34" width="132" height="132" fill="none" stroke="#6b5a35" stroke-width="2"/>'
+     +'<path d="M100 12 v18 M100 170 v18 M12 100 h18 M170 100 h18" stroke="#6b5a35" stroke-width="4"/></g>'
+     +'<circle cx="100" cy="100" r="30" fill="none" stroke="#8a2f24" stroke-width="4"/>'
+     +'<circle cx="100" cy="100" r="11" fill="#8a2f24"/></svg>';
+  }
+  function fileSVG(){
+    return '<svg viewBox="0 0 74 56" aria-hidden="true"><rect x="4" y="10" width="62" height="40" rx="2" fill="#efe6cd" stroke="#6b5a35"/>'
+     +'<rect x="10" y="4" width="26" height="12" rx="2" fill="#e3d8ba" stroke="#6b5a35"/>'
+     +'<line x1="14" y1="26" x2="56" y2="26" stroke="#9c8c66"/><line x1="14" y1="33" x2="50" y2="33" stroke="#9c8c66"/><line x1="14" y1="40" x2="44" y2="40" stroke="#9c8c66"/></svg>';
+  }
+  function init(){
+    const cov=document.getElementById('cover'); if(!cov||cov.__dressed) return; cov.__dressed=true;
+    const seal=document.createElement('div'); seal.className='cover-seal'; seal.innerHTML=sealSVG(); cov.appendChild(seal);
+    for(let i=0;i<3;i++){ const f=document.createElement('div'); f.className='drift-file d'+i; f.innerHTML=fileSVG(); cov.appendChild(f); }
+  }
+  if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded',init); } else { init(); }
+})();
+
 /* ================= KARSEN FILES — VISUAL NOVEL WINDOW =================
  * Episodes play as scenes of quoted dialogue: backdrop, colored speaker
  * plate with monogram portrait, text advanced with NEXT ▸, branching
@@ -2369,6 +2454,77 @@ function runStateCareYearTick(){
   return result;
 }
 const VN_SPEAKER_CLASS={narrator:'vn-narr',you:'vn-you'};
+/* Illustrated backdrops: one small SVG scene per setting, animated in CSS. */
+function vnBackdropArt(key){
+ const W=400,H=220;
+ const open='<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid slice" aria-hidden="true">';
+ switch(key){
+  case 'night_flat': return open
+   +'<rect width="400" height="220" fill="#141826"/>'
+   +'<circle class="glowp" cx="318" cy="46" r="26" fill="#efe6c8" opacity=".9"/>'
+   +'<rect x="0" y="150" width="400" height="70" fill="#0d101b"/>'
+   +'<g fill="#1d2233"><rect x="18" y="96" width="44" height="60"/><rect x="74" y="78" width="52" height="78"/><rect x="140" y="108" width="38" height="48"/><rect x="236" y="86" width="58" height="70"/><rect x="310" y="102" width="50" height="54"/></g>'
+   +'<g fill="#e8c95c"><rect class="flicker" x="84" y="90" width="7" height="9"/><rect x="98" y="112" width="7" height="9"/><rect class="flicker k2" x="246" y="98" width="7" height="9"/><rect x="270" y="120" width="7" height="9"/><rect class="flicker k3" x="320" y="114" width="7" height="9"/></g>'
+   +'<rect x="150" y="30" width="100" height="120" fill="#0a0d16" stroke="#2a3044" stroke-width="5"/><line x1="200" y1="30" x2="200" y2="150" stroke="#2a3044" stroke-width="4"/><line x1="150" y1="88" x2="250" y2="88" stroke="#2a3044" stroke-width="4"/>'
+   +'</svg>';
+  case 'factory_floor': return open
+   +'<rect width="400" height="220" fill="#241811"/>'
+   +'<ellipse class="smoke" cx="300" cy="34" rx="34" ry="14" fill="#cbb89a"/>'
+   +'<ellipse class="smoke s2" cx="286" cy="22" rx="26" ry="10" fill="#d8c8ac"/>'
+   +'<ellipse class="smoke s3" cx="316" cy="14" rx="20" ry="9" fill="#c4b294"/>'
+   +'<path d="M280 96 L300 20 L336 20 L356 96 Z" fill="#171008"/>'
+   +'<circle cx="80" cy="150" r="42" fill="none" stroke="#3d2c1c" stroke-width="10"/>'
+   +'<circle cx="80" cy="150" r="6" fill="#3d2c1c"/><path d="M80 116 v-14 M80 184 v14 M46 150 h-14 M114 150 h14" stroke="#3d2c1c" stroke-width="8"/>'
+   +'<ellipse class="glowp" cx="180" cy="176" rx="90" ry="26" fill="#ff8c3a"/>'
+   +'<circle class="spark" cx="150" cy="150" r="3" fill="#ffd27a"/><circle class="spark k2" cx="205" cy="142" r="2.5" fill="#ffe2a0"/><circle class="spark k3" cx="178" cy="158" r="2" fill="#ffc76e"/>'
+   +'<rect x="0" y="196" width="400" height="24" fill="#120b06"/>'
+   +'</svg>';
+  case 'schoolyard': return open
+   +'<rect width="400" height="220" fill="#a9c19f"/><rect y="150" width="400" height="70" fill="#7fa071"/>'
+   +'<rect x="228" y="92" width="130" height="62" fill="#c9b083" stroke="#8a6f45" stroke-width="3"/>'
+   +'<path d="M222 92 L293 58 L364 92 Z" fill="#7a4e33"/>'
+   +'<rect x="252" y="118" width="18" height="24" fill="#5c4326"/><rect x="286" y="118" width="18" height="24" fill="#5c4326"/><rect x="320" y="118" width="18" height="24" fill="#5c4326"/>'
+   +'<line x1="60" y1="160" x2="60" y2="70" stroke="#5c4326" stroke-width="8"/>'
+   +'<circle cx="60" cy="56" r="40" fill="#4e6b41"/><circle cx="94" cy="66" r="26" fill="#557447"/><circle cx="30" cy="68" r="22" fill="#476039"/>'
+   +'<g class="flagwave"><rect x="64" y="72" width="30" height="16" fill="#b23327"/></g>'
+   +'</svg>';
+  case 'dock_night': return open
+   +'<rect width="400" height="220" fill="#0f1722"/>'
+   +'<circle class="glowp" cx="330" cy="42" r="20" fill="#e9e2c8"/>'
+   +'<rect y="140" width="400" height="80" fill="#091018"/>'
+   +'<g stroke="#27405a" stroke-width="3">'
+   +'<line class="waterline" x1="10" y1="156" x2="90" y2="156"/>'
+   +'<line class="waterline w2" x1="150" y1="172" x2="240" y2="172"/>'
+   +'<line class="waterline w3" x1="260" y1="190" x2="380" y2="190"/></g>'
+   +'<g stroke="#141d29" stroke-width="8" fill="#141d29">'
+   +'<path d="M40 140 L110 60 L180 140" fill="none"/><line x1="110" y1="60" x2="110" y2="96"/></g>'
+   +'<rect x="96" y="96" width="30" height="18" fill="#7a4a33"/><rect x="230" y="128" width="44" height="22" fill="#3f5a45"/><rect x="278" y="128" width="44" height="22" fill="#5a3f3f"/>'
+   +'</svg>';
+  case 'office': return open
+   +'<rect width="400" height="220" fill="#3a3428"/>'
+   +'<rect x="26" y="26" width="150" height="12" fill="#241f17"/><rect x="26" y="66" width="150" height="12" fill="#241f17"/><rect x="26" y="106" width="150" height="12" fill="#241f17"/>'
+   +'<g><rect x="34" y="40" width="9" height="26" fill="#7a4a33"/><rect x="45" y="40" width="9" height="26" fill="#3f5a45"/><rect x="56" y="42" width="8" height="24" fill="#5a3f3f"/><rect x="66" y="40" width="9" height="26" fill="#46586e"/>'
+   +'<rect x="40" y="80" width="9" height="26" fill="#5a3f3f"/><rect x="51" y="82" width="8" height="24" fill="#7a6a3b"/><rect x="61" y="80" width="9" height="26" fill="#3f5a45"/></g>'
+   +'<polygon points="250,20 330,20 376,200 204,200" fill="#ffe9b0" opacity=".14"/>'
+   +'<circle class="flicker" cx="290" cy="30" r="10" fill="#ffe9b0"/>'
+   +'<g fill="#efe6cd" opacity=".8"><rect class="smoke s2" x="210" y="120" width="26" height="34" transform="rotate(8 223 137)"/><rect class="smoke s3" x="256" y="104" width="24" height="32" transform="rotate(-7 268 120)"/></g>'
+   +'</svg>';
+  default: return open
+   +'<rect width="400" height="220" fill="#232840"/>'
+   +'<rect y="168" width="400" height="52" fill="#151827"/>'
+   +'<g stroke="#0f1220" stroke-width="5"><line x1="70" y1="60" x2="70" y2="170"/><line x1="200" y1="60" x2="200" y2="170"/><line x1="330" y1="60" x2="330" y2="170"/></g>'
+   +'<g><circle class="glowp" cx="70" cy="56" r="13" fill="#ffe9a8"/><circle class="glowp" cx="200" cy="56" r="13" fill="#ffe9a8" style="animation-delay:-1.5s"/><circle class="glowp" cx="330" cy="56" r="13" fill="#ffe9a8" style="animation-delay:-3s"/></g>'
+   +'<g stroke="#3c4260" stroke-width="2"><line class="rainline" x1="30" y1="-20" x2="18" y2="20"/><line class="rainline r2" x1="120" y1="-20" x2="108" y2="20"/><line class="rainline r3" x1="255" y1="-20" x2="243" y2="20"/><line class="rainline" x1="305" y1="-20" x2="293" y2="20"/><line class="rainline r2" x1="370" y1="-20" x2="358" y2="20"/></g>'
+   +'<rect x="0" y="164" width="400" height="8" fill="#0d101c"/>'
+   +'</svg>';
+ }
+}
+function laurelSVG(){
+ return '<svg class="laurel l" viewBox="0 0 60 60" aria-hidden="true"><g fill="none" stroke="#cfc19a" stroke-width="2.4"><path d="M46 8 C24 18 16 38 22 54"/></g>'
+  +'<g fill="#cfc19a"><ellipse cx="30" cy="18" rx="6.5" ry="3.4" transform="rotate(-38 30 18)"/><ellipse cx="23" cy="28" rx="6.5" ry="3.4" transform="rotate(-52 23 28)"/><ellipse cx="20" cy="39" rx="6.5" ry="3.4" transform="rotate(-68 20 39)"/><ellipse cx="21" cy="50" rx="6.5" ry="3.4" transform="rotate(-84 21 50)"/></g></svg>'
+  +'<svg class="laurel r" viewBox="0 0 60 60" aria-hidden="true"><g fill="none" stroke="#cfc19a" stroke-width="2.4"><path d="M46 8 C24 18 16 38 22 54"/></g>'
+  +'<g fill="#cfc19a"><ellipse cx="30" cy="18" rx="6.5" ry="3.4" transform="rotate(-38 30 18)"/><ellipse cx="23" cy="28" rx="6.5" ry="3.4" transform="rotate(-52 23 28)"/><ellipse cx="20" cy="39" rx="6.5" ry="3.4" transform="rotate(-68 20 39)"/><ellipse cx="21" cy="50" rx="6.5" ry="3.4" transform="rotate(-84 21 50)"/></g></svg>';
+}
 function vnSpeakerClass(key){ return VN_SPEAKER_CLASS[key]||('vn-c'+Math.abs(String(key).split('').reduce((a,c)=>a+c.charCodeAt(0),0))%6); }
 function vnMonogram(label){
   const initials=String(label||'?').trim().split(/\s+/).map(w=>w.charAt(0)).slice(0,2).join('').toUpperCase()||'?';
@@ -2400,7 +2556,7 @@ function openStorySlip(force){
   html+='<div class="vn-titlebar">'+fill(view.title||'AN EPISODE')+'</div>';
   if(view.type==='ending'){
     const e=view.ending;
-    html+='<div class="vn-backdrop vn-bg-'+(view.bg||'street')+' vn-endbg"><div class="vn-endstamp">THE END</div></div>';
+    html+='<div class="vn-backdrop vn-bg-'+(view.bg||'street')+' vn-endbg">'+vnBackdropArt(view.bg||'street')+(view.ending&&view.ending.tone==='kind'?laurelSVG():'')+'<div class="vn-endstamp">THE END</div></div>';
     html+='<div class="vn-titlebar endname">'+fill(e.title)+'</div>';
     if(Array.isArray(view.chips)&&view.chips.length){
       html+='<div class="sl-chips">'+view.chips.map(c=>'<span class="fx '+(c.plus?'plus':'minus')+'">'+c.txt+'</span>').join('')+'</div>';
@@ -2409,7 +2565,7 @@ function openStorySlip(force){
     html+='<div class="sl-note">The consequences are already on the file.</div>'+
       '<div class="sl-actions"><button class="sl-btn ok" data-vn="file">File It Away ▸</button></div>';
   } else {
-    html+='<div class="vn-backdrop vn-bg-'+(view.bg||'street')+'"></div>';
+    html+='<div class="vn-backdrop vn-bg-'+(view.bg||'street')+'">'+vnBackdropArt(view.bg||'street')+'</div>';
     if(view.type==='line'){
       const spk=view.speaker||{key:'narrator',label:''};
       const isNarr=spk.key==='narrator';

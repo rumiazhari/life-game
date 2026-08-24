@@ -1155,3 +1155,102 @@ body{background:var(--olive);color:var(--ink)}
 .vn-choices small{display:block;opacity:.75;font-style:italic}
 .vn-remember{margin:8px 2px 0;font-size:.82em;letter-spacing:.06em;color:#6b3f2e;font-style:italic}
 .vn-epi{font-size:1.02em}
+
+/* ================= TYPOGRAPHY SYSTEM =================
+   Three official Bureau voices:
+   --font-stamp : Stardos Stencil  -> headings, stamps, labels, authority
+   --font-file  : Special Elite    -> typewritten records, notes, logs
+   --font-ui    : Archivo          -> interface chrome, buttons, tabs
+   --font-prose : Georgia serif    -> visual-novel narration & dialogue */
+:root{
+  --font-stamp:'Stardos Stencil',sans-serif;
+  --font-file:'Special Elite','Courier New',monospace;
+  --font-ui:'Archivo',sans-serif;
+  --font-prose:Georgia,'Times New Roman',serif;
+}
+.vn-text{font-family:var(--font-prose);font-size:1.07em;line-height:1.66}
+.vn-text.narr{font-style:italic;color:#413a2e}
+.vn-plate b,.vn-titlebar,.sl-head.story span,.sl-head .sl-req{font-family:var(--font-stamp);letter-spacing:.16em}
+.vn-prompt,.vn-remember,.vn-choices small{font-family:var(--font-file)}
+.vn-endstamp{font-family:var(--font-stamp)}
+.yr-entry .yr-head{font-family:var(--font-stamp);letter-spacing:.1em}
+#log>.entry,.yr-entry .etext,.qempty,.autotrain-toggle span,.ffrpt-intro{font-family:var(--font-file)}
+.ps-head>span:first-child,.ps-sub>span,.ptab,.rec-strip .rec-lab,.ps-catlab,.hrs{font-family:var(--font-stamp);letter-spacing:.12em}
+.rec-chip b,.sb-name{font-family:var(--font-ui);font-weight:700}
+.rec-chip span,.sb-note{font-family:var(--font-file)}
+.sl-body{font-family:var(--font-prose);line-height:1.6}
+.sl-note,.sl-speaker{font-family:var(--font-file)}
+
+/* ================= MOTION POLISH ================= */
+@keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+#log>.entry{animation:fadeInUp .45s ease both}
+.yr-entry{animation:fadeInUp .5s ease both}
+@keyframes popOpen{from{opacity:0;transform:scale(.94) translateY(14px)}to{opacity:1;transform:none}}
+.slipcard{animation:popOpen .3s cubic-bezier(.2,.9,.3,1.15) both}
+@keyframes slamIn{0%{opacity:0;transform:scale(1.7) rotate(-9deg)}55%{opacity:1;transform:scale(.94) rotate(-3deg)}100%{transform:scale(1) rotate(-4deg)}}
+.stamp.slam,#slStamp.show{animation:slamIn .38s cubic-bezier(.3,1.4,.4,1) both}
+.btn:active{transform:translateY(1px) scale(.99)}
+@keyframes pipFlash{0%{box-shadow:0 0 0 0 rgba(240,220,120,.9)}100%{box-shadow:0 0 10px 4px rgba(240,220,120,0)}}
+#plan-pips i.on{animation:pipFlash .5s ease both}
+
+/* ================= INTRO CINEMATIC ================= */
+.intro-cine{position:fixed;inset:0;z-index:260;background:#0c0b08;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#efe6cd;cursor:pointer;overflow:hidden}
+.intro-cine::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(255,255,255,.02) 0 1px,transparent 1px 3px);pointer-events:none}
+.ic-beat{max-width:660px;text-align:center;padding:0 26px;opacity:0;transform:translateY(16px);transition:opacity .8s ease,transform .8s ease}
+.ic-beat.on{opacity:1;transform:none}
+.ic-main{font-family:var(--font-stamp);font-size:clamp(20px,4.6vw,38px);letter-spacing:.2em;line-height:1.35;text-transform:uppercase}
+.ic-sub{margin-top:16px;font-family:var(--font-file);font-size:clamp(13px,1.8vw,16px);line-height:1.8;color:#b6aa8d;white-space:pre-line}
+.ic-dots{position:absolute;bottom:30px;left:0;right:0;display:flex;gap:9px;justify-content:center}
+.ic-dot{width:8px;height:8px;border-radius:50%;background:#37322a}
+.ic-dot.on{background:#b23327}
+.ic-skip{position:absolute;top:18px;right:18px;font-family:var(--font-stamp);letter-spacing:.18em;font-size:12px;color:#8f8674;background:none;border:1px solid #453f33;padding:9px 16px;cursor:pointer}
+.ic-skip:hover{color:#efe6cd;border-color:#8f8674}
+.ic-sealwrap{width:110px;height:110px;margin-bottom:28px;position:relative}
+.ic-sealwrap svg{width:100%;height:100%}
+.ic-sealwrap .ring-a{animation:icSpin 26s linear infinite;transform-origin:50% 50%}
+.ic-sealwrap .ring-b{animation:icSpinR 19s linear infinite;transform-origin:50% 50%}
+@keyframes icSpin{to{transform:rotate(360deg)}}
+@keyframes icSpinR{to{transform:rotate(-360deg)}}
+@keyframes stampSlam{0%{opacity:0;transform:scale(2) rotate(-11deg)}60%{opacity:1;transform:scale(.92) rotate(-4deg)}100%{opacity:1;transform:scale(1) rotate(-4deg)}}
+.ic-stampopen{display:inline-block;margin-top:26px;font-family:var(--font-stamp);font-size:clamp(24px,5vw,44px);letter-spacing:.3em;color:#c23b2e;border:4px double #c23b2e;padding:12px 30px;animation:stampSlam .5s cubic-bezier(.3,1.3,.4,1) .25s both}
+
+/* ================= COVER DRESSING ================= */
+.coverwrap{position:relative;overflow:hidden}
+.cover-seal{position:absolute;top:-70px;right:-80px;width:340px;height:340px;opacity:.16;pointer-events:none}
+.cover-seal svg{width:100%;height:100%}
+.cover-seal .ring-a{animation:icSpin 40s linear infinite;transform-origin:50% 50%}
+.cover-seal .ring-b{animation:icSpinR 30s linear infinite;transform-origin:50% 50%}
+.drift-file{position:absolute;width:74px;height:56px;pointer-events:none;opacity:.1;animation:driftFloat 11s ease-in-out infinite alternate}
+.drift-file.d0{left:4%;bottom:8%;transform:rotate(-9deg)}
+.drift-file.d1{left:78%;top:16%;transform:rotate(7deg);animation-delay:-4s;animation-duration:14s}
+.drift-file.d2{left:58%;bottom:4%;transform:rotate(-4deg);animation-delay:-8s;animation-duration:17s}
+@keyframes driftFloat{from{translate:0 0}to{translate:-14px -22px}}
+
+/* ================= VN BACKDROP ILLUSTRATIONS ================= */
+.vn-backdrop svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.vn-backdrop .flicker{animation:flick 3.4s steps(2,end) infinite}
+@keyframes flick{0%,92%{opacity:.95}96%{opacity:.35}100%{opacity:.9}}
+.vn-backdrop .smoke{animation:smokeDrift 10s linear infinite}
+.smoke.s2{animation-delay:-4s}.smoke.s3{animation-delay:-7s}
+@keyframes smokeDrift{from{transform:translate(-8px,4px);opacity:.15}50%{opacity:.32}to{transform:translate(46px,-14px);opacity:0}}
+.vn-backdrop .spark{animation:sparkBlink 1.3s steps(1,end) infinite}
+.spark.k2{animation-delay:-.5s}.spark.k3{animation-delay:-.9s}
+@keyframes sparkBlink{0%,60%{opacity:0}61%,100%{opacity:1}}
+.vn-backdrop .rainline{animation:rainFall 1s linear infinite}
+.rainline.r2{animation-delay:-.35s}.rainline.r3{animation-delay:-.68s}
+@keyframes rainFall{from{transform:translateY(-40px)}to{transform:translateY(230px)}}
+.vn-backdrop .waterline{animation:waterShift 8s linear infinite}
+.waterline.w2{animation-delay:-3s}.waterline.w3{animation-delay:-6s}
+@keyframes waterShift{from{transform:translateX(-26px)}to{transform:translateX(26px)}}
+.vn-backdrop .glowp{animation:glowPulse 4.5s ease-in-out infinite alternate}
+@keyframes glowPulse{from{opacity:.55}to{opacity:.95}}
+.vn-backdrop .flagwave{animation:flagWave 3.6s ease-in-out infinite alternate;transform-origin:left center}
+@keyframes flagWave{from{transform:skewY(-4deg)}to{transform:skewY(4deg)}}
+.laurel{position:absolute;top:-30px;width:64px;height:64px;pointer-events:none;opacity:.85}
+.laurel.l{left:-52px;transform:scaleX(-1) rotate(-6deg)}
+.laurel.r{right:-52px;rotate:6deg}
+.vn-endstamp{position:relative;display:inline-block}
+
+@media (prefers-reduced-motion:reduce){
+  *,*:before,*:after{animation-duration:.001s!important;animation-iteration-count:1!important;transition:none!important}
+}

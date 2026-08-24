@@ -29,7 +29,7 @@ function newFile(){
   $('#mapWrap').classList.add('hidden');
   openIntro();
 }
-$('#btn-open').addEventListener('click',()=>{ snd('paper'); newFile(); });
+$('#btn-open').addEventListener('click',()=>{ snd('paper'); startNewLife(); });
 $('#btn-reopen').addEventListener('click',()=>{ snd('paper'); $('#closedWrap').classList.add('hidden'); renderArchiveCount(); newFile(); });
 $('#btn-archive').addEventListener('click',()=>{ snd('paper'); openArchive(); });
 $('#btn-achieve').addEventListener('click',()=>{ snd('paper'); openAchievements(); });
