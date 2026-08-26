@@ -1,8 +1,8 @@
 # AUTOPILOT STATE — Life Game
 
 **STATUS:** OK  
-**Current phase:** Phase 5 — Government / law / politics (slice 6 landed: public dissent & protest waves wired to regime posture)  
-**Last verified:** 2026-08-26 (iter 16)  
+**Current phase:** Phase 5 — Government / law / politics (slice 7 landed: TaxSystem public budget — posture-driven extraction & spending written into nationalModifiers)  
+**Last verified:** 2026-08-26 (iter 17)  
 **origin/master SHA:** verify live with `git rev-parse origin/master` (iters 1–15 were pushed at the start of iter 16; HEAD should equal or lead origin/master only by uncommitted work) 
 
 ## Backlog (top-down, roadmap order)
@@ -29,7 +29,8 @@
    - ✅ **Slice 4 (iter 14):** `js/systems/detention-system.js` — authoritative `World.detentions` (stable `detention:NNNNN` IDs, one open case per person), deterministic annual intake (pure function of `GovernmentSystem.summary` posture + the subject's `S.scrutiny`/`S.bureauFavor`, via `WorldSimulation.streamFor`) + automatic release after `term` years restoring a sliver of `S.freedom`. Wired into `WorldSimulation.migrate` + `advanceYear` (`runDetentionYearTick`); `detentionPanel` readout in `EmploymentUI`. Mutates only `World.detentions` + `S.detainedUntil`/`S.freedom` (no second authority).
   - ✅ **Slice 5 (iter 15):** Bureau travel permit (`bureauPermit` decision — renewal extends bounded `S.permitUntil`; DetentionSystem intake records `subjectHasPermit` and lengthens the term by exactly one year when absent) + `detentionPanel` permit line. 920/920 pass; diagnostics clean.
   - ✅ **Slice 6 (iter 16):** Public dissent (5G-lite) — `js/systems/dissent-system.js` owns `World.dissent` (stable `dissent:NNNNN` wave IDs, one wave per year): deterministic annual wave roll that is a pure function of `GovernmentSystem.summary` posture (legitimacy ↓ / propaganda ↓ / unrest → higher wave chance & strength), next-year resolution (crushed iff surveillancePosture > 0.55); `attendProtest` decision routes through `DissentSystem.attend` (one attendance per wave, deterministic crackdown roll; crackdown raises S.scrutiny, drops S.bureauFavor and opens a real `sedition` LawSystem inquiry feeding the slice-3/4 pipeline) + `dissentPanel` ("THE STREET · FORM S-9") in EmploymentUI + `runDissentYearTick` in advanceYear. 926/926 pass; diagnostics clean. Also fixed a PRE-EXISTING flaky gate breaker: tests/bureau-decisions.test.js never seeded the global Random, so the bribe refusal path was a live 40% coin flip — both bribe tests now pin seeded streams (assertions unchanged/strengthened).
-  - ⏳ Queue: Phase 5 remaining sub-phases — 5D tax/public budgets or deepen 5F surveillance dossier (per-person attention history feeding detention intake); narrative chains (Phase 7) wired to regime posture after that.
+  - ✅ **Slice 7 (iter 17):** `js/systems/tax-system.js` — authoritative `World.publicBudget` (bounded treasury ≤ 50M, ledger history ≤ 32): deterministic annual tick that READS BusinessSystem's freshly-ticked books (profits → business tax, payrolls → payroll levy) plus a bounded levy on `S.assets` ($2k floor exempt, $250k single-year cap), then spends the whole purse by posture-driven weights, writing next year's policy line into the EXISTING `World.nationalModifiers` keys (`surveillancePressure`/`healthSupport`/`employmentSupport` — overwrite semantics, no second settlement model). Zero randomness anywhere (pure arithmetic over authoritative state); same-year no-op (`already_applied`) + stale-year rejection; migration wired through `WorldSimulation.migrate`, byte-idempotent; `checkInvariants` returns strings. UI: `runTaxYearTick` in `advanceYear` (after government, before law/detention/dissent) + STATE LEDGER chip. 7 focused tests in `tests/tax-system.test.js`; full suite **933/933**; diagnostics clean.
+  - ⏳ Queue: Phase 5 remaining sub-phases — deepen 5F surveillance dossier (per-person attention history feeding detention intake) or 5E propaganda/censorship reach; narrative chains (Phase 7) wired to regime posture after that.
 
 4. **Phase 6 — Advanced health / reproduction** *(future)*  
    - `js/systems/pregnancy-system.js`  

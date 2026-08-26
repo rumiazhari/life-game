@@ -2665,6 +2665,19 @@ function runDissentYearTick(){
   }
   return result;
 }
+// TAX (Phase 5 slice 7, sub-phase 5D): the public budget. Revenue is pure
+// arithmetic over books BusinessSystem already ticked plus a levy on the
+// subject's assets; spending splits the purse by regime posture and writes
+// next year's policy line into World.nationalModifiers. No randomness —
+// replaying a year reproduces every cent.
+function runTaxYearTick(){
+  if(typeof TaxSystem!=='object'||!TaxSystem||typeof World==='undefined'||!World||!S) return null;
+  const result=TaxSystem.tickWorld(World,{year:World.year,subject:S});
+  if(result&&result.applied&&Array.isArray(result.chips)&&result.chips.length){
+    logChips('The tax office made its annual assessment.',result.chips,'ruling','STATE LEDGER · YEAR '+S.age);
+  }
+  return result;
+}
 const VN_SPEAKER_CLASS={narrator:'vn-narr',you:'vn-you'};
 /* Illustrated backdrops: one small SVG scene per setting, animated in CSS. */
 function vnBackdropArt(key){
@@ -4089,6 +4102,7 @@ function advanceYear(suppressBurst,quiet){
   // Government (Phase 5): the regime's posture is recomputed after the world
   // sim, state care, and story have run, and expressed on the subject's file.
   runGovernmentYearTick();
+  runTaxYearTick();
   runLawYearTick();
   runDetentionYearTick();
   runDissentYearTick();

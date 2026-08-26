@@ -106,6 +106,7 @@
     if(root.LawSystem&&typeof root.LawSystem.migrate==='function') root.LawSystem.migrate(world);
     if(root.DetentionSystem&&typeof root.DetentionSystem.migrate==='function') root.DetentionSystem.migrate(world);
     if(root.DissentSystem&&typeof root.DissentSystem.migrate==='function') root.DissentSystem.migrate(world);
+    if(root.TaxSystem&&typeof root.TaxSystem.migrate==='function') root.TaxSystem.migrate(world);
     return world;
   }
   function initialize(world){ return migrate(world).settlements; }
