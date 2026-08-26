@@ -186,6 +186,9 @@
 - Full suite: **889/889 pass** (was 885; +4 new). No sim mutations; tests are
   read-only over authoritative state. Diagnostics not required (no sim-system
   changes to World/S schema).
+- Verified close-out gate: `npm run diagnostic:world` and `npm run
+  diagnostic:npcs` both return **0 invariant failures** (medicalInvariantFailures:
+  0, invariantFailures: [] across all sampled years).
 
 ## Lock
 
