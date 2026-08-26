@@ -634,8 +634,8 @@
             const dividend=Math.floor(business.finances.profit*dividendRate);
             if(dividend>0){
               business.finances.profit-=dividend;
-              // distribute dividend to owner NPC
-              const owner=root.NpcSystem&&root.NpcSystem.get(world,business.ownerNpcId);
+              // distribute dividend to owner NPC via World.npcs registry (not NpcSystem.get)
+              const owner=world.npcs&&world.npcs[business.ownerNpcId];
               if(owner&&owner.employment&&typeof owner.employment.income==='number'){
                 owner.employment.income=Math.round(owner.employment.income+dividend);
               }
