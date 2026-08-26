@@ -1,9 +1,9 @@
 # AUTOPILOT STATE — Life Game
 
 **STATUS:** OK  
-**Current phase:** Phase 5 — Government / law / politics (slice 2 landed)  
-**Last verified:** 2026-08-26 (iter 10)  
-**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 14+ ahead — iters 1–10 not yet pushed) 
+**Current phase:** Phase 5 — Government / law / politics (slice 2 landed, history readout added)  
+**Last verified:** 2026-08-26 (iter 11)  
+**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 15+ ahead — iters 1–11 not yet pushed) 
 
 ## Backlog (top-down, roadmap order)
 
@@ -254,6 +254,24 @@ them toward this):
   across all sampled years. No World/S schema change beyond adding `World.government`.
 
 ## Next iteration target
+- Phase 5 slice 3: extend the player-facing surface into *mechanics* — e.g. a
+  `law-system.js` stub + Bureau detention / permit / queue decisions wired
+  through `GovernmentSystem`'s posture (scrutinyPressure, surveillancePosture).
+  Keep deterministic + migration + focused tests + full-suite green.
+
+### Done in iter 11 (2026-08-26) — Phase 5 slice 2 addendum: posture-history readout
+- EXTENDED `EmploymentUI.regimePanel` with a "POSTURE HISTORY" section that
+  reads the authoritative `World.government.history` (the bounded 32-entry
+  annual-posture log the slice-1 `tickWorld` maintains) — newest 6 entries
+  shown first, each as a year stamp + the verbatim posture note. Renders the
+  entry count and is omitted entirely when history is empty. Read-only; no
+  World/S mutation (covered by the new no-mutation snapshot test).
+- Added additive CSS (`.regime-history`, history rows) in `css/style.css`.
+- NEW focused test in `tests/employment-ui.test.js` (+1): history readout with
+  year + latest-note rendering, entry count, omission when empty, and
+  no-mutation. Focused file: 12/12. Full suite: **899/899 pass** (was 898; +1).
+- Verified gate: `npm run diagnostic:world` and `npm run diagnostic:npcs` clean
+  (`invariantFailures: []`, `medicalInvariantFailures: 0`).
 
 ### Done in iter 10 (2026-08-26) — Phase 5 slice 2: regime-posture readout panel
 - TURNED the Phase 5 slice-1 posture into the project's first *player-facing*

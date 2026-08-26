@@ -1396,3 +1396,7 @@ body{background:var(--olive);color:var(--ink)}
   .regime-file{margin:4px 6px 6px;padding-top:4px;border-top:1px dashed #e0c8be}
   .regime-row-file .regime-lab{width:64px}
   .regime-row-file .regime-val{width:auto;min-width:120px}
+  .regime-history{margin:6px 6px 4px;padding-top:4px;border-top:1px dashed #e0c8be}
+  .regime-hist-row{font-size:9px;margin:2px 0;display:flex;gap:6px;line-height:1.35}
+  .regime-hist-year{width:34px;flex:none;font-weight:700;color:#9c2a1c;font-variant-numeric:tabular-nums}
+  .regime-hist-note{color:#6d4a20}

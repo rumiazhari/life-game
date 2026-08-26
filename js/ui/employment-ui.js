@@ -354,6 +354,14 @@
         '<span class="regime-val">'+esc(fr)+' · '+esc(frTxt)+'</span></div>'+
         '</div>';
     }
+    const entries=Array.isArray(world.government.history)?world.government.history:[];
+    if(entries.length){
+      const rows=entries.slice(-6).reverse().map(entry=>
+        '<div class="regime-hist-row"><span class="regime-hist-year">'+esc(entry.year!=null?entry.year:'?')+'</span>'+
+        '<span class="regime-hist-note">'+esc(entry.note||capitalize(String(entry.type||'').replace(/_/g,' ')))+'</span></div>'
+      ).join('');
+      html+='<div class="regime-history"><div class="ps-catlab">POSTURE HISTORY <span>'+entries.length+'</span></div>'+rows+'</div>';
+    }
     html+='</div>';
     return html;
   }

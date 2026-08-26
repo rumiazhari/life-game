@@ -235,3 +235,27 @@ test('employment-ui: regimePanel shows only posture (no file) when S is absent, 
   const panel=runRaw(context,"return EmploymentUI.regimePanel(World,{unavailableText:'REGIME OFFLINE'});");
   assert.match(panel,/REGIME OFFLINE/,'reports unavailability without throwing when GovernmentSystem is absent');
 });
+
+test('employment-ui: regimePanel renders the bounded posture-history readout from World.government.history',()=>{
+  const context=seededWorld(contextWithUi(['js/systems/government-system.js']));
+  expose(context,`
+    World.npcs['subject']={npcId:'subject',isSubject:true,alive:true};
+    GovernmentSystem.ensure(World);
+    World.government.history=[
+      {year:1901,type:'posture',note:'Posture: surveillance 0.20, legitimacy 0.55, propaganda 0.41'},
+      {year:1902,type:'posture',note:'Posture: surveillance 0.40, legitimacy 0.52, propaganda 0.45'},
+      {year:1903,type:'posture',note:'Posture: surveillance 0.60, legitimacy 0.49, propaganda 0.50'}
+    ];
+  `);
+  const before=expose(context,'JSON.stringify(World)');
+  const html=runRaw(context,"return EmploymentUI.regimePanel(World);");
+  const after=expose(context,'JSON.stringify(World)');
+  assert.equal(before,after,'rendering must not mutate World state');
+  assert.match(html,/POSTURE HISTORY <span>3<\/span>/,'history section carries the entry count');
+  assert.match(html,/1903/,'most recent history year renders');
+  assert.match(html,/1902/,'middle history year renders');
+  assert.match(html,/1901/,'oldest history year renders');
+  assert.match(html,/surveillance 0\.60/,'the latest posture note renders');
+  const empty=runRaw(context,"World.government.history=[]; return EmploymentUI.regimePanel(World);");
+  assert.ok(!/POSTURE HISTORY/.test(empty),'history section is omitted when there are no entries');
+});
