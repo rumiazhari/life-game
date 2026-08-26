@@ -765,6 +765,7 @@ function renderStats(changed){
     if(typeof EmploymentUI.workplacePanel==='function')html+=EmploymentUI.workplacePanel(World,'subject');
     if(typeof EmploymentUI.ownershipPanel==='function')html+=EmploymentUI.ownershipPanel(World,'subject');
     if(typeof EmploymentUI.regimePanel==='function')html+=EmploymentUI.regimePanel(World);
+    if(typeof EmploymentUI.bureauInquiriesPanel==='function')html+=EmploymentUI.bureauInquiriesPanel(World,{personId:'subject'});
     return html;
   }
 function renderServiceRecord(){
@@ -2619,6 +2620,24 @@ function runGovernmentYearTick(){
   }
   return result;
 }
+// LAW (Phase 5 slice 3): advance any open Bureau inquiries one stage per year,
+// decide verdicts deterministically from the regime's scrutiny pressure, and
+// express a guilty verdict on the subject's file as scrutiny. Annual state +
+// pipeline is the deliverable; outcomes are a pure function of posture so they
+// are deterministic and testable without Math.random.
+function runLawYearTick(){
+  if(typeof LawSystem!=='object'||!LawSystem||typeof World==='undefined'||!World||!S) return null;
+  const result=LawSystem.tickWorld(World,{year:World.year,subject:S});
+  if(result&&result.applied&&Array.isArray(result.verdicts)&&result.verdicts.length){
+    const guilty=result.verdicts.filter(v=>v.outcome==='guilty').length;
+    const cleared=result.verdicts.length-guilty;
+    const chips=[];
+    if(guilty) chips.push({txt:guilty+' inquir'+(guilty===1?'y':'ies')+' returned guilty','plus':false});
+    if(cleared) chips.push({txt:cleared+' cleared',plus:true});
+    if(chips.length) logChips('The Bureau closed its books for the year.',chips,'ruling','BUREAU LEDGER · YEAR '+S.age);
+  }
+  return result;
+}
 const VN_SPEAKER_CLASS={narrator:'vn-narr',you:'vn-you'};
 /* Illustrated backdrops: one small SVG scene per setting, animated in CSS. */
 function vnBackdropArt(key){
@@ -4043,6 +4062,7 @@ function advanceYear(suppressBurst,quiet){
   // Government (Phase 5): the regime's posture is recomputed after the world
   // sim, state care, and story have run, and expressed on the subject's file.
   runGovernmentYearTick();
+  runLawYearTick();
   if(S.alive) checkMortality();
   if(S.alive){ S.hapSum+=S.happiness; S.hapYears++; S.peakHap=Math.max(S.peakHap,S.happiness); }
   pushSparkPoint();

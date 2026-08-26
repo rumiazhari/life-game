@@ -1363,8 +1363,32 @@ const DECISIONS=[
            const owned=ownedActiveBusinesses();
            if(!owned.length) return{fx:{},text:'Subject had no business left to shut — the registry already showed nothing under the family name.',reason:'no_owned_business'};
            const result=BusinessSystem.close(World,owned[0],'player_initiated',World.year||0,{subject:S});
-           return{fx:{happiness:1},text:result?('Subject shut the doors of '+result.name+' for good — contracts settled, vacancies withdrawn, the ledger closed where it stood.'):'The closure was recorded without ceremony.',reason:'business_shut_down'}}},
-];
+            return{fx:{happiness:1},text:result?('Subject shut the doors of '+result.name+' for good — contracts settled, vacancies withdrawn, the ledger closed where it stood.'):'The closure was recorded without ceremony.',reason:'business_shut_down'}}},
+           {id:'bribeBureau',cost:1,cat:'personal',avail:s=>s.age>=18&&s.assets>=250&&(s.scrutiny>0||s.record),
+           note:()=>'grease the right palm · −$250 · −SCRUTINY, +BUREAU FAVOR · risky under a watchful regime',
+           apply:()=>{
+           // Under a watchful regime the bribe is more likely to be refused and
+           // noted — a pure function of the live posture, never a duplicate authority.
+           const posture=(typeof GovernmentSystem==='object'&&GovernmentSystem&&typeof GovernmentSystem.summary==='function'&&typeof World!=='undefined'&&World)?GovernmentSystem.summary(World):null;
+           const scrut=posture&&Number.isFinite(Number(posture.scrutinyPressure))?posture.scrutinyPressure:0.4;
+           const successP=clamp(0.85-0.45*scrut,0.3,0.9);
+           if(chance(successP)){
+           S.scrutiny=Math.max(0,S.scrutiny-25);
+           S.bureauFavor=Math.min(3,S.bureauFavor+1);
+           if(S.record&&chance(.5)) S.record=false;
+           if(typeof updatePersonalStanding==='function') updatePersonalStanding();
+           return{fx:{happiness:3,assets:-250},text:'Subject slid an envelope across the desk. The clerk looked at nothing in particular, then at the file, and the file was lighter. The Bureau, briefly, was satisfied.',reason:'bribe_accepted'};
+           }
+           // Refused: the approach is logged as a real Bureau inquiry for the subject.
+           S.scrutiny=clamp(S.scrutiny+8,0,100);
+           if(typeof World!=='undefined'&&World&&typeof LawSystem==='object'&&LawSystem&&typeof LawSystem.open==='function'){
+           LawSystem.ensure(World);
+           const existing=LawSystem.openForPerson(World,'subject').filter(c=>c.category==='bribery');
+           if(!existing.length) LawSystem.open(World,{personId:'subject',category:'bribery',openedYear:World.year||0});
+           }
+           if(typeof updatePersonalStanding==='function') updatePersonalStanding();
+           return{fx:{happiness:-4,assets:-250},text:'Subject tried to buy a quieter file. The clerk did not blink — only wrote something down. A new inquiry now bears the subject’s name.',reason:'bribe_refused_inquiry_opened'}}},
+           ];
 
 /* ================= HOTSPOT SHORTCUTS (dossier field → Plan the Year actions) ================= */
 const FIELD_ACTIONS={

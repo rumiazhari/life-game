@@ -323,6 +323,38 @@
       '<span class="regime-val">'+p+'%</span>'+
       '</div>';
   }
+  /* Bureau-inquiries panel (Phase 5 slice 3): the player-facing surface for
+   * the law registry. Read-only readout of the authoritative World.legalCases
+   * for the subject — open inquiries and their stage, plus a running cleared/
+   * guilty tally. Never mutates World or S; degrades gracefully when absent. */
+  const LAW_STAGE_LABELS={reported:'Reported',investigation:'Under investigation',charged:'Charged',hearing:'Awaiting hearing',verdict:'Verdict delivered',sentence:'Sentenced',closed:'Closed'};
+  function bureauInquiriesPanel(world,options){
+    options=options||{};
+    const S=(typeof root.S==='object'&&root.S)?root.S:null;
+    const law=system('LawSystem');
+    if(!law||typeof law.forPerson!=='function'||!world||typeof world!=='object'){
+      return unavailablePanel(options.unavailableText||'The Bureau keeps no ledger here yet.');
+    }
+    const personId=(options.personId==='subject'||(S&&options.personId==null))?'subject':(options.personId||'subject');
+    const cases=law.forPerson(world,personId);
+    if(!cases.length){
+      return '<div class="bureau-panel"><div class="sec-h">BUREAU INQUIRIES <span>FORM L-7</span></div>'+
+        '<div class="employer-empty">No inquiry bears the subject’s name. The Bureau is, for now, not writing.</div></div>';
+    }
+    const open=cases.filter(c=>c.stage!=='closed');
+    const sorted=cases.slice().sort((a,b)=>(b.lastStageYear||0)-(a.lastStageYear||0));
+    const rows=sorted.map(c=>{
+      const tone=c.outcome==='guilty'?' bureau-row-guilty':c.outcome==='cleared'?' bureau-row-cleared':c.stage==='closed'?' bureau-row-closed':' bureau-row-open';
+      const stageTxt=LAW_STAGE_LABELS[c.stage]||c.stage;
+      const outcomeTxt=c.outcome?(' · '+(c.outcome==='guilty'?'Guilty':'Cleared')):'';
+      return '<div class="bureau-row'+tone+'"><span class="bureau-row-cat">'+esc(c.category||'general')+'</span>'+
+        '<span class="bureau-row-stage">'+esc(stageTxt)+esc(outcomeTxt)+'</span>'+
+        '<span class="bureau-row-year">'+(c.lastStageYear!=null?c.lastStageYear:'?')+'</span></div>';
+    }).join('');
+    return '<div class="bureau-panel"><div class="sec-h">BUREAU INQUIRIES <span>FORM L-7</span></div>'+
+      '<div class="bureau-sub">'+open.length+' open of '+cases.length+' filed</div>'+rows+'</div>';
+  }
+
   function regimePanel(world,options){
     options=options||{};
     const gov=system('GovernmentSystem');
@@ -374,5 +406,5 @@
     return html;
   }
 
-  root.EmploymentUI={esc,money,personName,settlementName,statusLabel,businessPanel,contractHistoryView,ownershipPanel,workplacePanel,regimePanel};
+  root.EmploymentUI={esc,money,personName,settlementName,statusLabel,businessPanel,contractHistoryView,ownershipPanel,workplacePanel,bureauInquiriesPanel,regimePanel};
 })(typeof globalThis!=='undefined'?globalThis:this);

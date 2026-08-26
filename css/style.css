@@ -1408,3 +1408,14 @@ body{background:var(--olive);color:var(--ink)}
   .regime-threat.regime-threat-high{border-color:#b8503e;background:#f6e2dc}
   .regime-threat.regime-threat-high .regime-threat-lab{color:#b8503e}
   .regime-threat.regime-threat-high .regime-threat-val{color:#a02a1c;font-weight:700}
+  .bureau-panel{margin:6px 6px 4px;border:1px solid #cdb6a8;border-radius:4px;background:#f7f1ea;font-size:9px;padding:5px 6px}
+  .bureau-sub{font-size:8px;letter-spacing:.08em;color:#6d4a20;margin:2px 0 4px}
+  .bureau-row{display:flex;align-items:center;gap:6px;padding:2px 0;border-top:1px dashed #e3d6c9}
+  .bureau-row:first-of-type{border-top:none}
+  .bureau-row-cat{font-weight:700;color:#3a2c1e;flex:0 0 auto;text-transform:capitalize}
+  .bureau-row-stage{flex:1 1 auto;color:#5a4632}
+  .bureau-row-year{flex:0 0 auto;color:#8a6a45}
+  .bureau-row-open .bureau-row-stage{color:#9a6a14}
+  .bureau-row-guilty .bureau-row-stage{color:#a02a1c;font-weight:700}
+  .bureau-row-cleared .bureau-row-stage{color:#2f7d4f}
+  .bureau-row-closed .bureau-row-cat,.bureau-row-closed .bureau-row-stage{color:#9a8c7a}

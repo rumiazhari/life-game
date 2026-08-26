@@ -1,9 +1,9 @@
 # AUTOPILOT STATE — Life Game
 
 **STATUS:** OK  
-**Current phase:** Phase 5 — Government / law / politics (slice 2 + player-facing readout complete)  
-**Last verified:** 2026-08-26 (iter 12)  
-**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 16+ ahead — iters 1–12 not yet pushed) 
+**Current phase:** Phase 5 — Government / law / politics (slice 3 landed; readout + law registry complete)  
+**Last verified:** 2026-08-26 (iter 13)  
+**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 17+ ahead — iters 1–13 not yet pushed) 
 
 ## Backlog (top-down, roadmap order)
 
@@ -14,16 +14,19 @@
    - ✅ Persistence + migration for owner fields (idempotent repair)  
    - ✅ Focused tests: business creation, dividend flow, owner migration (4 new tests, 870 total pass)  
 
-2. **4C-8 — Employer UI** *(slice 1 done 2026-08-26; slices 2-3 remain)*   ✅▶️  
+2. **4C-8 — Employer UI** ✅ COMPLETE  
    - ✅ `js/ui/employment-ui.js` business panel (status, finances summary, employee list)  
    - ✅ Contract history view backed by `EmploymentSystem` APIs (`contractHistoryView`)  
-   - Vacancy-browsing/application UI backed by 4C-4/4C-5  
-   - Workplace-relationship UI (4C-6 already built)  
-   - Full retirement of legacy `rollJobVacancies()` / flat `INC[]` income path  
+   - ✅ Vacancy-browsing/application UI backed by 4C-4/4C-5 (live portal refresh, iter 7)  
+   - ✅ Workplace-relationship UI (4C-6, iter 6)  
+   - ✅ Ownership decision actions `foundBusiness` / `shutDownBusiness` (iter 5)  
+   - Legacy `rollJobVacancies()` retained as the single sanctioned projection-refresh point; flat `INC[]` fallback-only. Phase 4C completion criteria locked via `tests/phase4c-invariants.test.js` (iter 8).  
 
-3. **Phase 5 — Government / law / politics** ✅▶️ *(slice 1 landed 2026-08-26; slices 2+ remain)*  
+3. **Phase 5 — Government / law / politics** ✅▶️ *(slice 1–3 landed; detention/permit mechanic remains)*  
    - ✅ `js/systems/government-system.js` — authoritative `World.government` (regime posture: legitimacy / propaganda / surveillancePosture / scrutinyPressure), deterministic annual tick via `streamFor`, idempotent + stale-year rejection, bounded history, invariants, `WorldSimulation.migrate` hook, `advanceYear` wiring.  
-   - ⏳ Slice 2+: `js/systems/law-system.js`; Bureau detention / permits / queues as player-facing mechanics; narrative chains (Phase 7) wired to regime posture.  
+   - ✅ `js/ui/employment-ui.js` `regimePanel` (posture bars + YOUR FILE + posture history + BUREAU ATTENTION threat line), iters 10–12.  
+   - ✅ **Slice 3 (iter 13):** `js/systems/law-system.js` — authoritative `World.legalCases` (stable `legal-case:NNNNN` IDs), deterministic annual stage-advance + posture-driven verdict wired into `WorldSimulation.migrate` + `advanceYear` (`runLawYearTick`); `bribeBureau` decision (refusal opens a real inquiry) + `bureauInquiriesPanel` readout.  
+   - ⏳ Detention / permit / queue as deeper player-facing mechanics; narrative chains (Phase 7) wired to regime posture.  
 
 4. **Phase 6 — Advanced health / reproduction** *(future)*  
    - `js/systems/pregnancy-system.js`  
@@ -31,7 +34,7 @@
 5. **Phase 12 — Saves / release** *(future)*  
    - Save / load system for `World` / `Business` / `EmploymentContract` state  
 
-## Active development: 4C-8 Employer UI — slice 1 COMPLETE
+## Active development: Phase 5 slice 3 COMPLETE (iter 13)
 
 `js/ui/employment-ui.js` (`EmploymentUI`, presentation-only, read-only):
 - `businessPanel(world, businessId, options)` — status badge, settlement/kind/
@@ -315,3 +318,56 @@ them toward this):
   absent. Focused file: 11/11. Full suite: **898/898 pass** (was 896; +2 new).
 - Verified gate: `npm run diagnostic:world` and `npm run diagnostic:npcs` both
   clean — `invariantFailures: []`, `medicalInvariantFailures: 0`.
+
+### Done in iter 13 (2026-08-26) — Phase 5 slice 3: Bureau/permit mechanic + law registry
+- OPENED **Phase 5 slice 3** — the player-facing authoritarian-cruelty mechanic
+  the regime-posture slices (10–12) set up. Took the smallest verifiable slice
+  that is also real persistent state, not prose: a **law registry** plus a
+  Bureau-bribe decision that feeds it. Per the USER DIRECTIVE, every new
+  system hooks into what exists (GovernmentSystem posture, World/S, the legacy
+  scrutiny/bureauFavor fields) rather than duplicating it.
+- NEW `js/systems/law-system.js` (`LawSystem`) — authoritative `World.legalCases`
+  with stable `legal-case:NNNNN` IDs (one monotonic counter, idempotent
+  migration/repair of malformed records, single-authority **5E** foundation):
+  - `open(world,{personId,category,openedYear})` — opens a Bureau inquiry;
+    idempotent guard against a duplicate open case for the same person+category.
+  - `tickWorld` — the annual entry point: advances every open case exactly one
+    stage (`reported → investigation → charged → hearing → verdict → sentence →
+    closed`), decides the verdict **deterministically from the live regime
+    posture** (conviction probability rises with `GovernmentSystem.summary`.
+    `scrutinyPressure`, via `WorldSimulation.streamFor` — never `Math.random`),
+    and on a guilty verdict **against the subject** expresses it as +6 scrutiny
+    on `S` (the same legacy field the regime-posture tick already writes — no
+    second authority). Same-year idempotent, stale-year rejected, bounded
+    history, `checkInvariants` returns strings.
+  - `get/all/forPerson/openForPerson/summary/ensure/migrate` follow the standard
+    lifecycle (mirrors `BusinessSystem`/`EmploymentSystem`).
+- WIRED into the pipeline (guarded, follows the GovernmentSystem precedent):
+  - `WorldSimulation.migrate` now calls `LawSystem.migrate` (alongside the others).
+  - `advanceYear` runs `runLawYearTick()` right after `runGovernmentYearTick()`;
+    on any verdicts it logs a `BUREAU LEDGER · YEAR N` ruling chip.
+  - `life-game.html`: `js/systems/law-system.js?v=20260826-law1` loaded after
+    `government-system.js`.
+- NEW decision `bribeBureau` in `js/data.js` (cat `personal`): gated on age≥18,
+  assets≥$250, and an existing scrutiny/record. On apply the success chance is a
+  pure function of posture (`0.85 − 0.45·scrutinyPressure`, clamped 0.3–0.9) — a
+  watchful regime refuses more often. Success: −$250, −25 scrutiny, +1 Bureau
+  Favor, chance to clear `S.record`. Refusal: −$250, +8 scrutiny, and opens a
+  **real** `LawSystem` bribery inquiry for the subject (so the player's risk is
+  visible in the registry). Mutates only `S` legacy fields + the authoritative
+  `World.legalCases`; never fabricates a second state.
+- NEW `EmploymentUI.bureauInquiriesPanel(world,{personId})` read-only readout of
+  the subject's `World.legalCases` (open count, per-case stage + outcome with
+  tone classes) — the player-facing surface for the law registry. Degrades
+  gracefully when `LawSystem` is absent. Wired into `employmentUiPanels()` and
+  given additive CSS (`.bureau-panel`, rows, guilty/cleared/closed tones).
+- NEW tests: `tests/law-system.test.js` (7) — ensure/self-heal invariants,
+  migrate wiring, stable-id allocation + duplicate guard, posture-driven
+  verdict, same-year idempotency + stale-year rejection, guilty-verdict
+  scrutiny expression. `tests/bureau-decisions.test.js` (3) — gating, refusal
+  path opens a real inquiry + raises scrutiny, acceptance path shape. All drive
+  the live systems; none fabricate state.
+- Full suite: **909/909 pass** (was 900; +9 new). Verified gate: `npm run
+  diagnostic:world` + `npm run diagnostic:npcs` clean — `invariantFailures: []`,
+  `medicalInvariantFailures: 0`. No World/S schema change beyond adding
+  `World.legalCases` / `World.legalCaseCounter` / `World.legalCaseSchemaVersion`.
