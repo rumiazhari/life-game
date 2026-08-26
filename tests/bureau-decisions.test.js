@@ -38,6 +38,10 @@ test('bribeBureau exists and is gated on scrutiny/record and funds',()=>{
 test('a refused bribe opens a real Bureau inquiry and raises scrutiny',()=>{
   const c=ctx();
   expose(c,'S.age=30;S.assets=1000;S.scrutiny=20;S.record=false;World.government.scrutinyPressure=1;LawSystem.ensure(World);World.legalCaseLastTickYear=null;');
+  // Pin the global stream so the 40% success floor cannot flip this into the
+  // acceptance branch run-to-run (unseeded Random falls back to Math.random).
+  // First draw for this seed is 0.4149 >= successP (0.40) -> guaranteed miss.
+  expose(c,"Random.setSeed('bureau-fixed-0');");
   const out=applyDecision(c,'bribeBureau');
   assert.equal(out.r.reason,'bribe_refused_inquiry_opened','refusal path taken under watchful regime');
   assert.equal(out.r.fx.assets,-250,'bribe cost deducted even on refusal');
@@ -50,15 +54,14 @@ test('a refused bribe opens a real Bureau inquiry and raises scrutiny',()=>{
 test('an accepted bribe lowers scrutiny and grants Bureau Favor',()=>{
   const c=ctx();
   expose(c,'S.age=30;S.assets=1000;S.scrutiny=40;S.bureauFavor=0;S.record=true;World.government.scrutinyPressure=0;LawSystem.ensure(World);World.legalCaseLastTickYear=null;');
-  // Force acceptance by pinning the random stream low so chance(0.85) passes.
+  // Force acceptance by pinning the random stream low so chance(0.85) passes
+  // (first draw for this seed is 0.0932 < 0.85) — the accepted-branch asserts
+  // below therefore ALWAYS run instead of being silently skipped.
+  expose(c,"Random.setSeed('bureau-fixed-6');");
   const out=applyDecision(c,'bribeBureau');
-  // successP at scrutiny=0 is 0.85; only rarely fails. Assert the accepted
-  // branch shape when it lands; this path is itself deterministic per seed.
-  if(out.r.reason==='bribe_accepted'){
-    assert.ok(out.after.scrutiny<=15,'scrutiny dropped sharply on success');
-    assert.ok(out.after.bureauFavor>=1,'Bureau Favor granted');
-    assert.equal(out.r.fx.assets,-250,'bribe cost deducted on success');
-  }
-  assert.equal(out.r.fx.assets,-250,'bribe cost always deducted');
-  assert.ok(out.r.reason==='bribe_accepted'||out.r.reason==='bribe_refused_inquiry_opened','a defined branch resolved');
+  // successP at scrutiny=0 is 0.85; the pinned seed guarantees acceptance.
+  assert.equal(out.r.reason,'bribe_accepted','accepted branch taken under the pinned stream');
+  assert.ok(out.after.scrutiny<=15,'scrutiny dropped sharply on success');
+  assert.ok(out.after.bureauFavor>=1,'Bureau Favor granted');
+  assert.equal(out.r.fx.assets,-250,'bribe cost deducted on success');
 });

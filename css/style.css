@@ -1430,3 +1430,20 @@ body{background:var(--olive);color:var(--ink)}
   .detention-row-year{flex:0 0 auto;color:#8a6a45}
   .detention-row-held .detention-row-status{color:#a02a1c;font-weight:700}
   .detention-row-released .detention-row-cat,.detention-row-released .detention-row-status{color:#9a8c7a}
+  /* THE STREET (Phase 5 slice 6 — dissent panel): warm paper over a restless city. */
+  .dissent-panel{margin:6px 6px 4px;border:1px solid #b0895a;border-radius:4px;background:#faf3e7;font-size:9px;padding:5px 6px}
+  .dissent-panel .sec-h{color:#8a5a20;border-bottom-color:#e2cfa8;background:#f3e7cf}
+  .dissent-sub{color:#6a5535;margin:3px 0 2px}
+  .dissent-sub-active{color:#b0301f;font-weight:700}
+  .dissent-sub-crushed{color:#a02a1c;font-weight:700}
+  .dissent-sub-held{color:#2e6b3f;font-weight:700}
+  .dissent-bar{height:6px;border:1px solid #c9ab77;border-radius:3px;background:#efe2c6;overflow:hidden;margin:2px 0 3px}
+  .dissent-fill{display:block;height:100%;background:linear-gradient(90deg,#d9822b,#b0301f)}
+  .dissent-rows{margin-top:3px}
+  .dissent-row{display:flex;align-items:center;gap:6px;padding:2px 0;border-top:1px dashed #e6d8ba}
+  .dissent-row:first-of-type{border-top:none}
+  .dissent-row-year{flex:0 0 auto;color:#8a6a45;font-weight:700}
+  .dissent-row-status{flex:1 1 auto;color:#5a4632}
+  .dissent-row-open .dissent-row-status{color:#b0301f;font-weight:700}
+  .dissent-row-crushed .dissent-row-status{color:#a02a1c}
+  .dissent-row-faded .dissent-row-status{color:#9a8c7a}

@@ -1,9 +1,9 @@
 # AUTOPILOT STATE — Life Game
 
 **STATUS:** OK  
-**Current phase:** Phase 5 — Government / law / politics (slice 5 landed: Bureau travel permit lengthens detention without a permit) 
-**Last verified:** 2026-08-26 (iter 15)  
-**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 18+ ahead — iters 1–14 not yet pushed) 
+**Current phase:** Phase 5 — Government / law / politics (slice 6 landed: public dissent & protest waves wired to regime posture)  
+**Last verified:** 2026-08-26 (iter 16)  
+**origin/master SHA:** verify live with `git rev-parse origin/master` (iters 1–15 were pushed at the start of iter 16; HEAD should equal or lead origin/master only by uncommitted work) 
 
 ## Backlog (top-down, roadmap order)
 
@@ -22,13 +22,14 @@
    - ✅ Ownership decision actions `foundBusiness` / `shutDownBusiness` (iter 5)  
    - Legacy `rollJobVacancies()` retained as the single sanctioned projection-refresh point; flat `INC[]` fallback-only. Phase 4C completion criteria locked via `tests/phase4c-invariants.test.js` (iter 8).  
 
-3. **Phase 5 — Government / law / politics** ✅▶️ *(slice 3 landed; slice 4 detention mechanic lands below)*  
+3. **Phase 5 — Government / law / politics** ✅▶️ *(slice 6 landed; queue below)*  
    - ✅ `js/systems/government-system.js` — authoritative `World.government` (regime posture: legitimacy / propaganda / surveillancePosture / scrutinyPressure), deterministic annual tick via `streamFor`, idempotent + stale-year rejection, bounded history, invariants, `WorldSimulation.migrate` hook, `advanceYear` wiring.  
    - ✅ `js/ui/employment-ui.js` `regimePanel` (posture bars + YOUR FILE + posture history + BUREAU ATTENTION threat line), iters 10–12.  
    - ✅ **Slice 3 (iter 13):** `js/systems/law-system.js` — authoritative `World.legalCases` (stable `legal-case:NNNNN` IDs), deterministic annual stage-advance + posture-driven verdict wired into `WorldSimulation.migrate` + `advanceYear` (`runLawYearTick`); `bribeBureau` decision (refusal opens a real inquiry) + `bureauInquiriesPanel` readout.  
    - ✅ **Slice 4 (iter 14):** `js/systems/detention-system.js` — authoritative `World.detentions` (stable `detention:NNNNN` IDs, one open case per person), deterministic annual intake (pure function of `GovernmentSystem.summary` posture + the subject's `S.scrutiny`/`S.bureauFavor`, via `WorldSimulation.streamFor`) + automatic release after `term` years restoring a sliver of `S.freedom`. Wired into `WorldSimulation.migrate` + `advanceYear` (`runDetentionYearTick`); `detentionPanel` readout in `EmploymentUI`. Mutates only `World.detentions` + `S.detainedUntil`/`S.freedom` (no second authority).
   - ✅ **Slice 5 (iter 15):** Bureau travel permit (`bureauPermit` decision — renewal extends bounded `S.permitUntil`; DetentionSystem intake records `subjectHasPermit` and lengthens the term by exactly one year when absent) + `detentionPanel` permit line. 920/920 pass; diagnostics clean.
-  - ⏳ Queue as a deeper player-facing mechanic; narrative chains (Phase 7) wired to regime posture.
+  - ✅ **Slice 6 (iter 16):** Public dissent (5G-lite) — `js/systems/dissent-system.js` owns `World.dissent` (stable `dissent:NNNNN` wave IDs, one wave per year): deterministic annual wave roll that is a pure function of `GovernmentSystem.summary` posture (legitimacy ↓ / propaganda ↓ / unrest → higher wave chance & strength), next-year resolution (crushed iff surveillancePosture > 0.55); `attendProtest` decision routes through `DissentSystem.attend` (one attendance per wave, deterministic crackdown roll; crackdown raises S.scrutiny, drops S.bureauFavor and opens a real `sedition` LawSystem inquiry feeding the slice-3/4 pipeline) + `dissentPanel` ("THE STREET · FORM S-9") in EmploymentUI + `runDissentYearTick` in advanceYear. 926/926 pass; diagnostics clean. Also fixed a PRE-EXISTING flaky gate breaker: tests/bureau-decisions.test.js never seeded the global Random, so the bribe refusal path was a live 40% coin flip — both bribe tests now pin seeded streams (assertions unchanged/strengthened).
+  - ⏳ Queue: Phase 5 remaining sub-phases — 5D tax/public budgets or deepen 5F surveillance dossier (per-person attention history feeding detention intake); narrative chains (Phase 7) wired to regime posture after that.
 
 4. **Phase 6 — Advanced health / reproduction** *(future)*  
    - `js/systems/pregnancy-system.js`  

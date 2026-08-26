@@ -765,6 +765,7 @@ function renderStats(changed){
     if(typeof EmploymentUI.workplacePanel==='function')html+=EmploymentUI.workplacePanel(World,'subject');
     if(typeof EmploymentUI.ownershipPanel==='function')html+=EmploymentUI.ownershipPanel(World,'subject');
     if(typeof EmploymentUI.regimePanel==='function')html+=EmploymentUI.regimePanel(World);
+    if(typeof EmploymentUI.dissentPanel==='function')html+=EmploymentUI.dissentPanel(World);
     if(typeof EmploymentUI.bureauInquiriesPanel==='function')html+=EmploymentUI.bureauInquiriesPanel(World,{personId:'subject'});
     if(typeof EmploymentUI.detentionPanel==='function')html+=EmploymentUI.detentionPanel(World,{personId:'subject'});
     return html;
@@ -2652,6 +2653,18 @@ function runDetentionYearTick(){
   }
   return result;
 }
+// DISSENT (Phase 5 slice 6): protest waves rise and fall with the regime's
+// posture — a pure function of legitimacy/propaganda/unrest each year, so no
+// random and no second authority. The wave itself only opens the player's
+// window to act (attendProtest); repression lands through that decision.
+function runDissentYearTick(){
+  if(typeof DissentSystem!=='object'||!DissentSystem||typeof World==='undefined'||!World||!S) return null;
+  const result=DissentSystem.tickWorld(World,{year:World.year,subject:S});
+  if(result&&result.applied&&Array.isArray(result.chips)&&result.chips.length){
+    logChips('The year turned restive.',result.chips,'ruling','THE STREET · YEAR '+S.age);
+  }
+  return result;
+}
 const VN_SPEAKER_CLASS={narrator:'vn-narr',you:'vn-you'};
 /* Illustrated backdrops: one small SVG scene per setting, animated in CSS. */
 function vnBackdropArt(key){
@@ -4078,6 +4091,7 @@ function advanceYear(suppressBurst,quiet){
   runGovernmentYearTick();
   runLawYearTick();
   runDetentionYearTick();
+  runDissentYearTick();
   if(S.alive) checkMortality();
   if(S.alive){ S.hapSum+=S.happiness; S.hapYears++; S.peakHap=Math.max(S.peakHap,S.happiness); }
   pushSparkPoint();

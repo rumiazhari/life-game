@@ -1399,6 +1399,25 @@ const DECISIONS=[
               ?('Subject slid the renewal slip across the desk. The clerk clipped a fresh stamp into the passport — coverage extended through '+renewed+'.')
               :('Subject paid for the red stamp. For a year the road is open: permit good through '+renewed+'.');
             return{fx:{assets:-100,happiness:1},text:text,reason:'permit_renewed'}}},
+           {id:'attendProtest',cost:1,cat:'personal',
+           avail:s=>{try{return s.age>=16&&!(Number(s.detainedUntil)>=World.year)&&typeof DissentSystem==='object'&&!!DissentSystem&&typeof World!=='undefined'&&!!World&&typeof DissentSystem.currentWave==='function'&&!!DissentSystem.currentWave(World,World.year);}catch(e){return false;}},
+           note:()=>{try{const w=DissentSystem.currentWave(World,World.year);return w?('join the protest in the squares · wave strength '+Math.round(w.strength*100)+'% · crackdown risk under surveillance'):'the streets are quiet';}catch(e){return 'the streets are quiet';}},
+           apply:()=>{if(typeof DissentSystem!=='object'||!DissentSystem||typeof World==='undefined'||!World)return{fx:{},text:'Subject looked for the crowd, but the world it lived in had no streets on record.',reason:'no_registry'};
+            const result=DissentSystem.attend(World,{year:World.year,subject:S});
+            if(!result.ok){
+              if(result.reason==='already_attended') return{fx:{},text:'Subject has already stood in that crowd this year — once is all a file allows.',reason:'already_attended'};
+              return{fx:{},text:'Subject went looking for a demonstration and found only quiet boulevards.',reason:'no_wave'};
+            }
+            if(result.crackdown){
+              S.scrutiny=clamp(S.scrutiny+Math.round(12+18*result.wave.strength),0,100);
+              S.bureauFavor=Math.max(0,S.bureauFavor-1);
+              if(typeof updatePersonalStanding==='function') updatePersonalStanding();
+              const suffix=result.inquiryId?(' A new inquiry — '+result.inquiryId+' — now carries the subject’s name.'):'';
+              return{fx:{happiness:-5,freedom:-4},text:'Subject stood in the square until the vans came. The crowd scattered; some did not get away.'+suffix,reason:'protest_crackdown'};
+            }
+            S.scrutiny=clamp(S.scrutiny+4,0,100);
+            if(typeof updatePersonalStanding==='function') updatePersonalStanding();
+            return{fx:{happiness:6,freedom:2},text:'Subject marched with strangers who felt like neighbors. For one evening the city belonged to the people in it.',reason:'protest_held'}}},
            ];
 
 /* ================= HOTSPOT SHORTCUTS (dossier field → Plan the Year actions) ================= */

@@ -393,6 +393,45 @@
       head+(rows?'<div class=\"detention-rows\">'+rows+'</div>':'<div class=\"employer-empty\">The Bureau has never taken the subject into custody.</div>')+'</div>';
   }
 
+  /* Dissent panel (Phase 5 slice 6): the street, read back to the player.
+   * Read-only readout of the authoritative World.dissent waves — whether a
+   * wave is up this year (the attendProtest window), how strong, whether the
+   * subject already stood in it, and the recent history of waves. Never
+   * mutates World or S; degrades gracefully when DissentSystem is absent. */
+  function dissentPanel(world,options){
+    options=options||{};
+    const dissent=system('DissentSystem');
+    if(!dissent||typeof dissent.all!=='function'||!world||typeof world!=='object'){
+      return unavailablePanel(options.unavailableText||'No one keeps a record of the street here yet.');
+    }
+    const year=(typeof root.World==='object'&&root.World&&Number.isFinite(Number(root.World.year)))?root.World.year:0;
+    dissent.ensure(world);
+    const waves=Array.isArray(dissent.all(world))?dissent.all(world):[];
+    let head;
+    const current=waves.filter(w=>w.year===year);
+    const active=current.find(w=>w.stage==='active')||null;
+    if(active){
+      const pct=Math.round((active.strength||0)*100);
+      head='<div class="dissent-sub dissent-sub-active">WAVE UP THIS YEAR · strength '+pct+'%</div>'+
+        '<div class="dissent-bar"><span class="dissent-fill" style="width:'+pct+'%"></span></div>'+
+        (active.attended
+          ?'<div class="dissent-sub '+(active.crackdown?'dissent-sub-crushed':'dissent-sub-held')+'">'+(active.crackdown?'You attended · the square was taken by force':'You attended · the crowd held the street')+'</div>'
+          :'<div class="dissent-sub">The squares are crowded — the Plan-the-Year sheet carries an invitation.</div>');
+    }else{
+      head='<div class="dissent-sub">Quiet streets this year. Grievances keep; they do not vanish.</div>';
+    }
+    const rows=waves.slice().sort((a,b)=>b.year-a.year).slice(0,4).map(w=>{
+      const tone=w.stage==='active'?' dissent-row-open':w.crushed?' dissent-row-crushed':' dissent-row-faded';
+      const statusTxt=w.stage==='active'
+        ?('Wave up · '+Math.round((w.strength||0)*100)+'%')
+        :(w.crushed?'Crushed '+w.resolvedYear:'Faded '+w.resolvedYear);
+      return '<div class="dissent-row'+tone+'"><span class="dissent-row-year">'+(w.year!=null?w.year:'?')+'</span>'+
+        '<span class="dissent-row-status">'+esc(statusTxt)+(w.attended?' · attended':'')+'</span></div>';
+    }).join('');
+    return '<div class="dissent-panel"><div class="sec-h">THE STREET <span>FORM S-9</span></div>'+
+      head+(rows?'<div class="dissent-rows">'+rows+'</div>':'<div class="employer-empty">No wave has risen in living memory.</div>')+'</div>';
+  }
+
   function regimePanel(world,options){
     options=options||{};
     const gov=system('GovernmentSystem');
@@ -444,5 +483,5 @@
     return html;
   }
 
-  root.EmploymentUI={esc,money,personName,settlementName,statusLabel,businessPanel,contractHistoryView,ownershipPanel,workplacePanel,bureauInquiriesPanel,detentionPanel,regimePanel};
+  root.EmploymentUI={esc,money,personName,settlementName,statusLabel,businessPanel,contractHistoryView,ownershipPanel,workplacePanel,bureauInquiriesPanel,detentionPanel,dissentPanel,regimePanel};
 })(typeof globalThis!=='undefined'?globalThis:this);
