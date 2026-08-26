@@ -1355,7 +1355,26 @@ body{background:var(--olive);color:var(--ink)}
 /* ---- reduced motion: art still displays, movement becomes instant ---- */
 @media (prefers-reduced-motion:reduce){
   .ev-plate,.vn-bust,.photo.photo-swap,.photo-replace-mark{animation:none!important;transition:none!important}
-  .vn-bust{opacity:1!important}
-  .vn-bust.dim{opacity:.55!important}
-  .vn-bust.active{opacity:1!important}
-}
+    .vn-bust{opacity:1!important}
+    .vn-bust.dim{opacity:.55!important}
+    .vn-bust.active{opacity:1!important}
+  }
+
+  /* Workplace-life panel (EmploymentUI.workplacePanel, Phase 4C-8) */
+  .workplace-panel{margin-top:10px}
+  .wp-stress{display:flex;align-items:center;gap:6px;margin:2px 4px 4px}
+  .wp-stress-track{flex:1;height:7px;border-radius:4px;background:#e8dcc8;overflow:hidden;border:1px solid #d8c8a8}
+  .wp-stress-fill{height:100%;background:#5f9e63;border-radius:4px}
+  .wp-stress-fill.wp-stress-mid{background:#c99a3a}
+  .wp-stress-fill.wp-stress-high{background:#b8503e}
+  .wp-stress-num{font-size:9px;color:#6d4a20;white-space:nowrap}
+  .wp-meta-row{font-size:9px;color:#6d4a20;margin:2px 4px}
+  .wp-meta-muted{opacity:.65}
+  .wp-incidents{margin:3px 0 0}
+  .wp-incident-row{font-size:9px;color:#8a4a28;margin:1px 4px}
+  .wp-peer-row{font-size:10px;margin:2px 4px;display:flex;justify-content:space-between;gap:8px}
+  .wp-peer-row span{font-size:9px;color:#6d4a20;text-align:right}
+  .wp-peer-supervisor b::after{content:' ★';font-size:8px}
+  .wp-memory-row{font-size:9px;margin:2px 4px;line-height:1.35}
+  .wp-memory-good{color:#3f6e44}
+  .wp-memory-bad{color:#8a4030}
