@@ -254,40 +254,52 @@
     };
   }
 
-  function create(world,spec){
-    ensure(world);
-    spec=spec||{};
-    const settlementId=spec.settlementId;
-    if(!settlementId||typeof settlementId!=='string') throw new Error('BusinessSystem.create requires a settlementId');
-    const sector=spec.sector;
-    if(!SECTOR_SET.has(sector)) throw new Error('BusinessSystem.create requires a supported sector, got: '+sector);
-    const id=nextBusinessId(world);
-    const status=STATUSES.includes(spec.status)?spec.status:'active';
-    const closed=status==='closed';
-    const finances=normalizeFinances(spec.finances);
-    const reconciled=reconcileTickYears(finiteIntOrNull(spec.lastTickYear),finances.lastYear);
-    finances.lastYear=reconciled.lastYear;
-    const record={
-      id,
-      name:typeof spec.name==='string'&&spec.name?spec.name:id,
-      settlementId,
-      sector,
-      demandGroup:SECTOR_DEMAND_GROUPS[sector],
-      kind:KINDS.includes(spec.kind)?spec.kind:defaultKindForSector(sector),
-      status,
-      foundedYear:finiteIntOrNull(spec.foundedYear)!=null?finiteIntOrNull(spec.foundedYear):finiteIntOrNull(world.year),
-      ownerNpcId:spec.ownerNpcId!=null?spec.ownerNpcId:null,
-      employeeIds:closed?[]:uniqueStringArray(spec.employeeIds),
-      vacancies:closed?[]:uniqueVacancies(spec.vacancies).map(v=>v&&typeof v==='object'?Object.assign({},v):v),
-      finances,
-      lastTickYear:reconciled.lastTickYear,
-      strugglingYears:nonNegInt(spec.strugglingYears,0,MAX_STRUGGLING_YEARS),
-      closedYear:closed?boundedYear(spec.closedYear!=null?spec.closedYear:world.year,0):null,
-      history:Array.isArray(spec.history)?spec.history.slice(-HISTORY_LIMIT).map(h=>h&&typeof h==='object'?Object.assign({},h):h):[]
-    };
-    world.businesses[id]=record;
-    return record;
-  }
+  function autoAssignOwnerNpcId(world, settlement){
+      // If no ownerNpcId specified, try to auto-assign one from the settlement's NPCs.
+      // Prefer non-subject NPCs; use the first alive non-subject NPC found.
+      if(!world.npcs||typeof world.npcs!=='object'||Array.isArray(world.npcs)) return null;
+      const npcs=Object.values(world.npcs).filter(n=>n&&!n.isSubject&&n.alive!==false);
+      if(npcs.length>0) return npcs[0].npcId;
+      return null;
+    }
+
+    function create(world,spec){
+      ensure(world);
+      spec=spec||{};
+      const settlementId=spec.settlementId;
+      if(!settlementId||typeof settlementId!=='string') throw new Error('BusinessSystem.create requires a settlementId');
+      const sector=spec.sector;
+      if(!SECTOR_SET.has(sector)) throw new Error('BusinessSystem.create requires a supported sector, got: '+sector);
+      const id=nextBusinessId(world);
+      const status=STATUSES.includes(spec.status)?spec.status:'active';
+      const closed=status==='closed';
+      const finances=normalizeFinances(spec.finances);
+      const reconciled=reconcileTickYears(finiteIntOrNull(spec.lastTickYear),finances.lastYear);
+      finances.lastYear=reconciled.lastYear;
+      // Auto-assign ownerNpcId if not explicitly provided
+      let ownerNpcId=spec.ownerNpcId;
+      if(ownerNpcId==null) ownerNpcId=autoAssignOwnerNpcId(world, settlementId);
+      const record={
+        id,
+        name:typeof spec.name==='string'&&spec.name?spec.name:id,
+        settlementId,
+        sector,
+        demandGroup:SECTOR_DEMAND_GROUPS[sector],
+        kind:KINDS.includes(spec.kind)?spec.kind:defaultKindForSector(sector),
+        status,
+        foundedYear:finiteIntOrNull(spec.foundedYear)!=null?finiteIntOrNull(spec.foundedYear):finiteIntOrNull(world.year),
+        ownerNpcId,
+        employeeIds:closed?[]:uniqueStringArray(spec.employeeIds),
+        vacancies:closed?[]:uniqueVacancies(spec.vacancies).map(v=>v&&typeof v==='object'?Object.assign({},v):v),
+        finances,
+        lastTickYear:reconciled.lastTickYear,
+        strugglingYears:nonNegInt(spec.strugglingYears,0,MAX_STRUGGLING_YEARS),
+        closedYear:closed?boundedYear(spec.closedYear!=null?spec.closedYear:world.year,0):null,
+        history:Array.isArray(spec.history)?spec.history.slice(-HISTORY_LIMIT).map(h=>h&&typeof h==='object'?Object.assign({},h):h):[]
+      };
+      world.businesses[id]=record;
+      return record;
+    }
 
   function get(world,businessId){
     ensure(world);
