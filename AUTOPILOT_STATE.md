@@ -49,15 +49,31 @@
 - Wired into `life-game.html` after persistent-people-ui.js.
 - Tests: `tests/employment-ui.test.js` (4 tests). Full suite: **874/874 pass**.
 
-## Next iteration target: 4C-8 slice 2 — player-visible integration
+## Next iteration target: 4C-8 slice 3 — ownership decision surface
 
-1. Surface `EmploymentUI.businessPanel(World, contract.businessId)` inside the
-   existing job/work UI flow in `js/ui.js` (guard with typeof checks like the
-   other EmploymentSystem call sites) so players can actually see it.
-2. Ownership decision surface (4C-7): owner-visible dividend summary +
-   founder/closure actions routed through `BusinessSystem.create/close`.
-3. Then evaluate full retirement of the legacy `rollJobVacancies()` / flat
+1. Founder/closure ACTIONS (4C-7): player decisions routed through
+   `BusinessSystem.create` / `BusinessSystem.close` (e.g. "Found a business"
+   decision with cash stake deducted into `finances.cash`, ownerNpcId
+   'subject'; "Shut down" for businesses the subject owns). Presentation in
+   js/ui/employment-ui.js or ui.js helpers only; sim mutations ONLY via the
+   system APIs.
+2. Then evaluate full retirement of the legacy `rollJobVacancies()` / flat
    `INC[]` fallback path per the phase-page completion criteria.
+
+### Done in iter 4 (2026-08-26)
+- FIXED iter-3 bug: personal standing panel guarded
+  `typeof EmploymentUI==='function'` but EmploymentUI is an object, so it never
+  rendered; it also passed `S.employmentContractId` (a contract id) where a
+  business id belongs. Now `employmentUiPanels()` resolves the active contract
+  via `EmploymentSystem.activeForPerson(World,'subject')[0].businessId`.
+- NEW `EmploymentUI.ownershipPanel(world,personId,options)` — read-only list of
+  businesses owned by a person (active first), each with status badge,
+  settlement/kind/sector, last annual result, and dividends received total +
+  most recent payout from `history[type=dividend]`. Degrades gracefully without
+  BusinessSystem; never mutates World/S (JSON snapshot tested).
+- Wired into the personal standing panel next to the employer panel.
+- Cache-bust bumps in life-game.html for both files.
+- Tests: tests/employment-ui.test.js 6/6 (2 new). Full suite **876/876 pass**.
 
 ## Lock
 

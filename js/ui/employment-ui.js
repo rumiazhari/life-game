@@ -157,5 +157,46 @@
     return '<div class="contract-history">'+rows+'</div>';
   }
 
-  root.EmploymentUI={esc,money,personName,settlementName,statusLabel,businessPanel,contractHistoryView};
+  /* Ownership panel for one person: every business they own (active first,
+   * then closed, ids ascending), each with status, location, last annual
+   * result and a running total of dividends that business paid to them.
+   * Read-only like the rest of this module. */
+  function ownershipPanel(world,personId,options){
+    options=options||{};
+    const businessSystem=system('BusinessSystem');
+    if(!businessSystem||typeof businessSystem.all!=='function'||!world||typeof world!=='object'){
+      return unavailablePanel(options.unavailableText);
+    }
+    const owned=businessSystem.all(world)
+      .filter(business=>business&&business.ownerNpcId===personId)
+      .sort((a,b)=>(a.status==='closed'?1:0)-(b.status==='closed'?1:0)||String(a.id).localeCompare(String(b.id)));
+    if(!owned.length){
+      return '<div class="ownership-panel ownership-panel-empty"><div class="employer-empty">'+
+        esc(options.emptyText||'No businesses are owned by this person.')+'</div></div>';
+    }
+    const rows=owned.map(business=>{
+      const finances=business.finances||{};
+      const dividends=(Array.isArray(business.history)?business.history:[])
+        .filter(entry=>entry&&entry.type==='dividend'&&entry.recipient===personId);
+      const total=dividends.reduce((sum,entry)=>sum+(Number(entry&&entry.amount)||0),0);
+      const last=dividends.length?dividends[dividends.length-1]:null;
+      const resultLine=(finances.lastYear!=null)
+        ?esc(finances.lastYear)+' result · '+money(finances.profit)+' profit'
+        :'no annual result yet';
+      const dividendLine=(total>0)
+        ?'Dividends received: '+money(total)+
+          (last&&last.year!=null?' · last '+esc(last.year)+' '+money(last.amount):'')
+        :'No dividends received yet.';
+      return '<div class="ownership-row ownership-status-'+esc(business.status)+'">'+
+        '<b class="ownership-name">'+esc(business.name)+'</b>'+
+        '<span class="employer-status employer-status-'+esc(business.status)+'">'+statusLabel(business.status)+'</span>'+
+        '<span>'+esc(settlementName(world,business.settlementId))+' · '+esc(capitalize(business.kind))+' · '+esc(capitalize(business.sector))+'</span>'+
+        '<span>'+resultLine+'</span>'+
+        '<span class="ownership-dividend">'+dividendLine+'</span>'+
+        '</div>';
+    }).join('');
+    return '<div class="ownership-panel"><div class="ps-catlab">BUSINESS OWNERSHIP <span>'+owned.length+'</span></div>'+rows+'</div>';
+  }
+
+  root.EmploymentUI={esc,money,personName,settlementName,statusLabel,businessPanel,contractHistoryView,ownershipPanel};
 })(typeof globalThis!=='undefined'?globalThis:this);

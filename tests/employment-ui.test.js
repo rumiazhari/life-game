@@ -104,3 +104,34 @@ test('employment-ui: panels degrade gracefully when the backing systems are abse
   assert.match(panel,/SYSTEMS OFFLINE/,'businessPanel reports unavailability without throwing');
   assert.match(history,/HISTORY OFFLINE/,'contractHistoryView reports unavailability without throwing');
 });
+
+test('employment-ui: ownershipPanel lists owned businesses with dividend totals from live records',()=>{
+  const context=seededWorld(contextWithUi());
+  expose(context,`
+    World.npcs['subject']={npcId:'subject',isSubject:true,alive:true};
+    globalThis.Mine=BusinessSystem.create(World,{settlementId:'kostrin',sector:'manufacturing',name:'Reeve Works',ownerNpcId:'npc:00002',foundedYear:1903});
+    Mine.finances={cash:400,debt:0,revenue:900,expenses:500,payroll:200,profit:200,lastYear:1904};
+    Mine.history.push({type:'dividend',year:1904,amount:30,recipient:'npc:00002'});
+    Mine.history.push({type:'dividend',year:1905,amount:45,recipient:'npc:00002'});
+  `);
+  const before=expose(context,'JSON.stringify(World)');
+  const html=runRaw(context,"return EmploymentUI.ownershipPanel(World,'npc:00002');");
+  const after=expose(context,'JSON.stringify(World)');
+  assert.equal(before,after,'rendering must not mutate World state');
+  assert.match(html,/BUSINESS OWNERSHIP <span>1</,'panel header carries owned count');
+  assert.match(html,/Reeve Works/,'owned business name appears');
+  assert.match(html,/Kostrin · \w+ · Manufacturing/,'settlement, kind and sector meta appear');
+  assert.match(html,/1904 result · \$200 profit/,'last annual result line renders');
+  assert.match(html,/Dividends received: \$75/,'dividend total sums across years');
+  assert.match(html,/last 1905 \$45/,'most recent dividend year and amount render');
+  const empty=runRaw(context,"return EmploymentUI.ownershipPanel(World,'subject',{emptyText:'NO HOLDINGS'});");
+  assert.match(empty,/NO HOLDINGS/,'person with no businesses gets configured empty text');
+});
+
+test('employment-ui: ownershipPanel degrades gracefully when BusinessSystem is absent',()=>{
+  const context=createGameContext();
+  loadGameFiles(context,['js/ui/employment-ui.js']);
+  expose(context,'globalThis.World={year:1900,npcs:{},settlements:{}};');
+  const panel=runRaw(context,"return EmploymentUI.ownershipPanel(World,'subject',{unavailableText:'OWNERSHIP OFFLINE'});");
+  assert.match(panel,/OWNERSHIP OFFLINE/,'reports unavailability without throwing');
+});

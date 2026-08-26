@@ -753,6 +753,18 @@ function renderStats(changed){
   renderCoach();
   syncHoldTab();
 }
+  /* Employer + ownership panels for the personal standing view. Guards mirror
+   * the other EmploymentSystem call sites so older saves/partial loads render
+   * nothing instead of throwing. The employer panel needs the BUSINESS id from
+   * the player's active contract (S.employmentContractId is a contract id). */
+  function employmentUiPanels(){
+    if(typeof EmploymentUI!=='object'||!EmploymentUI||typeof World==='undefined'||!World)return '';
+    let html='';
+    const contract=(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof EmploymentSystem.activeForPerson==='function')?EmploymentSystem.activeForPerson(World,'subject')[0]:null;
+    if(contract&&typeof EmploymentUI.businessPanel==='function')html+=EmploymentUI.businessPanel(World,contract.businessId);
+    if(typeof EmploymentUI.ownershipPanel==='function')html+=EmploymentUI.ownershipPanel(World,'subject');
+    return html;
+  }
 function renderServiceRecord(){
   if(typeof RPG!=='object'||!RPG||!S||typeof World==='undefined'||!World)return '';
   const rec=RPG.recordOf(World);if(!rec)return '';
@@ -783,7 +795,7 @@ function renderInventory(){
     '<div class="medical-line"><b>MEDICAL FILE</b><span>'+(conditions.length?conditions.map(c=>medicalInfo(c.id).name+(c.known?'':' · unexamined')).join(' · '):(S.medicalRecord?'no active condition':'not yet opened'))+'</span></div>'+
     '<div class="location-line"><b>LOCATION</b><span>'+location.name+' · '+(building?building.name:'address pending')+(travel?' · travelling to '+travel.name:'')+'</span></div>'+
     '</div>'+
-    (settlementConditions?'<div class="settlement-conditions"><div class="sec-h">SETTLEMENT CONDITIONS <span>SIMULATION</span></div><div class="condition-grid"><div><b>EMPLOYMENT</b><span>'+settlementConditions.employment+'</span></div><div><b>COST OF LIVING</b><span>'+settlementConditions.costOfLiving+'</span></div><div><b>HEALTHCARE PRESSURE</b><span>'+settlementConditions.healthcare+'</span></div><div><b>UNREST</b><span>'+settlementConditions.unrest+'</span></div><div><b>SURVEILLANCE</b><span>'+settlementConditions.surveillance+'</span></div></div></div>':'')+(typeof EmploymentUI==='function'&&typeof World==='object'&&World?EmploymentUI.businessPanel(World,S.employmentContractId||''):'')+renderServiceRecord();
+    (settlementConditions?'<div class="settlement-conditions"><div class="sec-h">SETTLEMENT CONDITIONS <span>SIMULATION</span></div><div class="condition-grid"><div><b>EMPLOYMENT</b><span>'+settlementConditions.employment+'</span></div><div><b>COST OF LIVING</b><span>'+settlementConditions.costOfLiving+'</span></div><div><b>HEALTHCARE PRESSURE</b><span>'+settlementConditions.healthcare+'</span></div><div><b>UNREST</b><span>'+settlementConditions.unrest+'</span></div><div><b>SURVEILLANCE</b><span>'+settlementConditions.surveillance+'</span></div></div></div>':'')+employmentUiPanels()+renderServiceRecord();
   if(S.age<16||S.livingAtHome){
     const famT=FAMILY_TIERS.find(f=>f.id===S.familyTier);
     let hc='<div class="aempty">'+(S.age<16?'Dependent on parents — the family provides.':'Still living at home — rent-free, fed at the family table.')+'</div>';
