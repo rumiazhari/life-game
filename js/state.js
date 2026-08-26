@@ -440,7 +440,7 @@ function newSubject(){
     streak:0,bestStreak:0,yearAccum:{},stage:'infancy',career:null,vacancies:[],careerYears:0,employmentContractId:null,
     eduStage:null,eduYearsIn:0,eduDropped:false,eduCompleted:{},pendingSchoolStage:null,
     familyTier:fam.id,lifestyle:{housing:fam.housing,food:fam.food,childcare:fam.childcare},liabilities:[],livingAtHome:true,
-    freedom:70,bureauFavor:0,scrutiny:0,housingSecurity:60,financialSecurity:55,medicalRecord:false,conditions:[],lastFavorYear:currentYear(),
+    freedom:70,bureauFavor:0,scrutiny:0,detainedUntil:0,housingSecurity:60,financialSecurity:55,medicalRecord:false,conditions:[],lastFavorYear:currentYear(),
     holdMember:false,holdRecruitCooldown:0,
     location:{settlementId:World.activeSettlementId,buildingId:World.activeBuildingId},traveling:null,
     wasToxicHome:false,leftBeforeBroke:false,parentWarmAccum:0,parentStableAccum:0,parentYears:0,

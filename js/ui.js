@@ -766,6 +766,7 @@ function renderStats(changed){
     if(typeof EmploymentUI.ownershipPanel==='function')html+=EmploymentUI.ownershipPanel(World,'subject');
     if(typeof EmploymentUI.regimePanel==='function')html+=EmploymentUI.regimePanel(World);
     if(typeof EmploymentUI.bureauInquiriesPanel==='function')html+=EmploymentUI.bureauInquiriesPanel(World,{personId:'subject'});
+    if(typeof EmploymentUI.detentionPanel==='function')html+=EmploymentUI.detentionPanel(World,{personId:'subject'});
     return html;
   }
 function renderServiceRecord(){
@@ -2638,6 +2639,19 @@ function runLawYearTick(){
   }
   return result;
 }
+// DETENTION (Phase 5 slice 4): arbitrary Bureau detention decided
+// deterministically from the live regime posture + the subject's standing,
+// expressed on S.detainedUntil / S.freedom. Annual state + pipeline is the
+// deliverable; outcomes are a pure function of posture so they are
+// deterministic and testable without Math.random.
+function runDetentionYearTick(){
+  if(typeof DetentionSystem!=='object'||!DetentionSystem||typeof World==='undefined'||!World||!S) return null;
+  const result=DetentionSystem.tickWorld(World,{year:World.year,subject:S});
+  if(result&&result.applied&&Array.isArray(result.chips)&&result.chips.length){
+    logChips('The Bureau made its annual reckoning.',result.chips,'crisis','BUREAU DETENTION · YEAR '+S.age);
+  }
+  return result;
+}
 const VN_SPEAKER_CLASS={narrator:'vn-narr',you:'vn-you'};
 /* Illustrated backdrops: one small SVG scene per setting, animated in CSS. */
 function vnBackdropArt(key){
@@ -4063,6 +4077,7 @@ function advanceYear(suppressBurst,quiet){
   // sim, state care, and story have run, and expressed on the subject's file.
   runGovernmentYearTick();
   runLawYearTick();
+  runDetentionYearTick();
   if(S.alive) checkMortality();
   if(S.alive){ S.hapSum+=S.happiness; S.hapYears++; S.peakHap=Math.max(S.peakHap,S.happiness); }
   pushSparkPoint();

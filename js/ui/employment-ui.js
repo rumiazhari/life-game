@@ -330,7 +330,6 @@
   const LAW_STAGE_LABELS={reported:'Reported',investigation:'Under investigation',charged:'Charged',hearing:'Awaiting hearing',verdict:'Verdict delivered',sentence:'Sentenced',closed:'Closed'};
   function bureauInquiriesPanel(world,options){
     options=options||{};
-    const S=(typeof root.S==='object'&&root.S)?root.S:null;
     const law=system('LawSystem');
     if(!law||typeof law.forPerson!=='function'||!world||typeof world!=='object'){
       return unavailablePanel(options.unavailableText||'The Bureau keeps no ledger here yet.');
@@ -353,6 +352,44 @@
     }).join('');
     return '<div class="bureau-panel"><div class="sec-h">BUREAU INQUIRIES <span>FORM L-7</span></div>'+
       '<div class="bureau-sub">'+open.length+' open of '+cases.length+' filed</div>'+rows+'</div>';
+  }
+
+  /* Detention panel (Phase 5 slice 4): the player-facing surface for the
+   * Bureau's arbitrary detention mechanic. Read-only readout of the
+   * authoritative World.detentions for the subject — whether they are
+   * currently held, for how long, and the running tally of detentions filed.
+   * Never mutates World or S; degrades gracefully when DetentionSystem is
+   * absent. */
+  function detentionPanel(world,options){
+    options=options||{};
+    const detention=system('DetentionSystem');
+    if(!detention||typeof detention.forPerson!=='function'||!world||typeof world!=='object'){
+      return unavailablePanel(options.unavailableText||'The holding cells have no ledger here yet.');
+    }
+    const personId=(options.personId==='subject')?'subject':(options.personId||'subject');
+    const cases=detention.forPerson(world,personId);
+    const held=cases.filter(c=>c.stage==='held');
+    const heldNow=held.find(c=>{
+      const opened=c.openedYear!=null?c.openedYear:0;
+      const until=opened+(c.term||1);
+      const year=(typeof root.World==='object'&&root.World&&Number.isFinite(Number(root.World.year)))?root.World.year:0;
+      return year<=until;
+    })||null;
+    const sorted=cases.slice().sort((a,b)=>(b.lastStageYear||b.openedYear||0)-(a.lastStageYear||a.openedYear||0));
+    const rows=sorted.map(c=>{
+      const tone=c.stage==='held'?' detention-row-held':' detention-row-released';
+      const statusTxt=c.stage==='held'
+        ?('Held · '+(c.term||1)+'y of '+(c.openedYear!=null?c.openedYear:'?'))
+        :('Released '+(c.releasedYear!=null?c.releasedYear:'?'));
+      return '<div class=\"detention-row'+tone+'\"><span class=\"detention-row-cat\">'+esc(c.reason||'administrative')+'</span>'+
+        '<span class=\"detention-row-status\">'+esc(statusTxt)+'</span>'+
+        '<span class=\"detention-row-year\">'+(c.openedYear!=null?c.openedYear:'?')+'</span></div>';
+    }).join('');
+    const head=heldNow
+      ?'<div class=\"detention-sub detention-sub-held\">HELD BY THE BUREAU · '+(heldNow.term||1)+' year(s) from '+esc(heldNow.openedYear!=null?heldNow.openedYear:'?')+'</div>'
+      :'<div class=\"detention-sub\">Not currently held</div>';
+    return '<div class=\"detention-panel\"><div class=\"sec-h\">BUREAU DETENTION <span>FORM D-1</span></div>'+
+      head+(rows?'<div class=\"detention-rows\">'+rows+'</div>':'<div class=\"employer-empty\">The Bureau has never taken the subject into custody.</div>')+'</div>';
   }
 
   function regimePanel(world,options){
@@ -406,5 +443,5 @@
     return html;
   }
 
-  root.EmploymentUI={esc,money,personName,settlementName,statusLabel,businessPanel,contractHistoryView,ownershipPanel,workplacePanel,bureauInquiriesPanel,regimePanel};
+  root.EmploymentUI={esc,money,personName,settlementName,statusLabel,businessPanel,contractHistoryView,ownershipPanel,workplacePanel,bureauInquiriesPanel,detentionPanel,regimePanel};
 })(typeof globalThis!=='undefined'?globalThis:this);

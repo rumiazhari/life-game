@@ -1,9 +1,9 @@
 # AUTOPILOT STATE — Life Game
 
 **STATUS:** OK  
-**Current phase:** Phase 5 — Government / law / politics (slice 3 landed; readout + law registry complete)  
-**Last verified:** 2026-08-26 (iter 13)  
-**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 17+ ahead — iters 1–13 not yet pushed) 
+**Current phase:** Phase 5 — Government / law / politics (slice 4 landed: arbitrary Bureau detention mechanic) 
+**Last verified:** 2026-08-26 (iter 14)  
+**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 18+ ahead — iters 1–14 not yet pushed) 
 
 ## Backlog (top-down, roadmap order)
 
@@ -22,11 +22,12 @@
    - ✅ Ownership decision actions `foundBusiness` / `shutDownBusiness` (iter 5)  
    - Legacy `rollJobVacancies()` retained as the single sanctioned projection-refresh point; flat `INC[]` fallback-only. Phase 4C completion criteria locked via `tests/phase4c-invariants.test.js` (iter 8).  
 
-3. **Phase 5 — Government / law / politics** ✅▶️ *(slice 1–3 landed; detention/permit mechanic remains)*  
+3. **Phase 5 — Government / law / politics** ✅▶️ *(slice 3 landed; slice 4 detention mechanic lands below)*  
    - ✅ `js/systems/government-system.js` — authoritative `World.government` (regime posture: legitimacy / propaganda / surveillancePosture / scrutinyPressure), deterministic annual tick via `streamFor`, idempotent + stale-year rejection, bounded history, invariants, `WorldSimulation.migrate` hook, `advanceYear` wiring.  
    - ✅ `js/ui/employment-ui.js` `regimePanel` (posture bars + YOUR FILE + posture history + BUREAU ATTENTION threat line), iters 10–12.  
    - ✅ **Slice 3 (iter 13):** `js/systems/law-system.js` — authoritative `World.legalCases` (stable `legal-case:NNNNN` IDs), deterministic annual stage-advance + posture-driven verdict wired into `WorldSimulation.migrate` + `advanceYear` (`runLawYearTick`); `bribeBureau` decision (refusal opens a real inquiry) + `bureauInquiriesPanel` readout.  
-   - ⏳ Detention / permit / queue as deeper player-facing mechanics; narrative chains (Phase 7) wired to regime posture.  
+   - ✅ **Slice 4 (iter 14):** `js/systems/detention-system.js` — authoritative `World.detentions` (stable `detention:NNNNN` IDs, one open case per person), deterministic annual intake (pure function of `GovernmentSystem.summary` posture + the subject's `S.scrutiny`/`S.bureauFavor`, via `WorldSimulation.streamFor`) + automatic release after `term` years restoring a sliver of `S.freedom`. Wired into `WorldSimulation.migrate` + `advanceYear` (`runDetentionYearTick`); `detentionPanel` readout in `EmploymentUI`. Mutates only `World.detentions` + `S.detainedUntil`/`S.freedom` (no second authority).
+   - ⏳ Permit / queue as deeper player-facing mechanics; narrative chains (Phase 7) wired to regime posture.  
 
 4. **Phase 6 — Advanced health / reproduction** *(future)*  
    - `js/systems/pregnancy-system.js`  
@@ -371,3 +372,9 @@ them toward this):
   diagnostic:world` + `npm run diagnostic:npcs` clean — `invariantFailures: []`,
   `medicalInvariantFailures: 0`. No World/S schema change beyond adding
   `World.legalCases` / `World.legalCaseCounter` / `World.legalCaseSchemaVersion`.
+
+### Done in iter 14 (2026-08-26) — Phase 5 slice 4: arbitrary Bureau detention mechanic
+- OPENED **Phase 5 slice 4** — the smallest real player-facing authoritarian-cruelty mechanic the prior posture slices (10–13) set up. Per the ⭐ USER DIRECTIVE this grows FROM the existing sim: detention intake is a pure function of the live `GovernmentSystem` posture summary + the subject's `S.scrutiny`/`S.bureauFavor`, via `WorldSimulation.streamFor` — never `Math.random`.
+- NEW `js/systems/detention-system.js` (`DetentionSystem`) — authoritative `World.detentions` with stable `detention:NNNNN` IDs, deterministic annual intake + automatic release after `term` years restoring a sliver of `S.freedom`. Wired into `WorldSimulation.migrate` + `advanceYear` (`runDetentionYearTick`); `EmploymentUI.detentionPanel` readout + additive CSS. Mutates only `World.detentions` + `S.detainedUntil`/`S.freedom` (no second authority).
+- NEW `tests/detention-system.test.js` (8 tests): ensure/repair, migrate wiring, stable-id + duplicate guard, intake-probability posture/stigma/favor ordering, intake-on-`S` expression, held→released across term, same-year idempotency + stale-year rejection, UI panel reads authoritative ledger + degrades without the system. All drive the live system; none fabricate state.
+- Full suite: **917/917 pass** (was 909; +8 new). Verified gate: `npm run diagnostic:world` + `npm run diagnostic:npcs` clean — `invariantFailures: []`, `medicalInvariantFailures: 0`. `S.detainedUntil:0` added to subject defaults in `js/state.js` (schema-additive, backward compatible).

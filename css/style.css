@@ -1419,3 +1419,14 @@ body{background:var(--olive);color:var(--ink)}
   .bureau-row-guilty .bureau-row-stage{color:#a02a1c;font-weight:700}
   .bureau-row-cleared .bureau-row-stage{color:#2f7d4f}
   .bureau-row-closed .bureau-row-cat,.bureau-row-closed .bureau-row-stage{color:#9a8c7a}
+  .detention-panel{margin:6px 6px 4px;border:1px solid #c9a3a0;border-radius:4px;background:#f8efec;font-size:9px;padding:5px 6px}
+  .detention-sub{font-size:8px;letter-spacing:.08em;color:#6d4a20;margin:2px 0 4px}
+  .detention-sub-held{color:#a02a1c;font-weight:700}
+  .detention-rows{display:flex;flex-direction:column;gap:1px}
+  .detention-row{display:flex;align-items:center;gap:6px;padding:2px 0;border-top:1px dashed #e6d6d2}
+  .detention-row:first-of-type{border-top:none}
+  .detention-row-cat{font-weight:700;color:#3a2c1e;flex:0 0 auto;text-transform:capitalize}
+  .detention-row-status{flex:1 1 auto;color:#5a4632}
+  .detention-row-year{flex:0 0 auto;color:#8a6a45}
+  .detention-row-held .detention-row-status{color:#a02a1c;font-weight:700}
+  .detention-row-released .detention-row-cat,.detention-row-released .detention-row-status{color:#9a8c7a}
