@@ -7,12 +7,12 @@
 
 ## Backlog (top-down, roadmap order)
 
-1. **4C-7 — Ownership and entrepreneurship**  
-   - Extend `BusinessRecord` with ownerNpcId population logic  
-   - Implement business startup / share allocation API (`ensure/create` for new businesses with owners)  
-   - Add dividend / profit-distribution flow wired into `tickWorld`  
-   - Persistence + migration for owner fields (idempotent repair)  
-   - Focused tests: business creation, dividend flow, owner migration  
+1. **4C-7 — Ownership and entrepreneurship** ✅ COMPLETE  
+   - ✅ Extend `BusinessRecord` with ownerNpcId population logic  
+   - ✅ Implement business startup / share allocation API (`ensure/create` for new businesses with owners)  
+   - ✅ Add dividend / profit-distribution flow wired into `tickWorld`  
+   - ✅ Persistence + migration for owner fields (idempotent repair)  
+   - ✅ Focused tests: business creation, dividend flow, owner migration (4 new tests, 870 total pass)  
 
 2. **4C-8 — Employer UI**  
    - Add `js/ui/employment-ui.js` business panel (status, finances summary, employee list)  
@@ -31,15 +31,21 @@
 5. **Phase 12 — Saves / release** *(future)*  
    - Save / load system for `World` / `Business` / `EmploymentContract` state  
 
-## Active development: 4C-7 Ownership/Entrepreneurship
+## Active development: 4C-7 Ownership/Entrepreneurship — COMPLETE
 
-**Progress:** 2 of 3 sub-goals complete.
+All three sub-goals implemented and verified:
 
-- ✅ **ownerNpcId auto-assignment**: `BusinessSystem.create` now auto-assigns the first alive non-subject NPC at the settlement as owner when no explicit `ownerNpcId` is provided. Migration preserves ownerNpcId as-is.
-- ✅ **Dividend flow**: `tickWorld` now distributes 10-20% of business profit to the owner NPC deterministically via `WorldSimulation.streamFor(world, year, business.id, 'business-dividend')`. Dividend subtracted from business profit, added to owner NPC `employment.income`. History recorded.
-- **Remaining:** Implement business startup / share allocation API — explicit ownerNpcId override in `BusinessSystem.create` and share tracking schema extension.
+1. **ownerNpcId auto-assignment**: `BusinessSystem.create` now auto-assigns the first alive non-subject NPC at the settlement as owner when no explicit `ownerNpcId` is provided. Migration preserves ownerNpcId as-is.
 
-**Recent progress:** 4C-6 workplace life is already built (commits 8266247, 2b308e8). No `Math.random` usage in replayable annual-simulation systems (verified: `WorldSimulation.streamFor` used exclusively for seeded streams). `npm test` baseline: 866/866 pass, 0 fail.
+2. **Dividend flow**: `tickWorld` distributes 10-20% of business profit to the owner NPC deterministically via `WorldSimulation.streamFor(world, year, business.id, 'business-dividend')`. Dividend subtracted from business profit, added to owner NPC `employment.income`. History recorded with `{type:'dividend', year, amount, recipient}`.
+
+3. **Explicit owner override**: `BusinessSystem.create` accepts `ownerNpcId` spec parameter; when provided, it is used instead of auto-assignment.
+
+Tests: `tests/business-system-ownership.test.js` (4 tests, all passing). Full suite: 870/870 pass, 0 fail.
+
+## Next iteration target: 4C-8 Employer UI
+
+Build `js/ui/employment-ui.js` to surface business status, finances summary, and employee list to the player. Must read from `BusinessSystem` and `EmploymentSystem` APIs only — no legacy state duplication.
 
 ## Lock
 
