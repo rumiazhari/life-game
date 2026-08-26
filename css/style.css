@@ -1400,3 +1400,11 @@ body{background:var(--olive);color:var(--ink)}
   .regime-hist-row{font-size:9px;margin:2px 0;display:flex;gap:6px;line-height:1.35}
   .regime-hist-year{width:34px;flex:none;font-weight:700;color:#9c2a1c;font-variant-numeric:tabular-nums}
   .regime-hist-note{color:#6d4a20}
+  .regime-threat{display:flex;align-items:center;gap:8px;margin:6px 6px 4px;padding:5px 6px;border:1px solid #cdb6a8;border-radius:4px;background:#f3ece4;font-size:9px}
+  .regime-threat-lab{font-weight:700;letter-spacing:.12em;color:#9c2a1c}
+  .regime-threat-val{color:#6d4a20}
+  .regime-threat.regime-threat-mid{border-color:#c99a3a;background:#fbf1e0}
+  .regime-threat.regime-threat-mid .regime-threat-val{color:#9a6a14}
+  .regime-threat.regime-threat-high{border-color:#b8503e;background:#f6e2dc}
+  .regime-threat.regime-threat-high .regime-threat-lab{color:#b8503e}
+  .regime-threat.regime-threat-high .regime-threat-val{color:#a02a1c;font-weight:700}

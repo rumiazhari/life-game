@@ -1,9 +1,9 @@
 # AUTOPILOT STATE — Life Game
 
 **STATUS:** OK  
-**Current phase:** Phase 5 — Government / law / politics (slice 2 landed, history readout added)  
-**Last verified:** 2026-08-26 (iter 11)  
-**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 15+ ahead — iters 1–11 not yet pushed) 
+**Current phase:** Phase 5 — Government / law / politics (slice 2 + player-facing readout complete)  
+**Last verified:** 2026-08-26 (iter 12)  
+**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 16+ ahead — iters 1–12 not yet pushed) 
 
 ## Backlog (top-down, roadmap order)
 
@@ -258,6 +258,22 @@ them toward this):
   `law-system.js` stub + Bureau detention / permit / queue decisions wired
   through `GovernmentSystem`'s posture (scrutinyPressure, surveillancePosture).
   Keep deterministic + migration + focused tests + full-suite green.
+
+### Done in iter 12 (2026-08-26) — Phase 5 slice 2: Bureau-attention threat line
+- ADDED a derived "BUREAU ATTENTION" threat line to `EmploymentUI.regimePanel`:
+  a pure, deterministic function of the slice-1 posture
+  (`0.55*surveillancePosture + 0.45*scrutinyPressure`) that expresses the
+  authoritarian-cruelty theme as risk the player can read at a glance — LOW /
+  ELEVATED / HIGH, each with a distinct tone class. No World/S mutation; reads
+  only authoritative posture. First step toward slice 3's mechanic surface
+  (the threat line is exactly what a future Bureau-detention decision would
+  consult).
+- Added additive CSS (`.regime-threat` + mid/high tones) in `css/style.css`.
+- NEW focused test in `tests/employment-ui.test.js` (+1): high/low posture →
+  HIGH/LOW label + correct tone class. Focused file: 13/13. Full suite:
+  **900/900 pass** (was 899; +1).
+- Verified gate: `npm run diagnostic:world` + `npm run diagnostic:npcs` clean
+  (`invariantFailures: []`, `medicalInvariantFailures: 0`).
 
 ### Done in iter 11 (2026-08-26) — Phase 5 slice 2 addendum: posture-history readout
 - EXTENDED `EmploymentUI.regimePanel` with a "POSTURE HISTORY" section that

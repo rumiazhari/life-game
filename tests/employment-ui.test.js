@@ -236,6 +236,32 @@ test('employment-ui: regimePanel shows only posture (no file) when S is absent, 
   assert.match(panel,/REGIME OFFLINE/,'reports unavailability without throwing when GovernmentSystem is absent');
 });
 
+test('employment-ui: regimePanel renders a derived Bureau-attention threat line from the posture',()=>{
+  const context=seededWorld(contextWithUi(['js/systems/government-system.js']));
+  expose(context,`
+    World.npcs['subject']={npcId:'subject',isSubject:true,alive:true};
+    GovernmentSystem.ensure(World);
+    World.government.surveillancePosture=0.80;
+    World.government.scrutinyPressure=0.70;
+    S={scrutiny:20,freedom:80};
+  `);
+  const high=runRaw(context,"return EmploymentUI.regimePanel(World);");
+  assert.match(high,/BUREAU ATTENTION/,'threat line renders');
+  assert.match(high,/HIGH — the Bureau is watching/,'high threat label when surveillance+pressure are high');
+  assert.match(high,/regime-threat-high/,'high tone class applied');
+
+  const lowContext=seededWorld(contextWithUi(['js/systems/government-system.js']));
+  expose(lowContext,`
+    World.npcs['subject']={npcId:'subject',isSubject:true,alive:true};
+    GovernmentSystem.ensure(World);
+    World.government.surveillancePosture=0.10;
+    World.government.scrutinyPressure=0.10;
+    S={scrutiny:5,freedom:95};
+  `);
+  const low=runRaw(lowContext,"return EmploymentUI.regimePanel(World);");
+  assert.match(low,/LOW — routine oversight/,'low threat label when posture is calm');
+  assert.match(low,/regime-threat-low/,'low tone class applied');
+});
 test('employment-ui: regimePanel renders the bounded posture-history readout from World.government.history',()=>{
   const context=seededWorld(contextWithUi(['js/systems/government-system.js']));
   expose(context,`

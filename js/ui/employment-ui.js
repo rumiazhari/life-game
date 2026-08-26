@@ -362,6 +362,14 @@
       ).join('');
       html+='<div class="regime-history"><div class="ps-catlab">POSTURE HISTORY <span>'+entries.length+'</span></div>'+rows+'</div>';
     }
+    // Derived threat assessment: how likely the Bureau is to take notice of
+    // the subject this year. Pure function of the authoritative posture; the
+    // player-facing expression of slice-1's surveillance + scrutiny pressure.
+    const threat=clamp01(0.55*summary.surveillancePosture+0.45*summary.scrutinyPressure);
+    const threatLabel=threat>=0.66?'HIGH — the Bureau is watching':threat>=0.33?'ELEVATED — files are being cross-checked':'LOW — routine oversight';
+    const threatTone=threat>=0.66?' regime-threat-high':threat>=0.33?' regime-threat-mid':' regime-threat-low';
+    html+='<div class="regime-threat'+threatTone+'"><span class="regime-threat-lab">BUREAU ATTENTION</span>'+
+      '<span class="regime-threat-val">'+esc(threatLabel)+'</span></div>';
     html+='</div>';
     return html;
   }
