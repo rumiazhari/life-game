@@ -762,6 +762,7 @@ function renderStats(changed){
     let html='';
     const contract=(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof EmploymentSystem.activeForPerson==='function')?EmploymentSystem.activeForPerson(World,'subject')[0]:null;
     if(contract&&typeof EmploymentUI.businessPanel==='function')html+=EmploymentUI.businessPanel(World,contract.businessId);
+    if(typeof EmploymentUI.workplacePanel==='function')html+=EmploymentUI.workplacePanel(World,'subject');
     if(typeof EmploymentUI.ownershipPanel==='function')html+=EmploymentUI.ownershipPanel(World,'subject');
     return html;
   }

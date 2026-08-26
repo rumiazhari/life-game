@@ -135,3 +135,58 @@ test('employment-ui: ownershipPanel degrades gracefully when BusinessSystem is a
   const panel=runRaw(context,"return EmploymentUI.ownershipPanel(World,'subject',{unavailableText:'OWNERSHIP OFFLINE'});");
   assert.match(panel,/OWNERSHIP OFFLINE/,'reports unavailability without throwing');
 });
+
+test('employment-ui: workplacePanel renders well-being, colleagues and record from live systems and never mutates World',()=>{
+  const context=seededWorld(contextWithUi(['js/systems/workplace-system.js','js/systems/relationship-memory.js']));
+  expose(context,`
+    World.npcs['subject']={npcId:'subject',isSubject:true,alive:true};
+    World.relationshipMemories={};
+    World.relationshipMemoryCounter=0;
+    World.relationshipMemorySchemaVersion=1;
+    // Give the player an active contract at the seeded business.
+    globalThis.PC=EmploymentSystem.hire(World,{personId:'subject',businessId:Business.id,occupationName:'Foreman',annualSalary:900,jobTier:3});
+    PC.workplace={stress:.62,highStressYears:0,lastTickYear:null,lastIncidentYear:null,strikes:1,incidents:[{year:1903,kind:'minor_injury'}],leaveKind:null,leaveStartedYear:null};
+    // A senior colleague (higher tier than the player) so the roster shows a
+    // supervisor; npc:00002 already holds ContractA at this business and so
+    // appears as a peer without being re-hired.
+    globalThis.Senior=EmploymentSystem.hire(World,{personId:'npc:00001',businessId:Business.id,occupationName:'Manager',annualSalary:1400,jobTier:4});
+    RelationshipMemory.add(World,{year:1902,type:'workplace_bond',participants:['subject','npc:00002'],intensity:.5,valence:.6,summary:'Shared shifts built trust with Tomas.',tags:['workplace']});
+  `);
+  const before=expose(context,'JSON.stringify(World)');
+  const html=runRaw(context,"return EmploymentUI.workplacePanel(World,'subject');");
+  const after=expose(context,'JSON.stringify(World)');
+  assert.equal(before,after,'rendering must not mutate World state');
+  assert.match(html,/Vell Freight Depot/,'workplace name resolves from the contract');
+  assert.match(html,/62% stress/,'stress percentage renders');
+  assert.match(html,/wp-stress-fill wp-stress-mid/,'mid stress uses the mid tone');
+  assert.match(html,/Misconduct strikes · 1 of 3/,'strike count renders');
+  assert.match(html,/1903 · Minor injury/,'safety incident renders');
+  assert.match(html,/COLLEAGUES <span>2<\//,'roster peer count reflects both co-workers (senior is also a peer in the roster list)');
+  assert.match(html,/Senior colleague/,'supervisor/senior colleague line renders');
+  assert.match(html,/Tomas Reeve/,'peer name renders');
+  assert.match(html,/Shared shifts built trust/,'workplace relationship memory renders');
+});
+
+test('employment-ui: workplacePanel shows leave status and degrades when there is no active workplace',()=>{
+  const context=seededWorld(contextWithUi(['js/systems/workplace-system.js','js/systems/relationship-memory.js']));
+  expose(context,`
+    World.npcs['subject']={npcId:'subject',isSubject:true,alive:true};
+    World.relationshipMemories={};
+    globalThis.LC=EmploymentSystem.hire(World,{personId:'subject',businessId:Business.id,occupationName:'Foreman',annualSalary:900,jobTier:3});
+    EmploymentSystem.beginLeave(World,LC.id,'burnout',1905,{subject:{npcId:'subject'}});
+    LC.workplace=LC.workplace||{}; LC.workplace.leaveKind='burnout'; LC.workplace.leaveStartedYear=1905;
+  `);
+  const onLeave=runRaw(context,"return EmploymentUI.workplacePanel(World,'subject');");
+  assert.match(onLeave,/Burnout leave/,'leave kind renders');
+  assert.match(onLeave,/On leave since 1905/,'leave start year renders');
+  const none=runRaw(context,"return EmploymentUI.workplacePanel(World,'npc:00001',{emptyText:'NO WORKPLACE'});");
+  assert.match(none,/NO WORKPLACE/,'person without an active contract gets the configured empty text');
+});
+
+test('employment-ui: workplacePanel degrades gracefully when EmploymentSystem is absent',()=>{
+  const context=createGameContext();
+  loadGameFiles(context,['js/ui/employment-ui.js']);
+  expose(context,'globalThis.World={year:1900,npcs:{},settlements:{}};');
+  const panel=runRaw(context,"return EmploymentUI.workplacePanel(World,'subject',{unavailableText:'WORKPLACE OFFLINE'});");
+  assert.match(panel,/WORKPLACE OFFLINE/,'reports unavailability without throwing');
+});

@@ -198,5 +198,115 @@
     return '<div class="ownership-panel"><div class="ps-catlab">BUSINESS OWNERSHIP <span>'+owned.length+'</span></div>'+rows+'</div>';
   }
 
-  root.EmploymentUI={esc,money,personName,settlementName,statusLabel,businessPanel,contractHistoryView,ownershipPanel};
+  /* Workplace-life panel for one person: stress, leave status, misconduct
+   * strikes and recent safety incidents from the contract's workplace record,
+   * plus the colleague roster from WorkplaceSystem and recent workplace-tagged
+   * relationship memories. Read-only like the rest of this module: it never
+   * mutates World or S, and it only touches RelationshipMemory when a store
+   * already exists (forPerson lazily creates one otherwise). */
+  const LEAVE_LABELS={burnout:'Burnout leave',medical:'Medical leave'};
+  const INCIDENT_LABELS={minor_injury:'Minor injury',serious_injury:'Serious injury',severe_injury:'Severe injury',strain:'Strain'};
+  function clamp01(value){
+    const n=Number(value);
+    if(!Number.isFinite(n)) return .25;
+    return Math.max(0,Math.min(1,n));
+  }
+  function peerTone(world,personId,peerId,year){
+    const relationshipMemory=system('RelationshipMemory');
+    if(!world.relationshipMemories||typeof world.relationshipMemories!=='object') return null;
+    if(!relationshipMemory||typeof relationshipMemory.modifier!=='function') return null;
+    const m=relationshipMemory.modifier(world,personId,peerId,year);
+    const score=(Number(m&&m.trust)||0)-(Number(m&&m.conflict)||0);
+    return score>6?'warm':score<-6?'strained':'cordial';
+  }
+  function workplaceMemories(world,personId){
+    const relationshipMemory=system('RelationshipMemory');
+    if(!world.relationshipMemories||typeof world.relationshipMemories!=='object') return [];
+    if(!relationshipMemory||typeof relationshipMemory.forPerson!=='function') return [];
+    return relationshipMemory.forPerson(world,personId)
+      .filter(memory=>memory&&!memory.expired&&Array.isArray(memory.tags)&&memory.tags.includes('workplace'))
+      .slice(0,3);
+  }
+  function workplacePanel(world,personId,options){
+    options=options||{};
+    const employmentSystem=system('EmploymentSystem');
+    if(!employmentSystem||typeof employmentSystem.activeForPerson!=='function'||!world||typeof world!=='object'){
+      return unavailablePanel(options.unavailableText);
+    }
+    const active=employmentSystem.activeForPerson(world,personId);
+    const contract=Array.isArray(active)?active[0]:null;
+    if(!contract){
+      return '<div class="workplace-panel workplace-panel-empty"><div class="employer-empty">'+
+        esc(options.emptyText||'No active workplace.')+'</div></div>';
+    }
+    const wp=contract.workplace&&typeof contract.workplace==='object'?contract.workplace:{};
+    const workplaceSystem=system('WorkplaceSystem');
+
+    let headHtml='<div class="employer-head"><b class="employer-name">';
+    const businessSystem=system('BusinessSystem');
+    const business=(businessSystem&&typeof businessSystem.get==='function')?businessSystem.get(world,contract.businessId):null;
+    headHtml+=esc(business?business.name:contract.businessId)+'</b>';
+    if(contract.status==='on_leave'){
+      headHtml+='<span class="employer-status employer-status-on_leave">'+esc(LEAVE_LABELS[wp.leaveKind]||'On leave')+'</span>';
+      const sinceYear=wp.leaveStartedYear!=null?' since '+esc(wp.leaveStartedYear):'';
+      headHtml+='</div><div class="employer-meta">On leave'+esc(sinceYear)+'</div>';
+    } else {
+      headHtml+='<span class="employer-status employer-status-active">At work</span></div>';
+    }
+
+    const stress=clamp01(wp.stress);
+    const pct=Math.round(stress*100);
+    const stressClass=stress>=.7?' wp-stress-high':stress>=.5?' wp-stress-mid':'';
+    const maxStrikes=employmentSystem.MAX_MISCONDUCT_STRIKES||3;
+    let wellbeingHtml='<div class="ps-catlab">WELL-BEING</div>'+
+      '<div class="wp-stress"><div class="wp-stress-track"><div class="wp-stress-fill'+stressClass+'" style="width:'+pct+'%"></div></div>'+
+      '<span class="wp-stress-num">'+pct+'% stress</span></div>'+
+      '<div class="wp-meta-row">Misconduct strikes · '+esc(wp.strikes||0)+' of '+esc(maxStrikes)+'</div>';
+    const incidents=(Array.isArray(wp.incidents)?wp.incidents:[]).slice(-3).reverse();
+    if(incidents.length){
+      wellbeingHtml+='<div class="wp-incidents">'+incidents.map(entry=>
+        '<div class="wp-incident-row">'+esc(entry&&entry.year!=null?entry.year:'?')+' · '+
+        esc(INCIDENT_LABELS[entry&&entry.kind]||capitalize(entry&&entry.kind)||'Incident')+'</div>'
+      ).join('')+'</div>';
+    } else {
+      wellbeingHtml+='<div class="wp-meta-row wp-meta-muted">No recorded accidents.</div>';
+    }
+    if(contract.status==='on_leave'&&wp.leaveKind==null){
+      wellbeingHtml+='<div class="wp-meta-row wp-meta-muted">Leave reason not recorded.</div>';
+    }
+
+    let rosterHtml='';
+    if(workplaceSystem&&typeof workplaceSystem.rosterFor==='function'){
+      const roster=workplaceSystem.rosterFor(world,contract.id);
+      const peers=Array.isArray(roster.coworkerContracts)?roster.coworkerContracts:[];
+      if(roster.supervisorPersonId||peers.length){
+        rosterHtml='<div class="ps-catlab">COLLEAGUES <span>'+peers.length+'</span></div>';
+        if(roster.supervisorPersonId&&roster.supervisorPersonId!==personId){
+          rosterHtml+='<div class="wp-peer-row wp-peer-supervisor"><b>'+esc(personName(world,roster.supervisorPersonId,options))+'</b>'+
+            '<span>Senior colleague</span></div>';
+        }
+        rosterHtml+=peers.map(peer=>{
+          if(!peer||peer.personId===personId) return '';
+          const tone=peerTone(world,personId,peer.personId,world.year);
+          return '<div class="wp-peer-row"><b>'+esc(personName(world,peer.personId,options))+'</b>'+
+            '<span>'+esc(peer.occupationName||'Worker')+' · tier '+esc(peer.jobTier)+
+            (tone?' · '+esc(tone):'')+'</span></div>';
+        }).join('');
+      }
+    }
+
+    const memories=workplaceMemories(world,personId);
+    let memoriesHtml='';
+    if(memories.length){
+      memoriesHtml='<div class="ps-catlab">WORKPLACE RECORD</div>'+memories.map(memory=>
+        '<div class="wp-memory-row'+(Number(memory.valence)<0?' wp-memory-bad':' wp-memory-good')+'">'+
+        esc(memory.year!=null?memory.year:'?')+' · '+esc(memory.summary||capitalize(String(memory.type||'').replace(/_/g,' ')))+
+        '</div>').join('');
+    }
+
+    return '<div class="workplace-panel" data-contract-id="'+esc(contract.id)+'">'+headHtml+
+      wellbeingHtml+rosterHtml+memoriesHtml+'</div>';
+  }
+
+  root.EmploymentUI={esc,money,personName,settlementName,statusLabel,businessPanel,contractHistoryView,ownershipPanel,workplacePanel};
 })(typeof globalThis!=='undefined'?globalThis:this);
