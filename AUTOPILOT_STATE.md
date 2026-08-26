@@ -1,8 +1,8 @@
 # AUTOPILOT STATE — Life Game
 
 **STATUS:** OK  
-**Current phase:** Phase 5 — Government / law / politics (slice 4 landed: arbitrary Bureau detention mechanic) 
-**Last verified:** 2026-08-26 (iter 14)  
+**Current phase:** Phase 5 — Government / law / politics (slice 5 landed: Bureau travel permit lengthens detention without a permit) 
+**Last verified:** 2026-08-26 (iter 15)  
 **origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 18+ ahead — iters 1–14 not yet pushed) 
 
 ## Backlog (top-down, roadmap order)
@@ -27,7 +27,8 @@
    - ✅ `js/ui/employment-ui.js` `regimePanel` (posture bars + YOUR FILE + posture history + BUREAU ATTENTION threat line), iters 10–12.  
    - ✅ **Slice 3 (iter 13):** `js/systems/law-system.js` — authoritative `World.legalCases` (stable `legal-case:NNNNN` IDs), deterministic annual stage-advance + posture-driven verdict wired into `WorldSimulation.migrate` + `advanceYear` (`runLawYearTick`); `bribeBureau` decision (refusal opens a real inquiry) + `bureauInquiriesPanel` readout.  
    - ✅ **Slice 4 (iter 14):** `js/systems/detention-system.js` — authoritative `World.detentions` (stable `detention:NNNNN` IDs, one open case per person), deterministic annual intake (pure function of `GovernmentSystem.summary` posture + the subject's `S.scrutiny`/`S.bureauFavor`, via `WorldSimulation.streamFor`) + automatic release after `term` years restoring a sliver of `S.freedom`. Wired into `WorldSimulation.migrate` + `advanceYear` (`runDetentionYearTick`); `detentionPanel` readout in `EmploymentUI`. Mutates only `World.detentions` + `S.detainedUntil`/`S.freedom` (no second authority).
-   - ⏳ Permit / queue as deeper player-facing mechanics; narrative chains (Phase 7) wired to regime posture.  
+  - ✅ **Slice 5 (iter 15):** Bureau travel permit (`bureauPermit` decision — renewal extends bounded `S.permitUntil`; DetentionSystem intake records `subjectHasPermit` and lengthens the term by exactly one year when absent) + `detentionPanel` permit line. 920/920 pass; diagnostics clean.
+  - ⏳ Queue as a deeper player-facing mechanic; narrative chains (Phase 7) wired to regime posture.
 
 4. **Phase 6 — Advanced health / reproduction** *(future)*  
    - `js/systems/pregnancy-system.js`  
@@ -377,4 +378,16 @@ them toward this):
 - OPENED **Phase 5 slice 4** — the smallest real player-facing authoritarian-cruelty mechanic the prior posture slices (10–13) set up. Per the ⭐ USER DIRECTIVE this grows FROM the existing sim: detention intake is a pure function of the live `GovernmentSystem` posture summary + the subject's `S.scrutiny`/`S.bureauFavor`, via `WorldSimulation.streamFor` — never `Math.random`.
 - NEW `js/systems/detention-system.js` (`DetentionSystem`) — authoritative `World.detentions` with stable `detention:NNNNN` IDs, deterministic annual intake + automatic release after `term` years restoring a sliver of `S.freedom`. Wired into `WorldSimulation.migrate` + `advanceYear` (`runDetentionYearTick`); `EmploymentUI.detentionPanel` readout + additive CSS. Mutates only `World.detentions` + `S.detainedUntil`/`S.freedom` (no second authority).
 - NEW `tests/detention-system.test.js` (8 tests): ensure/repair, migrate wiring, stable-id + duplicate guard, intake-probability posture/stigma/favor ordering, intake-on-`S` expression, held→released across term, same-year idempotency + stale-year rejection, UI panel reads authoritative ledger + degrades without the system. All drive the live system; none fabricate state.
-- Full suite: **917/917 pass** (was 909; +8 new). Verified gate: `npm run diagnostic:world` + `npm run diagnostic:npcs` clean — `invariantFailures: []`, `medicalInvariantFailures: 0`. `S.detainedUntil:0` added to subject defaults in `js/state.js` (schema-additive, backward compatible).
+- Full suite: **917/917 pass** (was 909; +8 new). Verified gate: `npm run diagnostic:world` + `npm run diagnostic:npcs` clean — `invariantFailures: []`, `medicalInvariantFailures: 0`. `S.detainedUntil:0` added to subject defaults in `js/state.js` (schema-additive, backward compatible); `S.permitUntil:0` likewise added.
+
+### Done in iter 15 (2026-08-26) — Phase 5 slice 5: Bureau travel permit
+- Landed the crashed-run WIP (`bureauPermit` was half-written in `js/data.js` with a duplicate-key bug — `text` twice, no `reason`; `DetentionSystem.open` ignored `subjectHasPermit`; `ensure()` would drop it). Completed it as a real, verifiable mechanic rather than committing the broken stub:
+  - **`js/data.js` `bureauPermit` decision:** fixed `{fx,text,reason:'permit_renewed'}` (was `{fx,text,text:'permit_renewed'}`); renewal now `Math.max(before,World.year)+1` — extends from current expiry when valid, one year from now when lapsed; −$100 / +happiness, gated age≥18 & assets≥$100.
+  - **`js/systems/detention-system.js`:** `open()` records `subjectHasPermit: boolean|null` (default null) + a ledger note naming a missing permit; the annual intake in `tickWorld` is a pure function of `(World.government posture, S.scrutiny, S.bureauFavor, S.permitUntil)` via `streamFor` — no permit ⇒ base term +1 year (freedom −4·term already scales); `ensure()` preserves the flag through repair; `checkInvariants` validates it; migration is byte-for-byte idempotent.
+  - **`js/ui/employment-ui.js` `detentionPanel`:** shows "No Bureau permit was on file — the term was lengthened." on held records lacking the permit.
+  - Cache-busters bumped in `life-game.html` for `data.js`/`state.js`/`detention-system.js`/`employment-ui.js`.
+- NEW `tests/bureau-permit.test.js` (3 tests): renewal math from lapsed & valid states; deterministic intake-term-lengthening (same seed ⇒ identical intakes, unpermitted term = permitted term + 1, ledger note, invariants clean); migration preservation + malformed-flag repair + idempotency + legacy back-fill.
+- Full suite: **920/920 pass** (was 917; +3). `npm run diagnostic:world` + `npm run diagnostic:npcs` clean — `invariantFailures: []`, `medicalInvariantFailures: 0`. No `Math.random`; no second authority; `S.permitUntil` is a bounded compatibility field sourced only here.
+
+## Next iteration target — Phase 5 slice 6 (queue mechanic)
+- The ⭐ USER DIRECTIVE asks for permits/queues. Permit lands; next is the **queue as a deeper mechanic**: a deterministic wait/time-cost for Bureau services keyed off regime posture + `S.scrutiny` (higher scrutiny ⇒ longer waits ⇒ opportunity cost), resolved through `WorldSimulation.streamFor`. Smallest verifiable slice: a `permitDelay`/`queueRisk` estimate surfaced on the `bureauPermit` decision note + a posture-driven time cost on a new Bureau-service decision, with one focused test before full-suite green.

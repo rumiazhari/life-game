@@ -386,7 +386,8 @@
         '<span class=\"detention-row-year\">'+(c.openedYear!=null?c.openedYear:'?')+'</span></div>';
     }).join('');
     const head=heldNow
-      ?'<div class=\"detention-sub detention-sub-held\">HELD BY THE BUREAU · '+(heldNow.term||1)+' year(s) from '+esc(heldNow.openedYear!=null?heldNow.openedYear:'?')+'</div>'
+      ?'<div class=\"detention-sub detention-sub-held\">HELD BY THE BUREAU · '+(heldNow.term||1)+' year(s) from '+esc(heldNow.openedYear!=null?heldNow.openedYear:'?')+'</div>'+
+       (heldNow.subjectHasPermit===false?'<div class=\"detention-sub detention-sub-held\">No Bureau permit was on file — the term was lengthened.</div>':'')
       :'<div class=\"detention-sub\">Not currently held</div>';
     return '<div class=\"detention-panel\"><div class=\"sec-h\">BUREAU DETENTION <span>FORM D-1</span></div>'+
       head+(rows?'<div class=\"detention-rows\">'+rows+'</div>':'<div class=\"employer-empty\">The Bureau has never taken the subject into custody.</div>')+'</div>';

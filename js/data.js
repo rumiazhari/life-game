@@ -1388,6 +1388,17 @@ const DECISIONS=[
            }
            if(typeof updatePersonalStanding==='function') updatePersonalStanding();
            return{fx:{happiness:-4,assets:-250},text:'Subject tried to buy a quieter file. The clerk did not blink — only wrote something down. A new inquiry now bears the subject’s name.',reason:'bribe_refused_inquiry_opened'}}},
+           {id:'bureauPermit',cost:1,cat:'personal',avail:s=>s.age>=18&&s.assets>=100,
+           note:()=>S.permitUntil&&S.permitUntil>=World.year?'-PERMIT valid · renewal extends coverage':'renew the Bureau travel permit · −$100 · extends permit by 1 year · lacking one lengthens any detention',
+           apply:()=>{if(typeof World==='undefined'||!World)return{fx:{},text:'Subject sought a permit stamp, but the ledger was nowhere to be found.',reason:'no_registry'};
+            const before=Number.isFinite(Number(S.permitUntil))?Number(S.permitUntil):0;
+            const renewed=Math.max(before,World.year)+1;
+            S.permitUntil=renewed;
+            if(typeof updatePersonalStanding==='function') updatePersonalStanding();
+            const text=before>=World.year
+              ?('Subject slid the renewal slip across the desk. The clerk clipped a fresh stamp into the passport — coverage extended through '+renewed+'.')
+              :('Subject paid for the red stamp. For a year the road is open: permit good through '+renewed+'.');
+            return{fx:{assets:-100,happiness:1},text:text,reason:'permit_renewed'}}},
            ];
 
 /* ================= HOTSPOT SHORTCUTS (dossier field → Plan the Year actions) ================= */

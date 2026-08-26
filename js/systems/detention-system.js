@@ -98,6 +98,7 @@
         openedYear:boundedYearOrNull(rec.openedYear),
         releasedYear:boundedYearOrNull(rec.releasedYear),
         term:Math.max(1,Math.round(finite(rec.term,1))),
+        subjectHasPermit:typeof rec.subjectHasPermit==='boolean'?rec.subjectHasPermit:null,
         stage,
         history:Array.isArray(rec.history)?rec.history.slice(-HISTORY_LIMIT):[]
       };
@@ -121,8 +122,9 @@
     world.detentionCounter=(world.detentionCounter||0)+1;
     const id='detention:'+String(world.detentionCounter).padStart(5,'0');
     const rec={id,personId,reason:typeof spec.reason==='string'&&spec.reason?spec.reason:'administrative',
-      openedYear:year,releasedYear:null,term,stage:HELD,
-      history:[{year,type:'detained',note:'Administrative detention: '+(spec.reason||'administrative')}]};
+      openedYear:year,releasedYear:null,term,
+      subjectHasPermit:typeof spec.subjectHasPermit==='boolean'?spec.subjectHasPermit:null,stage:HELD,
+      history:[{year,type:'detained',note:'Administrative detention: '+(spec.reason||'administrative')+(spec.subjectHasPermit===false?' · no permit on file · term extended':'')}]};
     world.detentions[id]=rec;
     return rec;
   }
@@ -193,8 +195,11 @@
         const p=intakeProbability(posture,S);
         const rng=stream(world,year,'intake');
         if(rng.chance(p)){
-          const term=1+Math.floor(rng.range(0,2)); // 1 or 2 years
-          const rec=open(world,{personId:'subject',reason:'administrative',openedYear:year,term});
+          let term=1+Math.floor(rng.range(0,2)); // base: 1 or 2 years
+          const permitUntil=Number.isFinite(Number(S.permitUntil))?Number(S.permitUntil):0;
+          const hasPermit=permitUntil>=year;
+          if(!hasPermit) term+=1; // travelling without the Bureau's stamp lengthens any detention
+          const rec=open(world,{personId:'subject',reason:'administrative',openedYear:year,term,subjectHasPermit:hasPermit});
           // Express the detention on the subject's legacy file (bounded).
           S.detainedUntil=year+term;
           const freedom=Number.isFinite(Number(S.freedom))?Number(S.freedom):0;
@@ -231,6 +236,7 @@
       if(rec.personId==null) issues.push('detention.personId missing: '+rec.id);
       if(!Number.isFinite(Number(rec.term))||rec.term<1) issues.push('detention.term invalid: '+rec.id);
       if(rec.stage===RELEASED&&rec.releasedYear==null) issues.push('detention.releasedYear missing: '+rec.id);
+      if(rec.subjectHasPermit!=null&&typeof rec.subjectHasPermit!=='boolean') issues.push('detention.subjectHasPermit invalid: '+rec.id);
       if(!Array.isArray(rec.history)) issues.push('detention.history must be array: '+rec.id);
       else if(rec.history.length>HISTORY_LIMIT) issues.push('detention.history exceeds bound: '+rec.id);
     });
