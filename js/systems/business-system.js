@@ -610,29 +610,46 @@
   }
 
   function tickWorld(world,options){
-    ensure(world);
-    const defs=root.WorldSimulation&&typeof root.WorldSimulation.definitions==='function'?root.WorldSimulation.definitions(world):[];
-    migrate(world,defs);
-    const opts=options||{};
-    if(root.EmploymentSystem&&typeof root.EmploymentSystem.migrate==='function') root.EmploymentSystem.migrate(world,{subject:opts.subject});
-    const year=boundedYear(opts.year,world.year);
-    const list=all(world).slice().sort((a,b)=>String(a.id).localeCompare(String(b.id)));
-    const totals={year,applied:0,skipped:0,closed:0,revenue:0,expenses:0,payroll:0,profit:0};
-    list.forEach(business=>{
-      const before=business.status;
-      const result=tickBusiness(world,business,{year});
-      if(result.applied){
-        totals.applied++;
-        totals.revenue+=business.finances.revenue;
-        totals.expenses+=business.finances.expenses;
-        totals.payroll+=business.finances.payroll;
-        totals.profit+=business.finances.profit;
-        if(business.status==='closed'&&before!=='closed') totals.closed++;
-      } else totals.skipped++;
-    });
-    if(root.EmploymentSystem&&typeof root.EmploymentSystem.syncAllBusinessEmployees==='function') root.EmploymentSystem.syncAllBusinessEmployees(world);
-    return totals;
-  }
+      ensure(world);
+      const defs=root.WorldSimulation&&typeof root.WorldSimulation.definitions==='function'?root.WorldSimulation.definitions(world):[];
+      migrate(world,defs);
+      const opts=options||{};
+      if(root.EmploymentSystem&&typeof root.EmploymentSystem.migrate==='function') root.EmploymentSystem.migrate(world,{subject:opts.subject});
+      const year=boundedYear(opts.year,world.year);
+      const list=all(world).slice().sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+      const totals={year,applied:0,skipped:0,closed:0,revenue:0,expenses:0,payroll:0,profit:0};
+      list.forEach(business=>{
+        const before=business.status;
+        const result=tickBusiness(world,business,{year});
+        if(result.applied){
+          totals.applied++;
+          totals.revenue+=business.finances.revenue;
+          totals.expenses+=business.finances.expenses;
+          totals.payroll+=business.finances.payroll;
+          totals.profit+=business.finances.profit;
+          // 4C-7: dividend flow to owner NPC
+          if(business.ownerNpcId&&business.finances.profit>0){
+            const stream=root.WorldSimulation&&root.WorldSimulation.streamFor?root.WorldSimulation.streamFor(world,year,business.id,'business-dividend'):null;
+            const dividendRate=0.10+(stream?stream.next()*0.10:0.05);  // 10-20% deterministic rate
+            const dividend=Math.floor(business.finances.profit*dividendRate);
+            if(dividend>0){
+              business.finances.profit-=dividend;
+              // distribute dividend to owner NPC
+              const owner=root.NpcSystem&&root.NpcSystem.get(world,business.ownerNpcId);
+              if(owner&&owner.employment&&typeof owner.employment.income==='number'){
+                owner.employment.income=Math.round(owner.employment.income+dividend);
+              }
+              // record in history
+              business.history=business.history.slice(-HISTORY_LIMIT+1);
+              business.history.push({type:'dividend',year,amount:dividend,recipient:business.ownerNpcId});
+            }
+          }
+          if(business.status==='closed'&&before!=='closed') totals.closed++;
+        } else totals.skipped++;
+      });
+      if(root.EmploymentSystem&&typeof root.EmploymentSystem.syncAllBusinessEmployees==='function') root.EmploymentSystem.syncAllBusinessEmployees(world);
+      return totals;
+    }
 
   function checkInvariants(world){
     const issues=[];
