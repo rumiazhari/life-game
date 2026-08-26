@@ -121,18 +121,36 @@
   Diagnostics (`diagnostic:world`, `diagnostic:npcs`) clean — 0 invariant
   failures.
 
-## Next iteration target: 4C-8 follow-ups + legacy-path retirement review
+### Done in iter 7 (2026-08-26)
+- LIVE JOB PORTAL REFRESH (4C-8 follow-up): `openJobPortal()` in js/ui.js now
+  re-pulls the `S.vacancies` compatibility projection from
+  `VacancySystem.playerPortalVacancies(World,S)` before rendering (guard
+  mirrors `syncPlayerVacancyPortal()`: age 16–65, not jailed). Mid-year
+  changes — a vacancy filled/expired/withdrawn or its employer closed — are
+  visible the moment the portal opens instead of waiting for the next annual
+  sync. Read-only over authoritative records; out-of-band subjects keep the
+  previous snapshot behavior.
+- Bumped `js/ui.js?v=` cache-buster to `20260826-portal1` in life-game.html.
+- NEW tests (+2, in tests/vacancy-ui-integration.test.js): the portal renders
+  a vacancy opened mid-year without waiting for the annual sync; the portal
+  drops a vacancy withdrawn mid-year without mutating authoritative records
+  (statuses before/after identical). Focused file: 66/66. Full suite:
+  **885/885 pass** (was 883). Diagnostics (`diagnostic:world`,
+  `diagnostic:npcs`) clean — 0 invariant failures.
+- Legacy-path verdict: `rollJobVacancies()` stays as the sanctioned single
+  refresh point for the compatibility projection (now invoked by BOTH the
+  annual sync and portal open); its isolated-execution fallback branch is
+  intentionally retained for VacancySystem-less contexts. Flat `INC[]`
+  remains a fallback-only salary lookup — full retirement deferred until
+  every reader routes through contracts.
 
-- Evaluate **full retirement of the legacy `rollJobVacancies()` / flat `INC[]`
-  income path** (per the phase-page completion criteria): it is now a thin
-  delegate that repopulates `S.vacancies` from the persistent
-  `VacancySystem` projection, so the player-facing portal (`js/ui.js` job
-  ladder) already reads the authorit/ative source. Removing it outright
-  risks breaking the `S.vacancies` compatibility projection read by the
-  contract-history/hire flows, so treat as a bounded follow-up, not a
-  same-iteration swing.
-- Then consider small verifiable slices toward finishing 4C-8 and closing out
-  Phase 4C, after which the backlog opens Phase 5 (Government/law/politics).
+## Next iteration target: close out Phase 4C
+
+- Audit remaining readers that could see stale `S.vacancies` or rely on the
+  flat `INC[]` fallback and route them through system APIs where cheap;
+  then walk the phase-page completion checklist for 4C-6/4C-7/4C-8 to
+  declare Phase 4C complete.
+- After that, the backlog opens Phase 5 (Government/law/politics).
 
 ## Lock
 

@@ -107,6 +107,42 @@ test('general JOBLIST openings render in the GENERAL OPENINGS section',()=>{
   assert.equal(result,true);
 });
 
+test('job portal renders vacancies opened mid-year without waiting for the annual sync',()=>{
+  const context=uiContext('portal-midyear-open');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    syncPlayerVacancyPortal();
+    const before=S.vacancies.length;
+    VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Night Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    openJobPortal();
+    const html=$('#jobSheet').innerHTML;
+    return JSON.stringify({before,live:html.includes('Night Clerk'),projected:S.vacancies.some(v=>v&&v.vacancyId)});
+  })()`));
+  assert.equal(result.before,0);
+  assert.equal(result.live,true);
+  assert.equal(result.projected,true);
+});
+
+test('job portal drops vacancies withdrawn after the last annual sync without mutating authoritative records',()=>{
+  const context=uiContext('portal-midyear-withdraw');
+  configureAdult(context);
+  const b=seedPublicBusiness(context,'retail');
+  const result=JSON.parse(expose(context,`(function(){
+    const v=VacancySystem.open(World,{businessId:'${b.id}',occupationType:'job',occupationId:'clerk',occupationName:'Night Clerk',jobTier:1,annualSalary:1000,requirements:{minAge:16}});
+    syncPlayerVacancyPortal();
+    VacancySystem.withdraw(World,v.id,'employer_withdrew',World.year);
+    const statusesBefore=Object.keys(World.vacancies).map(k=>World.vacancies[k].status).sort().join(',');
+    openJobPortal();
+    const html=$('#jobSheet').innerHTML;
+    const statusesAfter=Object.keys(World.vacancies).map(k=>World.vacancies[k].status).sort().join(',');
+    return JSON.stringify({ghost:html.includes('Night Clerk'),statusesBefore,statusesAfter});
+  })()`));
+  assert.equal(result.ghost,false);
+  assert.equal(result.statusesBefore,result.statusesAfter);
+  assert.ok(result.statusesBefore.includes('withdrawn'));
+});
+
 test('lookwork accepted creates an authoritative contract and pays the signing bonus minus cost',()=>{
   const context=uiContext('lookwork-accept');
   configureAdult(context);

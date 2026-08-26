@@ -1991,6 +1991,15 @@ function isPersistentVacancyProjection(){
   return Array.isArray(S.vacancies)&&S.vacancies.some(v=>v&&v.vacancyId);
 }
 function openJobPortal(){
+  // Live portal refresh: re-pull the S.vacancies compatibility projection
+  // from the persistent VacancySystem before rendering, so mid-year changes
+  // (a vacancy filled, expired, withdrawn, or its employer closed) show up
+  // immediately instead of waiting for the next annual sync. The age/jail
+  // guard mirrors syncPlayerVacancyPortal(), so subjects outside the working
+  // band keep the previous snapshot behavior.
+  if(typeof VacancySystem==='object'&&VacancySystem&&typeof VacancySystem.playerPortalVacancies==='function'&&typeof World!=='undefined'&&World&&S.age>=16&&S.age<65&&S.jailUntil<=S.age){
+    rollJobVacancies();
+  }
   if(isPersistentVacancyProjection()){ openJobPortalPersistent(); return; }
   let rows='';
   CAREERS.forEach(track=>{
