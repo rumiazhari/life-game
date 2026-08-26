@@ -47,7 +47,7 @@
   to friendly unavailable panels when the systems are absent; never mutates
   World/S (verified by a JSON before/after snapshot test).
 - Wired into `life-game.html` after persistent-people-ui.js.
-- Tests: `tests/employment-ui.test.js` (4 tests). Full suite: **874/874 pass**.
+- Tests: `tests/employment-ui.test.js` (4 tests). Full suite: **880/880 pass**.
 
 ## Next iteration target: 4C-8 slice 3 — ownership decision surface
 
@@ -56,24 +56,39 @@
    decision with cash stake deducted into `finances.cash`, ownerNpcId
    'subject'; "Shut down" for businesses the subject owns). Presentation in
    js/ui/employment-ui.js or ui.js helpers only; sim mutations ONLY via the
-   system APIs.
+   system APIs. **(DONE in iter 5 — see below)**
 2. Then evaluate full retirement of the legacy `rollJobVacancies()` / flat
    `INC[]` fallback path per the phase-page completion criteria.
 
-### Done in iter 4 (2026-08-26)
-- FIXED iter-3 bug: personal standing panel guarded
-  `typeof EmploymentUI==='function'` but EmploymentUI is an object, so it never
-  rendered; it also passed `S.employmentContractId` (a contract id) where a
-  business id belongs. Now `employmentUiPanels()` resolves the active contract
-  via `EmploymentSystem.activeForPerson(World,'subject')[0].businessId`.
-- NEW `EmploymentUI.ownershipPanel(world,personId,options)` — read-only list of
-  businesses owned by a person (active first), each with status badge,
-  settlement/kind/sector, last annual result, and dividends received total +
-  most recent payout from `history[type=dividend]`. Degrades gracefully without
-  BusinessSystem; never mutates World/S (JSON snapshot tested).
-- Wired into the personal standing panel next to the employer panel.
-- Cache-bust bumps in life-game.html for both files.
-- Tests: tests/employment-ui.test.js 6/6 (2 new). Full suite **876/876 pass**.
+### Done in iter 5 (2026-08-26)
+- REPAIRED a corrupted `js/data.js` block from a crashed prior run: the
+  `payoffdebt` decision had lost its object-closing brace and the
+  `foundBusiness`/`shutDownBusiness` entries were fused into one syntactically
+  invalid object, breaking the ENTIRE suite (file failed to parse). Restored
+  both as clean, well-formed decision objects.
+- IMPLEMENTED 4C-8 slice 3 ownership actions, routed strictly through
+  `BusinessSystem`:
+  - `foundBusiness` — gated on age≥18, not in school, freedom≥40, assets≥$5,000,
+    and no existing subject-owned business; on apply calls
+    `BusinessSystem.create(World,{settlementId, sector:'professional',
+    ownerNpcId:'subject', finances:{cash:5000}})` so the $5,000 stake lands in
+    the business ledger (not just S.assets), deducts S.assets and S.freedom via
+    the normal `applyFx` path. Settlement resolved by
+    `subjectSettlementId()` (subject location → active settlement → any).
+  - `shutDownBusiness` — gated on owning ≥1 active business; on apply calls
+    `BusinessSystem.close(World, id, 'player_initiated', year, {subject:S})`,
+    which terminates employment contracts and withdraws vacancies via the
+    system. Inert with a clear `no_owned_business` reason when none owned.
+  - Added helper functions `ownedActiveBusinesses()` and `subjectSettlementId()`
+    in `js/data.js` (no authoritative-state duplication; read-only queries).
+  - Extended `STATKEYS` with `freedom`/`scrutiny` labels so decision fx chips
+    render correctly (additive; existing px paths unchanged).
+- NEW `tests/ownership-decisions.test.js` (4 tests): gating logic, real
+  BusinessSystem record creation with stake deposit + subject ownership,
+  closure terminating the business's employment contracts, and inert-no-op when
+  nothing is owned. All drive the live systems; none fabricate state.
+- Full suite: **880/880 pass** (was 876; +4 new). Diagnostics
+  (`diagnostic:world`, `diagnostic:npcs`) clean — 0 invariant failures.
 
 ## Lock
 

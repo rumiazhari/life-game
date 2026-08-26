@@ -315,7 +315,7 @@ function rollJobVacancies(){
   });
   return S.vacancies;
 }
-const STATKEYS={health:'HEALTH',happiness:'HAPPINESS',smarts:'SMARTS',looks:'LOOKS',relations:'RELATIONS'};
+const STATKEYS={health:'HEALTH',happiness:'HAPPINESS',smarts:'SMARTS',looks:'LOOKS',relations:'RELATIONS',freedom:'FREEDOM',scrutiny:'SCRUTINY'};
 function lastAncestor(){ return (typeof Lineage!=='undefined'&&Lineage&&Lineage.pastSubjects&&Lineage.pastSubjects.length)?Lineage.pastSubjects[Lineage.pastSubjects.length-1]:null; }
 function ancestorFateLine(a){
   if(!a) return '';
@@ -1137,6 +1137,21 @@ function resolveGigOutcome(g){
   return{fx,text:g.okText+(jackpot?' The client, unexpectedly, paid well over the going rate.':'')};
 }
 
+/* ================= OWNERSHIP HELPERS (4C-8 slice 3) ================= */
+function ownedActiveBusinesses(){
+  if(typeof World==='undefined'||!World||!World.businesses) return[];
+  return Object.keys(World.businesses).filter(id=>{const b=World.businesses[id];return b&&b.ownerNpcId==='subject'&&b.status!=='closed';});
+}
+function subjectSettlementId(){
+  if(typeof World==='undefined'||!World) return null;
+  const settlements=World.settlements||{};
+  const loc=S&&S.location&&S.location.settlementId;
+  if(loc&&settlements[loc]) return loc;
+  if(World.activeSettlementId&&settlements[World.activeSettlementId]) return World.activeSettlementId;
+  const keys=Object.keys(settlements);
+  return keys.length?keys[0]:null;
+}
+
 /* ================= DECISIONS ================= */
 const DECISIONS=[
  {id:'propose',cost:1,cat:'rel',avail:s=>s.partner&&!s.married&&s.age>=18,note:()=>`{partner} says yes ${P(proposeP())}`,
@@ -1332,7 +1347,23 @@ const DECISIONS=[
  {id:'payoffdebt',cost:1,cat:'lifestyle',avail:s=>s.liabilities.length>0&&s.assets>=s.liabilities[0].annualPayment*2,note:()=>'clear the oldest debt in one lump sum',
    apply:()=>{if(!S.liabilities.length) return{fx:{},text:'Subject meant to pay off a debt, but the last of it had already cleared on its own this year.'};
      const l=S.liabilities[0]; const remaining=l.annualPayment*l.yearsLeft; S.liabilities.shift();
-     return{fx:{assets:-remaining,happiness:3},text:'Subject paid off the '+l.name.toLowerCase()+' in one sitting, in cash, and watched the clerk stamp it “SETTLED.”'};}},
+     return{fx:{assets:-remaining,happiness:3},text:'Subject paid off the '+l.name.toLowerCase()+' in one sitting, in cash, and watched the clerk stamp it "SETTLED."'};}},
+     {id:'foundBusiness',cost:2,cat:'work',
+       avail:s=>{try{return s.age>=18&&!s.eduStage&&s.freedom>=40&&s.assets>=5000&&ownedActiveBusinesses().length===0;}catch(e){return false;}},
+       note:()=>'found a business · −$5,000 stake into business cash · freedom −5 · one venture at a time',
+       apply:()=>{if(typeof BusinessSystem!=='object'||!BusinessSystem||typeof World==='undefined'||!World) return{fx:{},text:'Subject drew up founding papers for a business, but there was no registry anywhere to receive them.',reason:'no_registry'};
+           const settlement=subjectSettlementId();
+           if(!settlement) return{fx:{},text:'Subject went looking for a hall to register a business and found no settlement willing to hold the ledger.',reason:'no_settlement'};
+           const business=BusinessSystem.create(World,{settlementId:settlement,sector:'professional',name:"Subject's Business",foundedYear:World.year,ownerNpcId:'subject',finances:{cash:5000}});
+           return{fx:{assets:-5000,freedom:-5,happiness:5},text:'Subject founded '+business.name+' at '+settlement+' — five thousand dollars turned into stock, a ledger, and a door with the family name painted on it.',reason:'found_business'}}},
+     {id:'shutDownBusiness',cost:1,cat:'work',
+       avail:s=>{try{return s.age>=18&&typeof BusinessSystem==='object'&&!!BusinessSystem&&typeof World!=='undefined'&&!!World&&ownedActiveBusinesses().length>0;}catch(e){return false;}},
+       note:()=>'shut down the subject-owned business · ends its contracts',
+       apply:()=>{if(typeof BusinessSystem!=='object'||!BusinessSystem||typeof World==='undefined'||!World) return{fx:{},text:'Subject considered closing the business, but its books could not be found.',reason:'no_registry'};
+           const owned=ownedActiveBusinesses();
+           if(!owned.length) return{fx:{},text:'Subject had no business left to shut — the registry already showed nothing under the family name.',reason:'no_owned_business'};
+           const result=BusinessSystem.close(World,owned[0],'player_initiated',World.year||0,{subject:S});
+           return{fx:{happiness:1},text:result?('Subject shut the doors of '+result.name+' for good — contracts settled, vacancies withdrawn, the ledger closed where it stood.'):'The closure was recorded without ceremony.',reason:'business_shut_down'}}},
 ];
 
 /* ================= HOTSPOT SHORTCUTS (dossier field → Plan the Year actions) ================= */
