@@ -2,8 +2,8 @@
 
 **STATUS:** OK  
 **Current phase:** Phase 4C — Businesses and Employment  
-**Last verified:** 2026-08-26  
-**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  
+**Last verified:** 2026-08-26 (iter 8)  
+**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 12+ ahead — iters 1–8 not yet pushed)  
 
 ## Backlog (top-down, roadmap order)
 
@@ -151,6 +151,41 @@
   then walk the phase-page completion checklist for 4C-6/4C-7/4C-8 to
   declare Phase 4C complete.
 - After that, the backlog opens Phase 5 (Government/law/politics).
+
+### Done in iter 8 (2026-08-26)
+- LANDED the pending uncommitted ⭐ USER DIRECTIVE (authoritarian-cruelty
+  north-star theme) into AUTOPILOT_STATE.md as a standalone section. Repo was
+  12 commits ahead of origin/master (iters 1–7 never pushed); committed that
+  directive as its own autopilot commit.
+- COMPLETED the Phase 4C close-out audit:
+  - All three `INC[]` salary readers in js/ui.js (lines 186, 274, 3031) already
+    prefer the authoritative contract via `EmploymentSystem.activeForPerson`
+    and only fall back to `INC[]` when `World`/the systems are unavailable —
+    exactly the documented "fallback-only, never a second live authority"
+    state the Phase 4C completion criteria require. `S.vacancies` is already
+    re-pulled on `openJobPortal()` (iter 7) so it cannot go stale mid-year.
+  - LOCKED the completion criteria with a new focused test file
+    `tests/phase4c-invariants.test.js` (+4 tests, full suite now 889 pass, was
+    885) driving the REAL multi-year `advanceYear` pipeline:
+    1. referential integrity holds across 8 advanced years (every business's
+       employeeIds exactly matches its active/on_leave contracts; no person
+       holds >1 active contract; no active contract dangles to a missing/
+       closed business; Business/Employment/Vacancy checkInvariants all clean);
+    2. the three systems' checkInvariants stay clean every year for 5 years;
+    3. closing a business drops employeeIds and reconciles its employment
+       contracts (all invariants clean after close);
+    4. the per-settlement ≤12 cap is *surfaced* by `checkInvariants` (never
+       silent) — see finding below.
+- FINDING (documented, not fixed — intentional): `BusinessSystem.create()` does
+  NOT enforce the per-settlement ≤12 cap; only `seedSettlement`/`checkInvariants`
+  guard/flag it. This is deliberate — forcing `create()` to throw would break
+  legitimate paths (player founding a 13th business in a small town; NPC
+  seeding). `checkInvariants` already reports overflow as a recoverable
+  condition, never a crash. Captured by test #4 so the behavior stays observable.
+  Left as-is per repo rule 8 (no weakening/over-engineering of correct behavior).
+- Full suite: **889/889 pass** (was 885; +4 new). No sim mutations; tests are
+  read-only over authoritative state. Diagnostics not required (no sim-system
+  changes to World/S schema).
 
 ## Lock
 
