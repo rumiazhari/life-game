@@ -2605,6 +2605,19 @@ function runStateCareYearTick(){
   }
   return result;
 }
+// GOVERNMENT (Phase 5): recompute the regime's posture and express it on the
+// subject's file (scrutiny / freedom). Presentation is deliberately minimal in
+// this slice — the authoritative state + annual pipeline is the deliverable.
+function runGovernmentYearTick(){
+  if(typeof GovernmentSystem!=='object'||!GovernmentSystem||typeof World==='undefined'||!World||!S) return null;
+  const result=GovernmentSystem.tickWorld(World,{year:World.year,subject:S});
+  const chips=result&&result.chips;
+  if(result&&result.applied&&Array.isArray(chips)&&chips.length){
+    const label=(typeof GovernmentSystem.summaryLabel==='function')?GovernmentSystem.summaryLabel(World):'REGIME';
+    logChips('The '+label.toLowerCase()+' filed its yearly account.',chips,'ruling','REGIME FILE · YEAR '+S.age);
+  }
+  return result;
+}
 const VN_SPEAKER_CLASS={narrator:'vn-narr',you:'vn-you'};
 /* Illustrated backdrops: one small SVG scene per setting, animated in CSS. */
 function vnBackdropArt(key){
@@ -4026,6 +4039,9 @@ function advanceYear(suppressBurst,quiet){
   runRandomEvents();
   runStoryYearTick();
   runStateCareYearTick();
+  // Government (Phase 5): the regime's posture is recomputed after the world
+  // sim, state care, and story have run, and expressed on the subject's file.
+  runGovernmentYearTick();
   if(S.alive) checkMortality();
   if(S.alive){ S.hapSum+=S.happiness; S.hapYears++; S.peakHap=Math.max(S.peakHap,S.happiness); }
   pushSparkPoint();

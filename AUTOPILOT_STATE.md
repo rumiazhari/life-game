@@ -1,9 +1,9 @@
 # AUTOPILOT STATE — Life Game
 
 **STATUS:** OK  
-**Current phase:** Phase 4C — Businesses and Employment  
-**Last verified:** 2026-08-26 (iter 8)  
-**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 12+ ahead — iters 1–8 not yet pushed)  
+**Current phase:** Phase 5 — Government / law / politics (slice 1 landed)  
+**Last verified:** 2026-08-26 (iter 9)  
+**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 13+ ahead — iters 1–9 not yet pushed)  
 
 ## Backlog (top-down, roadmap order)
 
@@ -21,9 +21,9 @@
    - Workplace-relationship UI (4C-6 already built)  
    - Full retirement of legacy `rollJobVacancies()` / flat `INC[]` income path  
 
-3. **Phase 5 — Government / law / politics** *(future, after 4C complete)*  
-   - `js/systems/government-system.js`  
-   - `js/systems/law-system.js`  
+3. **Phase 5 — Government / law / politics** ✅▶️ *(slice 1 landed 2026-08-26; slices 2+ remain)*  
+   - ✅ `js/systems/government-system.js` — authoritative `World.government` (regime posture: legitimacy / propaganda / surveillancePosture / scrutinyPressure), deterministic annual tick via `streamFor`, idempotent + stale-year rejection, bounded history, invariants, `WorldSimulation.migrate` hook, `advanceYear` wiring.  
+   - ⏳ Slice 2+: `js/systems/law-system.js`; Bureau detention / permits / queues as player-facing mechanics; narrative chains (Phase 7) wired to regime posture.  
 
 4. **Phase 6 — Advanced health / reproduction** *(future)*  
    - `js/systems/pregnancy-system.js`  
@@ -209,3 +209,53 @@ them toward this):
    narrative chains (7), property (8) etc. should grow FROM this theme.
 3. Every slice keeps deterministic sim rules (streamFor), migrations,
    focused tests + full suite green.
+
+### Done in iter 9 (2026-08-26) — Phase 5 slice 1: Government System foundation
+- OPENED **Phase 5 (Government / law / politics)**, the backlog's next item and
+  the explicit USER DIRECTIVE target ("grow FROM the authoritarian-cruelty
+  theme"). Took the smallest verifiable slice: an authoritative regime-posture
+  system, not yet player-facing mechanics.
+- NEW `js/systems/government-system.js` (`GovernmentSystem`):
+  - Owns `World.government` `{schemaVersion, regime:'bureaucratic_authoritarian',
+    legitimacy, propaganda, surveillancePosture, scrutinyPressure, lastTickYear,
+    history[]}` — all bounded `[0,1]` matrices per the Engineering-Rules bounded-state
+    rule.
+  - INTERCONNECTEDNESS-FIRST (per the directive): `computePosture` *reads* the
+    existing `settlement.security.surveillance`/`.unrest` and
+    `world.nationalModifiers` — it is a downstream expression of the live
+    settlement-security sim, never a duplicate authority. It then *writes*
+    small bounded amounts to the player's own `S` (scrutiny up on the
+    already-watched; freedom down under a weak regime) — exactly the
+    StateCareSystem pattern (system owns `World.*`, player oppression is
+    expressed through `S`, which other systems already consume). No new
+    authoritative fact duplicated in `S`.
+  - Deterministic: all rolls via `WorldSimulation.streamFor(world, year,
+    'government:…')`; same-seed → identical state; **same-year tick is a
+    no-op** (`reason:'already_applied'`); **stale-year rejected**
+    (`reason:'stale_year'`) without mutation; history bounded to 32.
+  - `migrate`/`ensure` repair malformed records (regime reset, matrices
+    clamped, history array healed); `checkInvariants` returns strings and is
+    clean on fresh + corrupted + multi-year state.
+- WIRED into the pipeline (guarded, follows the StateCare precedent):
+  - `WorldSimulation.migrate` now calls `GovernmentSystem.migrate` (alongside
+    the other systems).
+  - `advanceYear` runs `runGovernmentYearTick()` right after
+    `runStateCareYearTick()` — computes posture and, when applicable, logs a
+    `ruling` chip (`'REGIME FILE · YEAR N'`) expressing the grip on `S`.
+  - `life-game.html`: `js/systems/government-system.js?v=20260826-gov1` loaded
+    after `survival-system.js`, before `state-care-system.js`.
+- NEW `tests/government-system.test.js` (7 tests): valid/self-healing ensure +
+  invariants, `WorldSimulation.migrate` wiring, deterministic + same-year
+  idempotency, stale-year rejection, posture-as-expression-of-surveillance,
+  bounded subject-grip expression, and a 10-year multi-year invariant/history
+  bound check. All drive the live system; none fabricate state.
+- Full suite: **896/896 pass** (was 889; +7 new). Diagnostics (`diagnostic:world`,
+  `diagnostic:npcs`) clean — `invariantFailures: []`, `medicalInvariantFailures: 0`
+  across all sampled years. No World/S schema change beyond adding `World.government`.
+
+## Next iteration target
+- Phase 5 slice 2: turn the posture into *player-facing mechanics* — e.g. a
+  `law-system.js` stub + Bureau detention/permit/queue decisions wired through
+  `GovernmentSystem`'s posture, and/or a small UI readout of the regime posture
+  in the personal-standing view. Keep deterministic + migration + focused tests +
+  full-suite green.

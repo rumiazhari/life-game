@@ -102,6 +102,7 @@
     if(root.VacancySystem&&typeof root.VacancySystem.migrate==='function') root.VacancySystem.migrate(world);
     if(root.WorkplaceSystem&&typeof root.WorkplaceSystem.migrate==='function') root.WorkplaceSystem.migrate(world);
     if(root.SurvivalSystem&&typeof root.SurvivalSystem.migrate==='function') root.SurvivalSystem.migrate(world);
+    if(root.GovernmentSystem&&typeof root.GovernmentSystem.migrate==='function') root.GovernmentSystem.migrate(world);
     return world;
   }
   function initialize(world){ return migrate(world).settlements; }
