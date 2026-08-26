@@ -1378,3 +1378,21 @@ body{background:var(--olive);color:var(--ink)}
   .wp-memory-row{font-size:9px;margin:2px 4px;line-height:1.35}
   .wp-memory-good{color:#3f6e44}
   .wp-memory-bad{color:#8a4030}
+
+  /* Regime-posture panel (EmploymentUI.regimePanel, Phase 5 slice 2) —
+   * the first player-facing surface of the authoritarian-cruelty theme. */
+  .regime-panel{margin-top:10px;border:1px solid #b0301f;background:#fbf3ee}
+  .regime-panel .sec-h{color:#a02a1c;border-bottom-color:#e6c4bc;background:#f6e6df}
+  .regime-label{font:700 10px 'Archivo';letter-spacing:.14em;text-transform:uppercase;color:#9c2a1c;margin:4px 6px 6px}
+  .regime-bars{margin:2px 6px 6px}
+  .regime-row{display:flex;align-items:center;gap:6px;margin:3px 0;font-size:9px;color:#6d4a20}
+  .regime-lab{width:104px;flex:none;letter-spacing:.06em;text-transform:uppercase;font-weight:700}
+  .regime-track{flex:1;height:8px;border-radius:4px;background:#e8dcc8;overflow:hidden;border:1px solid #d8c8a8}
+  .regime-fill{height:100%;background:#7a8aa0;border-radius:4px}
+  .regime-fill.regime-bar-mid{background:#c99a3a}
+  .regime-fill.regime-bar-high{background:#b8503e}
+  .regime-fill.regime-bar-low{background:#5f9e63}
+  .regime-val{width:62px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
+  .regime-file{margin:4px 6px 6px;padding-top:4px;border-top:1px dashed #e0c8be}
+  .regime-row-file .regime-lab{width:64px}
+  .regime-row-file .regime-val{width:auto;min-width:120px}

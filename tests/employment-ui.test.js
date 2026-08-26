@@ -190,3 +190,48 @@ test('employment-ui: workplacePanel degrades gracefully when EmploymentSystem is
   const panel=runRaw(context,"return EmploymentUI.workplacePanel(World,'subject',{unavailableText:'WORKPLACE OFFLINE'});");
   assert.match(panel,/WORKPLACE OFFLINE/,'reports unavailability without throwing');
 });
+
+test('employment-ui: regimePanel renders the live World.government posture and the subject file, never mutating World',()=>{
+  const context=seededWorld(contextWithUi(['js/systems/government-system.js']));
+  expose(context,`
+    World.npcs['subject']={npcId:'subject',isSubject:true,alive:true};
+    S={scrutiny:58,freedom:40};
+    GovernmentSystem.ensure(World);
+    World.government.legitimacy=0.30;
+    World.government.propaganda=0.70;
+    World.government.surveillancePosture=0.55;
+    World.government.scrutinyPressure=0.62;
+  `);
+  const before=expose(context,'JSON.stringify(World)');
+  const html=runRaw(context,"return EmploymentUI.regimePanel(World);");
+  const after=expose(context,'JSON.stringify(World)');
+  assert.equal(before,after,'rendering must not mutate World state');
+  assert.match(html,/REGIME · LIVE POSTURE/,'panel header renders');
+  assert.match(html,/REGIME · TIGHTENING GRIP/,'label reflects weak-legitimacy posture');
+  assert.match(html,/Legitimacy/,'legitimacy row renders');
+  assert.match(html,/Propaganda/,'propaganda row renders');
+  assert.match(html,/Surveillance/,'surveillance row renders');
+  assert.match(html,/Scrutiny pressure/,'scrutiny-pressure row renders');
+  assert.match(html,/YOUR FILE/,'subject-file section renders when S is present');
+  assert.match(html,/Scrutiny<\/span>[\s\S]*58/,'subject scrutiny value is read from S');
+  assert.match(html,/Freedom<\/span>[\s\S]*40/,'subject freedom value is read from S');
+  assert.ok(/style="width:30%"/.test(html),'legitimacy bar reflects 0.30');
+});
+
+test('employment-ui: regimePanel shows only posture (no file) when S is absent, and degrades when GovernmentSystem is absent',()=>{
+  const withS=seededWorld(contextWithUi(['js/systems/government-system.js']));
+  expose(withS,`
+    World.npcs['subject']={npcId:'subject',isSubject:true,alive:true};
+    GovernmentSystem.ensure(World);
+    delete globalThis.S;
+  `);
+  const htmlOnly=runRaw(withS,"return EmploymentUI.regimePanel(World);");
+  assert.match(htmlOnly,/REGIME · LIVE POSTURE/,'panel still renders posture without S');
+  assert.ok(!/YOUR FILE/.test(htmlOnly),'subject-file section is omitted when S is absent');
+
+  const context=createGameContext();
+  loadGameFiles(context,['js/ui/employment-ui.js']);
+  expose(context,'globalThis.World={year:1900,npcs:{},settlements:{}};');
+  const panel=runRaw(context,"return EmploymentUI.regimePanel(World,{unavailableText:'REGIME OFFLINE'});");
+  assert.match(panel,/REGIME OFFLINE/,'reports unavailability without throwing when GovernmentSystem is absent');
+});

@@ -764,6 +764,7 @@ function renderStats(changed){
     if(contract&&typeof EmploymentUI.businessPanel==='function')html+=EmploymentUI.businessPanel(World,contract.businessId);
     if(typeof EmploymentUI.workplacePanel==='function')html+=EmploymentUI.workplacePanel(World,'subject');
     if(typeof EmploymentUI.ownershipPanel==='function')html+=EmploymentUI.ownershipPanel(World,'subject');
+    if(typeof EmploymentUI.regimePanel==='function')html+=EmploymentUI.regimePanel(World);
     return html;
   }
 function renderServiceRecord(){

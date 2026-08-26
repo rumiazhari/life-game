@@ -1,9 +1,9 @@
 # AUTOPILOT STATE — Life Game
 
 **STATUS:** OK  
-**Current phase:** Phase 5 — Government / law / politics (slice 1 landed)  
-**Last verified:** 2026-08-26 (iter 9)  
-**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 13+ ahead — iters 1–9 not yet pushed)  
+**Current phase:** Phase 5 — Government / law / politics (slice 2 landed)  
+**Last verified:** 2026-08-26 (iter 10)  
+**origin/master SHA:** 454511635a2837d97b67962463b2c25d7e51aecc  (local HEAD is 14+ ahead — iters 1–10 not yet pushed) 
 
 ## Backlog (top-down, roadmap order)
 
@@ -254,8 +254,30 @@ them toward this):
   across all sampled years. No World/S schema change beyond adding `World.government`.
 
 ## Next iteration target
-- Phase 5 slice 2: turn the posture into *player-facing mechanics* — e.g. a
-  `law-system.js` stub + Bureau detention/permit/queue decisions wired through
-  `GovernmentSystem`'s posture, and/or a small UI readout of the regime posture
-  in the personal-standing view. Keep deterministic + migration + focused tests +
-  full-suite green.
+
+### Done in iter 10 (2026-08-26) — Phase 5 slice 2: regime-posture readout panel
+- TURNED the Phase 5 slice-1 posture into the project's first *player-facing*
+  authoritarian-cruelty surface, per the ⭐ USER DIRECTIVE.
+- NEW `EmploymentUI.regimePanel(world, options)` (presentation-only, read-only,
+  mirrors the other EmploymentUI panels; degrades to a friendly unavailable
+  panel when `GovernmentSystem` is absent):
+  - Reads the authoritative `World.government` aggregate via `GovernmentSystem.summary`
+    (never duplicates state) and renders four bounded `0–1` posture bars —
+    Legitimacy, Propaganda, Surveillance, Scrutiny pressure — plus the live
+    `summaryLabel` ("REGIME · TIGHTENING GRIP" etc.).
+  - When the player's `S` is present it appends a "YOUR FILE" section reading
+    `S.scrutiny` / `S.freedom` (the regime grip already expressed by the slice-1
+    annual tick), so the oppression the sim computes is visible in one place.
+  - Color tones: low (blue/green) → mid (amber) → high (red) for posture/high
+    bars; freedom uses the low (green) tone to read as "remaining liberty".
+  - No mutation of World/S (verified by a before/after JSON snapshot test).
+- WIRED `regimePanel` into `employmentUiPanels()` in `js/ui.js` (personal
+  standing view) and bumped `js/ui/employment-ui.js?v=` to `20260826-gov2` in
+  `life-game.html`. Added additive CSS (`.regime-panel`, bars, file section) in
+  `css/style.css`.
+- NEW focused tests in `tests/employment-ui.test.js` (+2): live posture + S-file
+  readout with no-mutation snapshot check and weak-regime label; posture-only
+  render when `S` absent; graceful degradation when `GovernmentSystem` is
+  absent. Focused file: 11/11. Full suite: **898/898 pass** (was 896; +2 new).
+- Verified gate: `npm run diagnostic:world` and `npm run diagnostic:npcs` both
+  clean — `invariantFailures: []`, `medicalInvariantFailures: 0`.

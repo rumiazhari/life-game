@@ -308,5 +308,55 @@
       wellbeingHtml+rosterHtml+memoriesHtml+'</div>';
   }
 
-  root.EmploymentUI={esc,money,personName,settlementName,statusLabel,businessPanel,contractHistoryView,ownershipPanel,workplacePanel};
+  /* Regime-posture panel (Phase 5 slice 2): the first player-facing surface
+   * for the authoritarian-cruelty theme. It is a read-only readout of the
+   * authoritative World.government aggregate (the state's grip expressed as
+   * posture numbers, not prose). Never mutates World or S. Degrades to a
+   * friendly unavailable panel when GovernmentSystem is absent. */
+  function pctOf(value){ return Math.round(clamp01(value)*100); }
+  function postureBar(label,value,extraClass){
+    const p=pctOf(value);
+    const tone=p>=66?' regime-bar-high':p>=33?' regime-bar-mid':'';
+    return '<div class="regime-row'+(extraClass?(' '+esc(extraClass)):'')+'">'+
+      '<span class="regime-lab">'+esc(label)+'</span>'+
+      '<span class="regime-track"><span class="regime-fill'+tone+'" style="width:'+p+'%"></span></span>'+
+      '<span class="regime-val">'+p+'%</span>'+
+      '</div>';
+  }
+  function regimePanel(world,options){
+    options=options||{};
+    const gov=system('GovernmentSystem');
+    if(!gov||typeof gov.summary!=='function'||!world||typeof world!=='object'){
+      return unavailablePanel(options.unavailableText||'The regime has not yet taken its posture.');
+    }
+    gov.ensure(world);
+    const summary=gov.summary(world);
+    const s=(typeof root.S==='object'&&root.S)?root.S:null;
+    let html='<div class="regime-panel"><div class="sec-h">REGIME · LIVE POSTURE <span>FORM G-1</span></div>'+
+      '<div class="regime-label">'+esc(summary.label)+'</div>'+
+      '<div class="regime-bars">'+
+      postureBar('Legitimacy',summary.legitimacy,'regime-row-leg')+
+      postureBar('Propaganda',summary.propaganda,'regime-row-prop')+
+      postureBar('Surveillance',summary.surveillancePosture,'regime-row-surv')+
+      postureBar('Scrutiny pressure',summary.scrutinyPressure,'regime-row-scrut')+
+      '</div>';
+    if(s){
+      const sc=Number.isFinite(Number(s.scrutiny))?Number(s.scrutiny):0;
+      const fr=Number.isFinite(Number(s.freedom))?Number(s.freedom):0;
+      const scTxt=(typeof root.scrutinyLabel==='function')?scrutinyLabel(sc):'';
+      const frTxt=(typeof root.freedomLabel==='function')?freedomLabel(fr):'';
+      html+='<div class="regime-file"><div class="ps-catlab">YOUR FILE</div>'+
+        '<div class="regime-row regime-row-file"><span class="regime-lab">Scrutiny</span>'+
+        '<span class="regime-track"><span class="regime-fill regime-bar-high" style="width:'+pctOf(sc/100)+'%"></span></span>'+
+        '<span class="regime-val">'+esc(sc)+' · '+esc(scTxt)+'</span></div>'+
+        '<div class="regime-row regime-row-file"><span class="regime-lab">Freedom</span>'+
+        '<span class="regime-track"><span class="regime-fill regime-bar-low" style="width:'+pctOf(fr/100)+'%"></span></span>'+
+        '<span class="regime-val">'+esc(fr)+' · '+esc(frTxt)+'</span></div>'+
+        '</div>';
+    }
+    html+='</div>';
+    return html;
+  }
+
+  root.EmploymentUI={esc,money,personName,settlementName,statusLabel,businessPanel,contractHistoryView,ownershipPanel,workplacePanel,regimePanel};
 })(typeof globalThis!=='undefined'?globalThis:this);
