@@ -778,11 +778,12 @@ function renderInventory(){
   const settlementConditions=typeof WorldSimulation==='object'&&WorldSimulation&&World?WorldSimulation.getSettlementConditions(World,location.id):null;
   const standing='<div class="personal-ledger"><div class="sec-h">PERSONAL STANDING <span>LIVE FILE</span></div>'+ 
     '<div class="standing-grid"><div><b>FREEDOM</b><span>'+S.freedom+' · '+freedomLabel(S.freedom)+'</span></div><div><b>SCRUTINY</b><span>'+S.scrutiny+' · '+scrutinyLabel(S.scrutiny)+'</span></div>'+ 
-    '<div><b>BUREAU FAVOR</b><span>'+S.bureauFavor+' / 3</span></div><div><b>SECURITY</b><span>'+securityLabel(Math.min(S.housingSecurity,S.financialSecurity))+'</span></div></div>'+ 
+    '<div><b>BUREAU FAVOR</b><span>'+S.bureauFavor+' / 3</span></div><div><b>SECURITY</b><span>'+securityLabel(Math.min(S.housingSecurity,S.financialSecurity))+'</span></div>'+
+    '<div><b>RELATIONSHIP</b><span>'+(S.married?'Married to '+S.partner:(S.status==='Attached'?('Partner: '+S.partner||'—'):(S.status==='Single'?'Single':'—')))+'</span></div></div>'+ 
     '<div class="medical-line"><b>MEDICAL FILE</b><span>'+(conditions.length?conditions.map(c=>medicalInfo(c.id).name+(c.known?'':' · unexamined')).join(' · '):(S.medicalRecord?'no active condition':'not yet opened'))+'</span></div>'+
     '<div class="location-line"><b>LOCATION</b><span>'+location.name+' · '+(building?building.name:'address pending')+(travel?' · travelling to '+travel.name:'')+'</span></div>'+
     '</div>'+
-    (settlementConditions?'<div class="settlement-conditions"><div class="sec-h">SETTLEMENT CONDITIONS <span>SIMULATION</span></div><div class="condition-grid"><div><b>EMPLOYMENT</b><span>'+settlementConditions.employment+'</span></div><div><b>COST OF LIVING</b><span>'+settlementConditions.costOfLiving+'</span></div><div><b>HEALTHCARE PRESSURE</b><span>'+settlementConditions.healthcare+'</span></div><div><b>UNREST</b><span>'+settlementConditions.unrest+'</span></div><div><b>SURVEILLANCE</b><span>'+settlementConditions.surveillance+'</span></div></div></div>':'')+renderServiceRecord();
+    (settlementConditions?'<div class="settlement-conditions"><div class="sec-h">SETTLEMENT CONDITIONS <span>SIMULATION</span></div><div class="condition-grid"><div><b>EMPLOYMENT</b><span>'+settlementConditions.employment+'</span></div><div><b>COST OF LIVING</b><span>'+settlementConditions.costOfLiving+'</span></div><div><b>HEALTHCARE PRESSURE</b><span>'+settlementConditions.healthcare+'</span></div><div><b>UNREST</b><span>'+settlementConditions.unrest+'</span></div><div><b>SURVEILLANCE</b><span>'+settlementConditions.surveillance+'</span></div></div></div>':'')+(typeof EmploymentUI==='function'&&typeof World==='object'&&World?EmploymentUI.businessPanel(World,S.employmentContractId||''):'')+renderServiceRecord();
   if(S.age<16||S.livingAtHome){
     const famT=FAMILY_TIERS.find(f=>f.id===S.familyTier);
     let hc='<div class="aempty">'+(S.age<16?'Dependent on parents — the family provides.':'Still living at home — rent-free, fed at the family table.')+'</div>';
@@ -2033,6 +2034,13 @@ function openJobPortalPersistent(){
   const careerEntries=S.vacancies.filter(v=>v&&v.occupationType==='career');
   const jobEntries=S.vacancies.filter(v=>v&&v.occupationType!=='career');
   let rows='';
+  let employerHtml='';
+  if(typeof EmploymentSystem==='object'&&EmploymentSystem&&typeof World!=='undefined'&&World&&typeof EmploymentSystem.activeForPerson==='function'){
+    const contract=EmploymentSystem.activeForPerson(World,'subject')[0];
+    if(contract&&typeof EmploymentUI==='object'&&EmploymentUI&&typeof EmploymentUI.businessPanel==='function'){
+      employerHtml='<div class="employer-panel"><div class="ps-head"><span>YOUR CURRENT EMPLOYER</span></div>'+EmploymentUI.businessPanel(World,contract.businessId)+'</div>';
+    }
+  }
   careerEntries.forEach(v=>{
     const track=CAREERS.find(c=>c.id===v.track);
     const yearsLeft=Number.isFinite(v.expiresYear)&&Number.isFinite(World.year)?Math.max(0,v.expiresYear-World.year):null;
