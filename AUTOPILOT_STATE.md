@@ -14,9 +14,9 @@
    - ✅ Persistence + migration for owner fields (idempotent repair)  
    - ✅ Focused tests: business creation, dividend flow, owner migration (4 new tests, 870 total pass)  
 
-2. **4C-8 — Employer UI**  
-   - Add `js/ui/employment-ui.js` business panel (status, finances summary, employee list)  
-   - Contract history view backed by `EmploymentSystem` APIs  
+2. **4C-8 — Employer UI** *(slice 1 done 2026-08-26; slices 2-3 remain)*   ✅▶️  
+   - ✅ `js/ui/employment-ui.js` business panel (status, finances summary, employee list)  
+   - ✅ Contract history view backed by `EmploymentSystem` APIs (`contractHistoryView`)  
    - Vacancy-browsing/application UI backed by 4C-4/4C-5  
    - Workplace-relationship UI (4C-6 already built)  
    - Full retirement of legacy `rollJobVacancies()` / flat `INC[]` income path  
@@ -31,21 +31,33 @@
 5. **Phase 12 — Saves / release** *(future)*  
    - Save / load system for `World` / `Business` / `EmploymentContract` state  
 
-## Active development: 4C-7 Ownership/Entrepreneurship — COMPLETE
+## Active development: 4C-8 Employer UI — slice 1 COMPLETE
 
-All three sub-goals implemented and verified:
+`js/ui/employment-ui.js` (`EmploymentUI`, presentation-only, read-only):
+- `businessPanel(world, businessId, options)` — status badge, settlement/kind/
+  sector meta, owner line (resolves `ownerNpcId`, 4C-7 aware), finances grid
+  (cash/debt + last annual revenue/expenses/payroll/profit when
+  `finances.lastYear != null`), staff list from
+  `EmploymentSystem.activeForBusiness` (on-leave flagged), open-vacancy count,
+  past-staff count, last 3 business-history entries.
+- `contractHistoryView(world, personId, options)` — every contract newest
+  first: occupation @ business, year range, salary, status label,
+  termination reason.
+- Reads exclusively through `BusinessSystem`/`EmploymentSystem` APIs; degrades
+  to friendly unavailable panels when the systems are absent; never mutates
+  World/S (verified by a JSON before/after snapshot test).
+- Wired into `life-game.html` after persistent-people-ui.js.
+- Tests: `tests/employment-ui.test.js` (4 tests). Full suite: **874/874 pass**.
 
-1. **ownerNpcId auto-assignment**: `BusinessSystem.create` now auto-assigns the first alive non-subject NPC at the settlement as owner when no explicit `ownerNpcId` is provided. Migration preserves ownerNpcId as-is.
+## Next iteration target: 4C-8 slice 2 — player-visible integration
 
-2. **Dividend flow**: `tickWorld` distributes 10-20% of business profit to the owner NPC deterministically via `WorldSimulation.streamFor(world, year, business.id, 'business-dividend')`. Dividend subtracted from business profit, added to owner NPC `employment.income`. History recorded with `{type:'dividend', year, amount, recipient}`.
-
-3. **Explicit owner override**: `BusinessSystem.create` accepts `ownerNpcId` spec parameter; when provided, it is used instead of auto-assignment.
-
-Tests: `tests/business-system-ownership.test.js` (4 tests, all passing). Full suite: 870/870 pass, 0 fail.
-
-## Next iteration target: 4C-8 Employer UI
-
-Build `js/ui/employment-ui.js` to surface business status, finances summary, and employee list to the player. Must read from `BusinessSystem` and `EmploymentSystem` APIs only — no legacy state duplication.
+1. Surface `EmploymentUI.businessPanel(World, contract.businessId)` inside the
+   existing job/work UI flow in `js/ui.js` (guard with typeof checks like the
+   other EmploymentSystem call sites) so players can actually see it.
+2. Ownership decision surface (4C-7): owner-visible dividend summary +
+   founder/closure actions routed through `BusinessSystem.create/close`.
+3. Then evaluate full retirement of the legacy `rollJobVacancies()` / flat
+   `INC[]` fallback path per the phase-page completion criteria.
 
 ## Lock
 
