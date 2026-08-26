@@ -155,3 +155,19 @@
 ## Lock
 
 `.autopilot.lock` present, age < 20 min — run in progress, per protocol.
+## ⭐ USER DIRECTIVE (2026-08-26 evening) — AUTHORITARIAN CRUELTY THEME + INTERCONNECTION
+North-star direction for all future slices (continue roadmap slices, but shape
+them toward this):
+
+1. THEME — living under an authoritarian, cruel government. The player is an
+   ordinary person surviving state oppression: surveillance, permits/queues,
+   propaganda, informants, rationing, arbitrary detention (Bureau), fear and
+   small resistances. Systems should express institutional cruelty through
+   MECHANICS (bureaucratic friction, punishment risk, scarcity), not gore.
+   Tone: oppressive, Kafkaesque, human — keep it tasteful.
+2. INTERCONNECTEDNESS FIRST — new systems must hook into what exists
+   (settlement economy, public health, NPC/households, medical, businesses/
+   employment/vacancies, relationship memory). Government/law (Phase 5),
+   narrative chains (7), property (8) etc. should grow FROM this theme.
+3. Every slice keeps deterministic sim rules (streamFor), migrations,
+   focused tests + full suite green.
