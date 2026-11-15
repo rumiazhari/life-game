@@ -199,11 +199,12 @@
     runtime.education.capacityPressure=bounded(runtime.education.enrolledStudents/Math.max(1,runtime.education.schoolCapacity));
     return runtime.education;
   }
-  function updateSecurity(runtime,settlement,world,year,national){
+  function updateSecurity(runtime,settlement,world,year,national,laborMarket){
     const economy=runtime.economy, health=runtime.publicHealth, previous=runtime.security;
     const rng=streamFor(world,year,settlement.id,'security');
     const unemployment=1-economy.employmentIndex;
-    const targetUnrest=clamp(unemployment*.55+(1-health.sanitation)*.18+health.outbreakRisk*.12+previous.unrest*.12+
+    const recentLayoffs=laborMarket?clamp(Number(laborMarket.layoffRate)||0):0;
+    const targetUnrest=clamp(unemployment*.55+recentLayoffs*.20+(1-health.sanitation)*.18+health.outbreakRisk*.12+previous.unrest*.12+
       nationalValue(national,['unrestPressure','unrest'],0)-nationalValue(national,['stability'],0)+rng.range(-.012,.012));
     const unrest=bounded(previous.unrest*.7+targetUnrest*.3);
     const base=bounded((settlement&&settlement.surveillance||0)/100);
@@ -212,6 +213,19 @@
     const checkpointPressure=bounded(surveillance*.58+(settlement&&settlement.travelDifficulty||1)*.08+unrest*.18);
     runtime.security={unrest,surveillance,checkpointPressure};
     return runtime.security;
+  }
+
+  // Derived from last year's authoritative business and employment records.
+  // No independent unemployment or political-pressure counter is persisted.
+  function laborMarketFor(world,settlementId,year){
+    const businesses=Object.values(world.businesses||{}).filter(b=>b&&b.settlementId===settlementId&&b.status!=='closed');
+    const contracts=Object.values(world.employmentContracts||{}).filter(c=>c&&c.settlementId===settlementId);
+    const employees=contracts.filter(c=>c.status==='active'||c.status==='on_leave').length;
+    const layoffs=contracts.filter(c=>c.status==='terminated'&&c.terminationReason==='layoff_financial'&&c.endedYear===year-1).length;
+    const distressed=businesses.filter(b=>b.status==='struggling'||(b.finances&&Number.isFinite(Number(b.finances.profit))&&Number(b.finances.profit)<0)).length;
+    const vacancies=Object.values(world.vacancies||{}).filter(v=>v&&v.settlementId===settlementId&&v.status==='open').length;
+    return {businesses:businesses.length,employees,distressRate:businesses.length?distressed/businesses.length:0,
+      layoffRate:Math.min(1,layoffs/Math.max(1,employees+layoffs)),opportunityRate:Math.min(1,vacancies/Math.max(1,employees+vacancies))};
   }
   function tick(world,context){
     if(!world) throw new Error('WorldSimulation.tick requires a world object');
@@ -226,7 +240,7 @@
         const activeId=world.publicHealth.activeSettlementId;
         if(!activeId||activeId===settlement.id) root.PublicHealth.triggerShock(runtime,'outbreak',clamp((globalOutbreak.severity||1)*.38),1,year);
       }
-      root.SettlementEconomy.tick(runtime,settlement,{random:streamFor(world,year,settlement.id,'economy'),national});
+      root.SettlementEconomy.tick(runtime,settlement,{random:streamFor(world,year,settlement.id,'economy'),national,laborMarket:laborMarketFor(world,settlement.id,year)});
       root.PublicHealth.tick(runtime,settlement,{random:streamFor(world,year,settlement.id,'health'),national,year});
       updateDemographics(runtime,settlement,world,year,national);
       world.settlements[settlement.id]=runtime;
@@ -244,7 +258,7 @@
       runtime.demographics.netMigration=runtime.demographics.internalIn-runtime.demographics.internalOut+external;
       externalNet+=external;
       updateEducation(runtime,settlement);
-      updateSecurity(runtime,settlement,world,year,national);
+      updateSecurity(runtime,settlement,world,year,national,laborMarketFor(world,settlement.id,year));
     });
     const after=defs.reduce((sum,settlement)=>sum+world.settlements[settlement.id].demographics.population,0);
     world.totalPopulation=after;
@@ -264,5 +278,5 @@
     if(!state)return {employment:'Unknown',costOfLiving:'Unknown',healthcare:'Unknown',unrest:'Unknown',surveillance:'Unknown'};
     return {employment:getEmploymentConditions(world,id),costOfLiving:costLabel(getCostOfLiving(world,id)),healthcare:root.PublicHealth.pressureLabel(getHealthcarePressure(world,id)),unrest:unrestLabel(state.security.unrest),surveillance:securityLabel(state.security.surveillance)};
   }
-  root.WorldSimulation={SIMULATION_SCHEMA_VERSION,RANGES,migrate,initialize,tick,getSettlementState,getCostOfLiving,getEmploymentConditions,getHealthcarePressure,getSettlementConditions,definitions,streamFor,attractiveness};
+  root.WorldSimulation={SIMULATION_SCHEMA_VERSION,RANGES,migrate,initialize,tick,laborMarketFor,getSettlementState,getCostOfLiving,getEmploymentConditions,getHealthcarePressure,getSettlementConditions,definitions,streamFor,attractiveness};
 })(typeof globalThis!=='undefined'?globalThis:this);
