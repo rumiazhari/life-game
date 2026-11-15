@@ -1896,3 +1896,256 @@ body.playing .recent-record{bottom:calc(122px + env(safe-area-inset-bottom));wid
   #actionReceipt:not(.hidden),#actionReceipt .ar-delta{animation:none!important}
   #planWrap .rec-chip,#planWrap .slipbtn{transition:none!important}
 }
+
+/* ===== MAP v6: PUBLIC-DOMAIN LITHUANIA GEOMETRY + KARSEN 2.5D MODEL =====
+   Low-poly real border + fictional city simulation; geometry in js/map.js.
+   No runtime tiles, location tracking or third-party rendering dependencies. */
+#mapWrap .map-sheet{background:linear-gradient(135deg,#e6e3d6,#d4d7c8 62%,#e2e4d9)}
+#mapWrap .map-kicker{font:800 11px 'Archivo',sans-serif;letter-spacing:.13em;color:#48584b}
+#mapWrap .map-toolbar{background:rgba(47,66,61,.09);border-bottom:1px solid #a9b8a8}
+#mapWrap .map-canvas{background:linear-gradient(160deg,#648d97,#b1cbd0 70%,#89a5a5);
+  box-shadow:0 14px 32px rgba(19,44,40,.16),inset 0 0 65px rgba(13,62,79,.12);
+  border:1px solid #566f70}
+#mapWrap .map-canvas::after{opacity:.03;pointer-events:none}
+#mapWrap .map-canvas.country-relief{background:radial-gradient(ellipse at 28% 25%,#aec6cc,#6996aa 72%,#436678)}
+#mapWrap .national-landmass{filter:drop-shadow(1.2px 3px 1px rgba(19,52,54,.22))}
+#mapWrap .map-land-shadow{fill:#274a4c;opacity:.45;stroke:none}
+#mapWrap .map-land-side{fill:#666d52;stroke:#56654b;stroke-width:.4}
+#mapWrap .map-land-surface{fill:#bdd1b0;stroke:none}
+#mapWrap .map-border{fill:none;stroke:#526750;stroke-width:1.0;opacity:.92}
+#mapWrap .map-geographic-relief .map-relief-band{opacity:.52}
+#mapWrap .map-relief-band.relief-west{fill:#c8c89c}
+#mapWrap .map-relief-band.relief-north{fill:#83a67c}
+#mapWrap .map-relief-band.relief-east{fill:#b3be89}
+#mapWrap .map-relief-band.relief-south{fill:#c7b67e}
+#mapWrap .map-relief-ridge{stroke:#6c946c;stroke-width:2.2;fill:none;opacity:.5}
+#mapWrap .map-river-main{stroke:#558fa8;stroke-width:.75;fill:none}
+#mapWrap .map-river,#mapWrap .map-river-small{stroke:#649cb0;stroke-width:.34;fill:none;opacity:.7}
+#mapWrap .map-greenery{opacity:.38}
+#mapWrap .map-minor-road{stroke:#ccbe96;stroke-width:.4;opacity:.63}
+#mapWrap .map-region-labels text{fill:#345b49;opacity:.5;stroke:none;letter-spacing:.16em;font-weight:800}
+#mapWrap .map-route{fill:none;stroke:#eddfbf;stroke-width:.9;stroke-linecap:round;
+  stroke-dasharray:none;opacity:.7;filter:drop-shadow(0 .1px .15px rgba(0,0,0,.3))}
+#mapWrap .map-route.rail{stroke:#3f5d62;stroke-width:.7;stroke-dasharray:1.6 .9;opacity:.74}
+#mapWrap .map-route.route-selected{stroke:#ffd178;stroke-width:1.75;stroke-dasharray:3 1.8;
+  stroke-linecap:round;opacity:1;animation:map-train-move 3.2s linear infinite}
+#mapWrap .map-route-glow{stroke:#fff4c8;stroke-width:.7;opacity:.83;fill:none;stroke-dasharray:none}
+@keyframes map-train-move{to{stroke-dashoffset:-24}}
+#mapWrap .map-city-model{pointer-events:none;filter:drop-shadow(.45px .8px .35px rgba(9,31,31,.52))}
+#mapWrap .map-city-model .city-shadow{fill:#284c50;opacity:.6}
+#mapWrap .map-city-model .city-wall{fill:#8d9682;stroke:#51645a;stroke-width:.12}
+#mapWrap .map-city-model .city-wall-right{fill:#647b72;stroke:#4f6258;stroke-width:.12}
+#mapWrap .map-city-model .city-roof{fill:#c7bb97;stroke:#675c48;stroke-width:.13}
+#mapWrap .map-city-model .city-tower{fill:#dbd0a8;stroke:#6d6650;stroke-width:.16}
+#mapWrap .map-node.current .city-roof{fill:#e8b875}
+#mapWrap .map-node.selected .city-roof{fill:#ffdb8a;stroke:#7f4e30;stroke-width:.28}
+#mapWrap .map-node.current .city-tower{fill:#eeb768}
+#mapWrap .map-node-dot{opacity:.25;stroke-width:.15}
+#mapWrap .map-node-hit{fill:transparent;stroke:none;pointer-events:all;cursor:pointer}
+#mapWrap .map-node:hover .city-roof{fill:#ffdb97}
+#mapWrap .map-node:focus-visible{outline:none}
+#mapWrap .map-node:focus-visible .map-node-hit{stroke:#f8cb78;stroke-width:1.3}
+#mapWrap .map-node text{font-size:3px;stroke:#eff2e3;stroke-width:.65px;paint-order:stroke;letter-spacing:.02em}
+#mapWrap .geo-credit{position:absolute;bottom:6px;right:10px;z-index:3;color:#e1eacc;
+  text-shadow:0 1px 3px #2c515a;font:800 9px 'Archivo',sans-serif;letter-spacing:.07em;
+  pointer-events:none;opacity:.82}
+#mapWrap .map-cartouche{background:rgba(30,54,49,.80);color:#edf3e4;border-color:#668679}
+#mapWrap .map-cartouche b,#mapWrap .map-cartouche span{color:#f3ead4}
+#mapWrap .map-compass{background:rgba(247,244,222,.82);border-color:#668175;color:#355442}
+#mapWrap .map-controls{display:flex;gap:5px}
+#mapWrap .map-controls .map-ctl{min-width:34px;min-height:34px;box-shadow:0 2px 4px rgba(34,50,44,.2);
+  background:rgba(240,239,220,.92);border:1px solid #789085;color:#355546;
+  transition:transform .13s,background .13s}
+#mapWrap .map-controls .map-ctl:hover{background:#fcf3d8;transform:translateY(-1px)}
+#mapWrap .map-controls .depth-ctl{font-weight:900;background:#3c5951;color:#f6e8c4;border-color:#506b5d}
+#mapWrap .map-controls .depth-ctl[aria-pressed="false"]{background:#f4eed8;color:#6d6554}
+
+/* Towns are true z-height extrusions from the actual authored footprints,
+   batch-rendered into an SVG layer (roofs, bright faces, dark faces). */
+#mapWrap .settlement-ground{fill:#b7c8aa}
+#mapWrap .plan-landuse{opacity:.86}
+#mapWrap .plan-fabric{opacity:.82}
+#mapWrap .map-mesh-city,#mapWrap .map-mesh-building{pointer-events:none}
+#mapWrap .map-mesh-batch .mesh-wall-dark,
+#mapWrap .map-mesh-building .mesh-wall-dark{fill:#66705f;stroke:#4c5b55;stroke-width:.3;stroke-linejoin:round}
+#mapWrap .map-mesh-batch .mesh-wall-light,
+#mapWrap .map-mesh-building .mesh-wall-light{fill:#b2ad92;stroke:#7d846b;stroke-width:.3;stroke-linejoin:round}
+#mapWrap .map-mesh-batch .mesh-roof,
+#mapWrap .map-mesh-building .mesh-roof{fill:#bead8b;stroke:#6f705e;stroke-width:.7;stroke-linejoin:round}
+#mapWrap .mesh-residence .mesh-roof{fill:#c4b495}
+#mapWrap .mesh-workplace .mesh-roof{fill:#777f82}
+#mapWrap .mesh-workplace .mesh-wall-dark{fill:#54676c}
+#mapWrap .mesh-workplace .mesh-wall-light{fill:#9caba9}
+#mapWrap .mesh-bureau .mesh-roof{fill:#7c8272}
+#mapWrap .mesh-bureau .mesh-wall-dark{fill:#495d58}
+#mapWrap .mesh-bureau .mesh-wall-light{fill:#aeb7a1}
+#mapWrap .mesh-market .mesh-roof{fill:#b89068}
+#mapWrap .mesh-market .mesh-wall-dark{fill:#805b4f}
+#mapWrap .mesh-worship .mesh-roof{fill:#d0b38e}
+#mapWrap .mesh-transport .mesh-roof{fill:#82979d}
+#mapWrap .mesh-clinic .mesh-roof{fill:#b6cbb8}
+#mapWrap .mesh-school .mesh-roof{fill:#bbaf83}
+#mapWrap .mesh-civic .mesh-roof{fill:#cbbf9d}
+#mapWrap .mesh-roof{paint-order:stroke fill}
+#mapWrap .depth-on .plan-canonical .map-building{fill:rgba(245,215,145,.03);stroke-width:2;
+  stroke:rgba(76,72,58,.28);pointer-events:all}
+#mapWrap .depth-on .plan-canonical .map-building.current{fill:rgba(83,122,175,.16);stroke:#2b68b0;stroke-width:4}
+#mapWrap .depth-on .plan-canonical .map-building.selected{fill:rgba(244,197,82,.16);stroke:#e0ac43;stroke-width:4}
+#mapWrap .plan-canonical .map-building-hit{cursor:pointer}
+#mapWrap .depth-off .map-mesh-city,#mapWrap .depth-off .map-mesh-building{display:none}
+#mapWrap .plan-contour{stroke:#6b9771;stroke-width:1.8;opacity:.5}
+#mapWrap .plan-road{stroke:#d0c49d}
+#mapWrap .plan-road.secondary{stroke:#d5c9ab}
+
+/* Compact context cards rather than another encyclopedia below the map */
+#mapWrap .map-strategy-selection{display:grid;grid-template-columns:minmax(180px,1fr) minmax(185px,.9fr);
+  gap:10px 16px;padding:12px 13px;background:#e2e5d6;border:1px solid #95a896}
+#mapWrap .map-selection-copy{gap:4px}
+#mapWrap .map-selection-copy>small{font:800 9px 'Archivo',sans-serif;letter-spacing:.12em;color:#6e7f6a}
+#mapWrap .map-selection-copy>b{font:700 clamp(18px,2.2vw,23px) 'Stardos Stencil',sans-serif;color:#2f483e}
+#mapWrap .map-selection-copy>span{font:700 9px 'Archivo',sans-serif;color:#718071;letter-spacing:.09em}
+#mapWrap .map-description{margin:5px 0 0}
+#mapWrap .map-description summary{font:700 9px 'Archivo',sans-serif;letter-spacing:.1em;
+  color:#4f6961;cursor:pointer;list-style:none}
+#mapWrap .map-description p{font:11px/1.5 'Special Elite',monospace;max-width:50ch;
+  border-left:2px solid #8ba498;margin-top:6px;padding:5px 8px;background:#f2f1df}
+#mapWrap .map-city-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;
+  grid-column:1/-1;grid-row:auto}
+#mapWrap .map-city-stats>div{min-width:0;display:flex;flex-direction:column;align-items:center;
+  padding:8px 5px;background:#eaf0e4;border:1px solid #a7baa8;gap:3px;text-align:center}
+#mapWrap .mstat-icon{font-size:19px;color:#5b806e;height:24px;line-height:1}
+#mapWrap .map-city-stats small{font:800 8px 'Archivo',sans-serif;letter-spacing:.13em;color:#6b816e}
+#mapWrap .map-city-stats b{font:800 14px 'Stardos Stencil',sans-serif;color:#42534c}
+#mapWrap .map-route-intel{grid-column:1/-1;border:1px solid #b7c3af;background:#f0efdc;padding:8px 10px}
+#mapWrap .map-route-intel-h{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  border-bottom:1px dashed #afbdab;padding-bottom:6px;font:800 9px 'Archivo',sans-serif;
+  letter-spacing:.1em;color:#52705d}
+#mapWrap .map-route-intel-h b{color:#8a6944}
+#mapWrap .map-route-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:9px 0 8px}
+#mapWrap .map-route-metrics>span{display:flex;flex-direction:column;align-items:center;text-align:center;
+  font:800 9px 'Archivo',sans-serif;color:#7a8a79;letter-spacing:.1em}
+#mapWrap .map-route-metrics b{font:800 16px 'Stardos Stencil',sans-serif;color:#3a5949}
+#mapWrap .map-route-stops{display:flex;align-items:center;flex-wrap:wrap;gap:5px 3px}
+#mapWrap .map-route-stops>span{font:700 10px 'Archivo',sans-serif;padding:4px 6px;
+  border:1px solid #aabb9f;background:#e0e8d6;color:#4e6658}
+#mapWrap .map-route-stops>.origin{background:#d3e5eb;color:#446478}
+#mapWrap .map-route-stops>.destination{background:#f5dcb0;color:#805c31}
+#mapWrap .map-route-stops i{font-size:12px;font-style:normal;color:#8da38d}
+#mapWrap .map-open-button{min-height:38px;grid-column:1/-1;background:#35584f;
+  color:#ffebc9;border-color:#274c42;letter-spacing:.08em}
+#mapWrap .map-here-tag{display:flex;align-items:center;padding:6px 8px;background:#cfdfd2;
+  font:800 10px 'Archivo',sans-serif;letter-spacing:.07em;color:#2b634b}
+#mapWrap .map-strategy-selection .map-actions{grid-column:1/-1;display:block;min-width:0}
+#mapWrap .map-travel-note{display:block;color:#6e7e68;font:800 10px 'Archivo',sans-serif;
+  letter-spacing:.08em;margin:6px 0}
+#mapWrap .map-travel-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:8px 0}
+#mapWrap .map-travel-choice{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:4px;min-height:105px;padding:9px 5px;border:1px solid #8aab9a;background:#e8efe4;
+  cursor:pointer;transition:transform .17s,box-shadow .17s,border-color .17s}
+#mapWrap .map-travel-choice:hover:not(:disabled){transform:translateY(-3px);border-color:#cd9853;
+  box-shadow:0 4px 13px rgba(36,72,59,.2);background:#f8eed6}
+#mapWrap .map-travel-choice:focus-visible{outline:3px solid #c28d43;outline-offset:2px}
+#mapWrap .map-travel-choice:disabled{cursor:not-allowed;opacity:.52}
+#mapWrap .map-choice-icon{font-size:20px;line-height:1}
+#mapWrap .map-choice-name{font:800 10px 'Archivo',sans-serif;letter-spacing:.08em;color:#53705f}
+#mapWrap .map-travel-choice>b{font:800 17px 'Stardos Stencil',sans-serif;color:#355044}
+#mapWrap .map-travel-choice>small{font:800 8px 'Archivo',sans-serif;letter-spacing:.04em;color:#7c8c7d}
+#mapWrap .map-travel-choice.travel-discreet{background:#e5e4d3}
+#mapWrap .map-travel-choice.travel-express{background:#dae8e8}
+@media(max-width:700px){
+ #mapWrap .map-strategy-selection{grid-template-columns:1fr;padding:11px;gap:8px}
+ #mapWrap .map-city-stats{grid-template-columns:repeat(4,minmax(0,1fr))}
+ #mapWrap .map-route-intel{grid-column:1}
+ #mapWrap .map-open-button{grid-column:1}
+ #mapWrap .map-controls{gap:3px}
+ #mapWrap .map-controls .map-ctl{min-height:37px;min-width:32px}
+ #mapWrap .map-compass{opacity:.75}
+ #mapWrap .geo-credit{font-size:7px;max-width:70%;text-align:right}
+}
+@media(max-width:430px){
+ #mapWrap .map-city-stats small{font-size:7px}
+ #mapWrap .map-city-stats b{font-size:12px}
+ #mapWrap .map-travel-choice{min-height:98px}
+ #mapWrap .map-choice-icon{font-size:18px}
+ #mapWrap .map-choice-name{font-size:9px}
+ #mapWrap .map-travel-choice>b{font-size:14px}
+ #mapWrap .map-travel-choice>small{font-size:7px}
+}
+@media(prefers-reduced-motion:reduce){
+ #mapWrap .map-route.route-selected{animation:none}
+ #mapWrap .map-controls .map-ctl,
+ #mapWrap .map-travel-choice{transition:none}
+}
+
+
+/* Architecturally identifiable public-service landmarks, modeled as
+   pitched roofs, spires and chimneys above their true 3D footprints. */
+#mapWrap .map-rooftop{pointer-events:none;stroke-linejoin:round;stroke-linecap:round}
+#mapWrap .map-rooftop.industry rect{fill:#7b655a;stroke:#4e4643;stroke-width:1.4}
+#mapWrap .map-rooftop.industry .smoke{fill:none;stroke:#e0dcd0;stroke-width:3;opacity:.65;stroke-dasharray:7 4;animation:chimney-flow 3.8s linear infinite}
+#mapWrap .map-rooftop.civic path{fill:#b9b69c;stroke:#657467;stroke-width:1.7}
+#mapWrap .map-rooftop.civic .tower-line{fill:none;stroke:#657467;stroke-width:2}
+#mapWrap .map-rooftop.worship path:first-child{fill:#b7aa88;stroke:#655d52;stroke-width:1.6}
+#mapWrap .map-rooftop.worship .cross{fill:none;stroke:#6b4d45;stroke-width:2.2}
+#mapWrap .map-rooftop.clinic rect{fill:#e2e6db;stroke:#67817b;stroke-width:1.7}
+#mapWrap .map-rooftop.clinic .cross{fill:none;stroke:#418864;stroke-width:2.5}
+#mapWrap .map-rooftop.rail path:first-child{fill:#8fa4a5;stroke:#526a68;stroke-width:1.8}
+#mapWrap .map-rooftop.rail .tower-line{fill:none;stroke:#4b6578;stroke-width:1.6}
+#mapWrap .map-rooftop.market path:first-child{fill:#c7a077;stroke:#956947;stroke-width:1.6}
+#mapWrap .map-rooftop.market .roof-line{fill:none;stroke:#966c50;stroke-width:1.3}
+#mapWrap .map-rooftop.school path:first-child{fill:none;stroke:#56635d;stroke-width:1.6}
+#mapWrap .map-rooftop.school path:nth-child(2){fill:#a74538;stroke:#6f5145;stroke-width:1.6}
+#mapWrap .map-residence-gable{fill:none;stroke:#776b59;stroke-width:2.2}
+@keyframes chimney-flow{to{stroke-dashoffset:-30}}
+@media(prefers-reduced-motion:reduce){
+ #mapWrap .map-rooftop.industry .smoke{animation:none}
+}
+/* Political-economic map modes are sourced from live WorldSimulation state. */
+#mapWrap .map-lens-panel{display:flex;align-items:center;gap:5px;padding:6px 10px;
+ background:#d7e1d3;border:1px solid #a5b7a4;border-bottom:0;flex-wrap:wrap}
+#mapWrap .map-lens-kicker{font:900 9px 'Archivo',sans-serif;letter-spacing:.13em;
+ color:#4d705e;margin-right:4px}
+#mapWrap .map-lens-button{display:flex;align-items:center;gap:6px;padding:7px 10px;
+ border:1px solid #a4b8a7;background:#ebefe2;color:#516d5d;
+ font:800 9px 'Archivo',sans-serif;letter-spacing:.07em;cursor:pointer;
+ transition:background .14s,color .14s}
+#mapWrap .map-lens-button>span{font-size:14px;line-height:1}
+#mapWrap .map-lens-button.active{color:#f4edd9;background:#456a5b;border-color:#385f4f}
+#mapWrap .map-lens-button:hover:not(.active){background:#fff8e8}
+#mapWrap .map-lens-button:focus-visible{outline:2px solid #d69d49;outline-offset:2px}
+#mapWrap .map-lens-key{display:flex;align-items:center;gap:3px;margin-left:auto;
+ font:800 8px 'Archivo',sans-serif;letter-spacing:.07em;color:#718173}
+#mapWrap .map-lens-key>i{width:7px;height:7px;border-radius:50%;display:inline-block;margin-left:4px}
+#mapWrap .atlas-key-good{background:#3c9669}
+#mapWrap .atlas-key-danger{background:#c24c3b}
+#mapWrap .atlas-status-ring{fill:none;stroke-width:1.45;stroke-linecap:round;
+ pointer-events:none;opacity:.91;filter:drop-shadow(0 0 .3px rgba(18,40,31,.5))}
+#mapWrap .atlas-status-ring.atlas-good{stroke:#47b875}
+#mapWrap .atlas-status-ring.atlas-mid{stroke:#e3b65a}
+#mapWrap .atlas-status-ring.atlas-danger{stroke:#e06651}
+#mapWrap .map-atlas-selected{grid-column:1/-1;display:flex;justify-content:space-between;
+ align-items:center;padding:8px 11px;background:#d4e4d7;border:1px solid #a5bead;
+ color:#3d614f;font:900 10px 'Archivo',sans-serif;letter-spacing:.08em}
+#mapWrap .map-atlas-selected>span{font:900 15px 'Stardos Stencil',sans-serif}
+#mapWrap .map-relocation-warning{display:flex;flex-wrap:wrap;align-items:center;gap:5px 12px;
+ padding:8px 10px;margin-top:6px;border-left:3px solid #b16b45;background:#f2e0ca;
+ color:#795033;font:800 10px 'Archivo',sans-serif}
+#mapWrap .map-relocation-warning b{font-weight:900;letter-spacing:.09em}
+#mapWrap .map-relocation-warning span{font:10px/1.4 'Special Elite',monospace;color:#664b38}
+@media(max-width:600px){
+ #mapWrap .map-lens-panel{gap:4px;padding:5px}
+ #mapWrap .map-lens-kicker{font-size:8px}
+ #mapWrap .map-lens-button{padding:7px 6px;font-size:8px;gap:3px}
+ #mapWrap .map-lens-button>span{font-size:12px}
+ #mapWrap .map-lens-key{width:100%;justify-content:flex-end;padding:2px 5px}
+}
+@media(prefers-reduced-motion:reduce){#mapWrap .map-lens-button{transition:none}}
+
+/* The original village-green land-use had no fill rule and rendered black. */
+#mapWrap .plan-landuse .lu-green{fill:#dfe8c2;stroke:#a9be93}
+@media(max-width:700px){
+  /* Country title already appears above the viewport; cartouche must not
+     obscure Baltic coastline and city markers on a 390px phone. */
+  #mapWrap .national-map-canvas .map-cartouche{display:none}
+  #mapWrap .settlement-canvas .map-cartouche{font-size:9px;max-width:45%;padding:4px}
+}

@@ -114,9 +114,9 @@ const KARSEN_SETTLEMENTS=[
 const KARSEN_MAP_POSITIONS={
  // The country is deliberately roomy: a long, crooked bean with a western
  // coast, northern woods, a central lowland, and a broad eastern shoulder.
- branec:{x:82,y:52},veskar:{x:23,y:59},eisenmark:{x:108,y:69},kostrin:{x:68,y:68},rudava:{x:122,y:57},
- dobraven:{x:44,y:40},krasnava:{x:78,y:81},brezin:{x:56,y:28},lindava:{x:27,y:43},sundervik:{x:117,y:29},
- oberhain:{x:128,y:78},marec:{x:134,y:43},kamenor:{x:43,y:58},svetlin:{x:103,y:81}
+ branec:{x:75.8,y:57.7},veskar:{x:17.6,y:34.5},eisenmark:{x:85.1,y:33.6},kostrin:{x:104.4,y:64.0},rudava:{x:121.5,y:37.7},
+ dobraven:{x:41.5,y:26.1},krasnava:{x:64.4,y:67.5},brezin:{x:43.4,y:16.8},lindava:{x:42.3,y:47.5},sundervik:{x:18.3,y:28.1},
+ oberhain:{x:111.1,y:40.3},marec:{x:93.4,y:20.0},kamenor:{x:25.5,y:44.6},svetlin:{x:78.9,y:72.1}
 };
 KARSEN_SETTLEMENTS.forEach(s=>Object.assign(s,KARSEN_MAP_POSITIONS[s.id]));
 const KARSEN_BUILDING_NAMES={
@@ -191,6 +191,81 @@ const KARSEN_ROUTES=[
 function settlementById(id){ return KARSEN_SETTLEMENTS.find(s=>s.id===id)||null; }
 function buildingById(settlementId,id){ const s=settlementById(settlementId); return s&&s.buildings.find(b=>b.id===id)||null; }
 function routeBetween(a,b){ return KARSEN_ROUTES.find(r=>(r.from===a&&r.to===b)||(r.from===b&&r.to===a))||null; }
+
+/* Transport graph, not an instant teleport. Three policies share exactly
+   the same canonical KARSEN_ROUTES; wages, travel costs, surveillance and
+   security are read from current world records. No phantom roads added. */
+const TRAVEL_STYLES={
+  economy:{id:'economy',name:'ECONOMY',fare:1,risk:1,fatigue:2},
+  express:{id:'express',name:'EXPRESS',fare:1.34,risk:1.06,fatigue:0},
+  discreet:{id:'discreet',name:'DISCREET',fare:1.22,risk:.61,fatigue:1}
+};
+function routePlan(from,to,preference){
+  if(!from||!to||from.id===to.id)return null;
+  const style=TRAVEL_STYLES[preference]||TRAVEL_STYLES.economy;
+  const graph={};KARSEN_SETTLEMENTS.forEach(s=>{graph[s.id]=[];});
+  KARSEN_ROUTES.forEach((e,i)=>{
+    for(const [src,dst] of [[e.from,e.to],[e.to,e.from]]){
+      const target=settlementById(dst);
+      if(!target)continue;
+      const base=Math.max(25,Math.round(e.distance*target.travelDifficulty*1.35));
+      const time=e.distance/(e.mode==='rail'?2.0:1);
+      const runtime=typeof WorldSimulation==='object'&&WorldSimulation&&World&&World.settlements?
+        WorldSimulation.getSettlementState(World,dst):null;
+      const security=runtime&&runtime.security||{};
+      const surveillance=Number.isFinite(Number(security.surveillance))?
+        Number(security.surveillance):target.surveillance/100;
+      const pressure=Number(security.checkpointPressure)||0;
+      const unrest=Number(security.unrest)||0;
+      // This exposure is dynamic: martial law, unrest and surveillance
+      // change the route the player considers safest.
+      const exposure=clamp(surveillance*.38+pressure*.47+unrest*.15,0,1);
+      const weight=style.id==='express'?time:
+        style.id==='discreet'?e.distance*.38+exposure*45+(e.mode==='rail'?7:0):base;
+      graph[src].push({from:src,to:dst,mode:e.mode,distance:e.distance,
+        index:i,base,weight,exposure});
+    }
+  });
+  const best={[from.id]:0},previous={},seen=new Set();
+  while(true){
+    const node=Object.keys(best).filter(id=>!seen.has(id)).sort((a,b)=>best[a]-best[b]||a.localeCompare(b))[0];
+    if(!node)break;
+    if(node===to.id)break;
+    seen.add(node);
+    for(const leg of graph[node]||[]){
+      const value=best[node]+leg.weight;
+      if(best[leg.to]==null||value<best[leg.to]-1e-8){
+        best[leg.to]=value;previous[leg.to]={node,leg};
+      }
+    }
+  }
+  if(best[to.id]==null)return null;
+  let at=to.id,legs=[];
+  while(at!==from.id){
+    const prev=previous[at];if(!prev)return null;
+    legs.unshift(prev.leg);at=prev.node;
+  }
+  const stops=[from.id].concat(legs.map(e=>e.to));
+  const rawFare=legs.reduce((sum,e)=>sum+e.base,0);
+  const fare=Math.round(rawFare*style.fare);
+  const distance=legs.reduce((sum,e)=>sum+e.distance,0);
+  const averageExposure=legs.reduce((sum,e)=>sum+e.exposure,0)/legs.length;
+  const local=typeof WorldSimulation==='object'&&WorldSimulation&&World&&World.settlements?
+    WorldSimulation.getSettlementState(World,from.id):null;
+  const pressure=local&&local.security?Number(local.security.checkpointPressure)||0:0;
+  const scrutiny=S?Number(S.scrutiny)||0:0;
+  const permitRisk=clamp((averageExposure*.87+scrutiny/100*.27+
+    Math.max(0,legs.length-1)*.035+pressure*.12)*style.risk,.035,.94);
+  // resolveTravel() applies a 0.45 multiplier when checking events.
+  // Show that same true probability before confirming a ticket.
+  const checkpointProbability=clamp(permitRisk*.45,0,.95);
+  return {from:from.id,to:to.id,choice:style.id,style:style.name,
+    stops,legs,distance,rawFare,fare,permitRisk,checkpointProbability,
+    checkpointPressure:pressure,fatigue:style.fatigue,
+    mode:legs.every(l=>l.mode==='rail')?'rail':
+      legs.every(l=>l.mode==='road')?'road':'mixed'};
+}
+
 function newWorld(){
   // Every settlement is a valid birthplace. Equal settlement odds keep
   // villages playable instead of making population size decide the opening.
@@ -206,10 +281,12 @@ function currentSettlement(){ return World&&World.activeSettlementId?settlementB
 function currentBuilding(){ const s=currentSettlement(); return s&&World?buildingById(s.id,World.activeBuildingId)||s.buildings[0]:null; }
 function mapDistance(a,b){ const dx=a.x-b.x,dy=a.y-b.y; return Math.round(Math.sqrt(dx*dx+dy*dy)); }
 function travelDestination(id){ return settlementById(id); }
-function travelCost(from,to){
-  const route=routeBetween(from.id,to.id); const distance=route?route.distance:mapDistance(from,to)*1.7;
-  return Math.max(25,Math.round(distance*to.travelDifficulty*1.35));
+
+function travelCost(from,to,preference){
+  const plan=routePlan(from,to,preference);
+  return plan?Math.max(25,plan.fare):Infinity;
 }
+
 function moveWithinSettlement(buildingId){
   const viewed=settlementById(World&&World.map&&World.map.selectedSettlementId)||currentSettlement();
   const b=viewed&&buildingById(viewed.id,buildingId); if(!viewed||!b||!S) return false;
@@ -217,27 +294,60 @@ function moveWithinSettlement(buildingId){
   if(World.activeSettlementId===viewed.id){ World.activeBuildingId=b.id; if(S.location) S.location.buildingId=b.id; }
   renderMapIfOpen(); return true;
 }
-function scheduleTravel(id){
-  if(!S||!World||S.traveling) return {ok:false,reason:'already travelling'};
-  if(S.eduStage||(S.education&&S.education.stageId)) return {ok:false,reason:'enrolled students must finish or transfer their course before travelling'};
-  const from=currentSettlement(), to=travelDestination(id); if(!from||!to||from.id===to.id) return {ok:false,reason:'already there'};
-  if(S.age<16) return {ok:false,reason:'no independent travel before age 16'};
-  const cost=travelCost(from,to); if(S.assets<cost) return {ok:false,reason:'needs '+money(cost)};
-  const route=routeBetween(from.id,to.id); const permitRisk=clamp((to.surveillance+S.scrutiny)/250,0.05,.7);
-  S.assets-=cost;
-  S.traveling={from:from.id,to:to.id,departYear:currentYear(),arriveYear:currentYear()+1,cost,mode:route?route.mode:'unregistered road',permitRisk};
-  S.scrutiny=clamp(S.scrutiny+(route?2:6),0,100);
+
+function scheduleTravel(id,preference){
+  if(!S||!World||S.traveling)return {ok:false,reason:'already travelling'};
+  if(S.eduStage||(S.education&&S.education.stageId))
+    return {ok:false,reason:'enrolled students must finish or transfer their course before travelling'};
+  const from=currentSettlement(),to=travelDestination(id);
+  if(!from||!to||from.id===to.id)return {ok:false,reason:'already there'};
+  if(S.age<16)return {ok:false,reason:'no independent travel before age 16'};
+  const plan=routePlan(from,to,preference);
+  if(!plan)return {ok:false,reason:'no connected route'};
+  // Invoke travelCost() via its installed WorldGameplay wrapper so the
+  // actual fare matches the local checkpoint-friction preview in the UI.
+  const fare=travelCost(from,to,plan.choice);
+  if(!Number.isFinite(fare)||S.assets<fare)return {ok:false,reason:'needs '+money(fare)};
+  S.assets-=fare;
+  S.traveling={
+    from:from.id,to:to.id,departYear:currentYear(),arriveYear:currentYear()+1,
+    cost:fare,mode:plan.mode,preference:plan.choice,route:plan.stops,
+    legs:plan.legs.map(l=>({from:l.from,to:l.to,mode:l.mode,distance:l.distance})),
+    permitRisk:plan.permitRisk,checkpointPressure:plan.checkpointPressure,
+    routeRiskPrecalculated:true,fatigue:plan.fatigue
+  };
+  S.scrutiny=clamp(S.scrutiny+(plan.choice==='discreet'?0:plan.choice==='express'?3:2),0,100);
   updatePersonalStanding();
-  logEv('TRAVEL FILE. Subject departed '+from.name+' for '+to.name+' by '+(route?route.mode:'an unregistered road')+'. Fare paid: '+money(cost)+'. Arrival is filed for next year.',{assets:0,happiness:-1},'plan','MOVEMENT · YEAR '+S.age);
-  renderStats(window.C||{}); return {ok:true};
+  logEv('TRAVEL FILE. '+plan.style+' route: '+plan.stops.map(x=>settlementById(x).name).join(' → ')+
+    '. '+fare+' charged; checkpoint delay probability '+Math.round(plan.checkpointProbability*100)+'%. Expected arrival next year.',
+    {assets:0,happiness:-1},'plan','MOVEMENT · YEAR '+S.age);
+  renderStats(window.C||{});
+  return {ok:true,route:plan.stops,choice:plan.choice,cost:fare,permitRisk:plan.permitRisk,checkpointProbability:plan.checkpointProbability};
 }
+
 function resolveTravel(){
   if(!S||!S.traveling||S.traveling.arriveYear>currentYear()) return;
   const trip=S.traveling, to=settlementById(trip.to); S.traveling=null;
   if(!to) return;
   const delayed=chance(trip.permitRisk*.45);
+  if(trip.preference==='economy') S.health=clamp(S.health-2,0,100);
+  else if(trip.preference==='discreet') S.health=clamp(S.health-1,0,100);
+  else if(trip.preference==='express') S.happiness=clamp(S.happiness+1,0,100);
   if(delayed){ S.scrutiny=clamp(S.scrutiny+10,0,100); S.happiness=clamp(S.happiness-4,0,100);
-    logEv('The train was held at a checkpoint. The subject arrived late, searched, and with one more note in the margin.',{happiness:-4},'ruling','CHECKPOINT · YEAR '+S.age);
+    logEv('The route was detained for prolonged checkpoint inspection. The subject arrived, searched, with another note on the record.',{happiness:-4},'ruling','CHECKPOINT · YEAR '+S.age);
+  }
+  // A contract is tied to a real employer in a real settlement.
+  // Cross-city relocation cannot silently preserve a job located elsewhere.
+  // End the existing contract ON ARRIVAL, never at ticket purchase.
+  if(typeof EmploymentSystem==='object'&&EmploymentSystem&&World&&
+    typeof EmploymentSystem.activeForPerson==='function'&&
+    typeof EmploymentSystem.resign==='function'){
+    const displaced=EmploymentSystem.activeForPerson(World,'subject')
+      .filter(c=>c&&c.settlementId!==to.id);
+    displaced.forEach(c=>EmploymentSystem.resign(World,c.id,'worker_relocated',currentYear(),{subject:S}));
+    if(displaced.length) logEv('RELOCATION NOTICE. Previous employment ended following the move to '+
+      to.name+'. The subject must seek work in the destination labor market.',
+      {},'ruling','EMPLOYMENT · YEAR '+S.age);
   }
   World.activeSettlementId=to.id; World.place=to.name; World.activeBuildingId=to.buildings.find(b=>b.type==='residence')?.id||to.buildings[0].id;
   World.map.selectedSettlementId=to.id; World.map.selectedBuildingId=World.activeBuildingId; World.map.mode='settlement';

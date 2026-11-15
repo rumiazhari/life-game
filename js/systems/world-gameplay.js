@@ -88,7 +88,7 @@
       if(result&&result.ok&&subject&&subject.traveling&&runtime&&runtime.security){
         const pressure=runtime.security.checkpointPressure;
         subject.traveling.checkpointPressure=pressure;
-        subject.traveling.permitRisk=clamp((subject.traveling.permitRisk||0)+pressure*.42,0,.95);
+        if(!subject.traveling.routeRiskPrecalculated) subject.traveling.permitRisk=clamp((subject.traveling.permitRisk||0)+pressure*.42,0,.95);
       }
       return result;
     };

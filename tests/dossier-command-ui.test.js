@@ -37,8 +37,8 @@ test('dossier contains a persistent world briefing, direct action receipt, and v
  const source=fs.readFileSync(path.resolve(__dirname,'../life-game.html'),'utf8');
  assert.match(source,/id="worldBrief"/);
  assert.match(source,/id="actionReceipt"/);
- assert.match(source,/css\/style.css\?v=20261115-visual1/);
- assert.match(source,/js\/ui.js\?v=20261115-visual1/);
+ assert.match(source,/css\/style.css\?v=20261116-map7/);
+ assert.match(source,/js\/ui.js\?v=20261116-map7/);
  assert.match(source,/js\/main.js\?v=20261115-command1/);
 });
 test('world briefing renders actual employment, company and security indicators without changing the world',()=>{
