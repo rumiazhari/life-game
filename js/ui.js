@@ -530,10 +530,12 @@ function recommendedActions(rem){
     }
   }
   if(S.age>=16&&S.jobTier<1)add('p','lookwork','Find work');
+  else if(S.age>=16)add('d','laborDispute','Workplace negotiation');
+  if(S.age>=18&&S.jobTier>=1)add('d','presspromo','Career progression');
   else if(S.assets<-500)add('p','overtime','Earn overtime');
   if(S.health<45)add('p','doctor','See the doctor');
   if(S.happiness<32)add('p',S.age<16?'family':'walk','Lift your mood');
-  return out.slice(0,2);
+  return out.slice(0,3);
 }
 let coachMem={};
 function coachGet(k){
@@ -1602,7 +1604,30 @@ function planActionButton(def,type,rem){
 function fxPreviewHtmlSafe(def){
   try{const h=typeof def.fx==='object'&&def.fx?fxPreviewChips(def.fx):'';return h?'<div class="sb-fx">'+h+'</div>':'';}catch(e){return '';}
 }
-let planTab='pursuits';
+
+function escapePlanText(value){return String(value==null?'':value).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
+function focusSituationHtml(rem){
+  const cards=recommendedActions(rem),sid=World&&World.activeSettlementId;
+  const market=typeof WorldSimulation==='object'&&WorldSimulation&&sid&&WorldSimulation.laborMarketFor?WorldSimulation.laborMarketFor(World,sid,World.year):null;
+  const local=typeof WorldSimulation==='object'&&WorldSimulation&&sid&&WorldSimulation.getSettlementState?WorldSimulation.getSettlementState(World,sid):null;
+  const labor=typeof WorkplaceSystem==='object'&&WorkplaceSystem&&World?WorkplaceSystem.laborSituation(World):null;
+  const economy=local&&local.economy||{},security=local&&local.security||{};
+  const condition=market&&market.businesses?
+    Math.round(market.distressRate*100)+'% of local employers are struggling; recent layoffs: '+Math.round(market.layoffRate*100)+'% of known positions.':
+    'No local business report is available yet.';
+  const employer=labor&&labor.available?
+    '<div class="ps-catlab">YOUR EMPLOYER</div><div class="qempty">'+escapePlanText(labor.businessName)+
+    ': annual salary '+money(labor.salary)+'; recorded profit '+money(labor.profit)+'; '+labor.peers+
+    ' coworkers. Negotiations can change multiple contracts and next year’s payroll.</div>':'';
+  const district='<div class="ps-catlab">LOCAL ECONOMY · '+escapePlanText(World&&World.place||'Karsen')+'</div>'+
+    '<div class="qempty">'+escapePlanText(condition)+' Employment index: '+Math.round((Number(economy.employmentIndex)||0)*100)+
+    '%; unrest: '+Math.round((Number(security.unrest)||0)*100)+'%. These values come from the simulated world.</div>';
+  const quick=cards.length?'<div class="rec-strip"><span class="rec-lab">DECIDE NOW</span>'+cards.join('')+'</div>':
+    '<div class="qempty">No urgent action is recommended. End the year or browse the full decisions.</div>';
+  return district+employer+quick+'<div class="qempty">Other actions remain under ACT NOW and DECISIONS.</div>';
+}
+
+let planTab='focus';
 function renderPlan(){
   const h=planHours(), used=energyUsed();
   const rem=Math.max(0,h-used);
@@ -1655,7 +1680,8 @@ function renderPlan(){
     }
   }
   let body='';
-  if(planTab==='decisions'){ body=dh+hh; }
+  if(planTab==='focus'){ body=focusSituationHtml(rem); }
+  else if(planTab==='decisions'){ body=dh+hh; }
   else if(planTab==='desk'){ body=(lh?'<div class="ps-catlab">LIVING — NO ENERGY</div>'+lh:'')+'<div class="ps-catlab">CLERK’S DISCRETION</div><div class="ps-clerk">'+ch+'</div>'; }
   else {
     const recChips=recommendedActions(rem);
@@ -1666,6 +1692,7 @@ function renderPlan(){
     '<div class="ps-head"><span>DIRECT ORDERS · FORM 7</span><span style="display:flex;align-items:center;gap:10px"><span class="hrs">⚡ '+rem+'/'+h+' ENERGY '+pipsHTML(rem,h)+'</span><button class="ps-close" id="planClose" aria-label="Close">✕</button></span></div>'+
     '<div class="ps-sub"><span>WHAT IS DONE IS DONE — ACTS LAND IMMEDIATELY</span></div>'+qh+
     '<div class="plan-tabs">'+
+      '<button class="ptab'+(planTab==='focus'?' on':'')+'" data-plan-tab="focus">PRIORITIES</button>'+
       '<button class="ptab'+(planTab==='pursuits'?' on':'')+'" data-plan-tab="pursuits">ACT NOW</button>'+
       '<button class="ptab'+(planTab==='decisions'?' on':'')+'" data-plan-tab="decisions">DECISIONS</button>'+
       '<button class="ptab'+(planTab==='desk'?' on':'')+'" data-plan-tab="desk">BUREAU DESK</button>'+
@@ -1690,7 +1717,7 @@ function labelOf(q){if(q.id==='practice'&&q.skill&&SKILLS[q.skill])return 'Pract
   if(q.id==='meetsomeone'&&q.venue){const v=MEETING_VENUES.find(x=>x.id===q.venue); if(v) return 'Meet Someone: '+v.name;}
   const d=PUR_MAP[q.id]||DEC_MAP[q.id];return (PUR_MAP[q.id]?pursuitLabel(d):decisionLabel(d));}
 function pursuitLabel(p){return {study:'Hit the books',lookwork:'Look for work',overtime:'Work overtime',court:'Court {partner}',tendspouse:'Tend the marriage',family:'Visit the children',writemother:'Write to {mother}',writefather:'Write to {father}',doctor:'See the doctor',walk:'Walk it off',bottle:'The bottle',track:'The racetrack',backroom2:'The back room',rest:'Do nothing',favor:'Call in a favor',practice:'Practice a skill',tendmember:'Look after a member',gig:'Off the books',soupkitchen:'The mission line',meetsomeone:'Meet someone new',flirt:'Flirt',flirtsecret:'See them, secretly',tendcontact:'Spend time together',covertracks:'Cover your tracks'}[p.id]||p.id;}
-function decisionLabel(d){if(d.id==='crime'){return ['Lift a wallet','Run the numbers','Fence the goods','The big score','Lie low'][S.crime]||'Crime';}return {propose:'Propose to {partner}',trychild:'Try for a child',presspromo:'Press for promotion',learntrade:'Take vocational training',nightshift:'Take night shift',quitjob:'Quit the job',relocate:'Move to the coast',leave:'Take a year off',leaveschool:'Leave school now',loan:'Take the loan',gamblelic:'Open a gambling hall',expunge:'Expunge record',treatment:'File treatment',earlyret:'Retire early',namechange:'Change name',breakup:'End it with {partner}',divorce:'File for divorce',estrangemother:'Go no-contact with {mother}',estrangefather:'Go no-contact with {father}',recruit:'Bring someone into the fold',bankloan:'Take out a bank loan',storecredit:'Buy on store credit',payoffdebt:'Pay off a debt early',endaffair:'End it, quietly',cutcontact:'Cut them off',seekfixer:'Meet a fixer',fixerjob:'Work for the fixer'}[d.id]||d.id;}
+function decisionLabel(d){if(d.id==='crime'){return ['Lift a wallet','Run the numbers','Fence the goods','The big score','Lie low'][S.crime]||'Crime';}return {propose:'Propose to {partner}',trychild:'Try for a child',presspromo:'Press for promotion',learntrade:'Take vocational training',nightshift:'Take night shift',laborDispute:'Negotiate at work',quitjob:'Quit the job',relocate:'Move to the coast',leave:'Take a year off',leaveschool:'Leave school now',loan:'Take the loan',gamblelic:'Open a gambling hall',expunge:'Expunge record',treatment:'File treatment',earlyret:'Retire early',namechange:'Change name',breakup:'End it with {partner}',divorce:'File for divorce',estrangemother:'Go no-contact with {mother}',estrangefather:'Go no-contact with {father}',recruit:'Bring someone into the fold',bankloan:'Take out a bank loan',storecredit:'Buy on store credit',payoffdebt:'Pay off a debt early',endaffair:'End it, quietly',cutcontact:'Cut them off',seekfixer:'Meet a fixer',fixerjob:'Work for the fixer'}[d.id]||d.id;}
 function fillLabel(t){return t.replace(/\{partner\}/g,S.partner||S.__partnerNameSnapshot||'—').replace(/\{other\}/g,S.__affairName||'—').replace(/\{mother\}/g,S.mother?S.mother.name:'—').replace(/\{father\}/g,S.father?S.father.name:'—');}
 let pressTimer=null, longPressActive=false, pressedBtn=null;
 function startPress(btn){ pressedBtn=btn; longPressActive=false; clearTimeout(pressTimer); pressTimer=setTimeout(()=>{ longPressActive=true; btn.classList.add('show-note'); },380); }
@@ -1761,6 +1788,27 @@ function openContactTargetPicker(id){
   };
   $('#skillWrap').classList.remove('hidden');
 }
+
+function openLaborDecision(){
+  const ctx=typeof WorkplaceSystem==='object'&&WorkplaceSystem&&World?WorkplaceSystem.laborSituation(World):null;
+  if(!ctx||!ctx.available)return;
+  const sheet=$('#skillSheet');
+  sheet.innerHTML='<div class="ps-head"><span>WORKPLACE · NEGOTIATION</span></div>'+
+    '<div class="qempty">'+escapePlanText(ctx.businessName)+' · salary '+money(ctx.salary)+
+    ' · coworkers '+ctx.peers+' · recent profit '+money(ctx.profit)+
+    '. The choices below alter real employment contracts and workplace relationships.</div>'+
+    '<div class="chips">'+ctx.choices.map(c=>
+      '<button class="chipbtn" data-labor="'+c.id+'"><b>'+escapePlanText(c.label)+'</b>'+
+      '<span>'+Math.round(c.odds*100)+'% accepted · '+escapePlanText(c.note)+'</span></button>').join('')+'</div>'+
+    '<div class="ps-foot"><button class="btn" id="laborCancel">Never Mind ▸</button></div>';
+  sheet.onclick=e=>{
+    const choice=e.target.closest('[data-labor]');
+    if(choice){$('#skillWrap').classList.add('hidden');performActionNow('d','laborDispute',{strategy:choice.dataset.labor});return;}
+    if(e.target.closest('#laborCancel'))$('#skillWrap').classList.add('hidden');
+  };
+  $('#skillWrap').classList.remove('hidden');
+}
+
 function triggerAction(type,id,extra){
   if(actionReservedThisYear(id)){ shake(); return; }
   if(type==='p'){
@@ -1772,6 +1820,7 @@ function triggerAction(type,id,extra){
     if(Object.prototype.hasOwnProperty.call(CONTACT_TARGET_ROLES,id)){openContactTargetPicker(id);return;}
     performActionNow('p',id,extra);
   } else {
+    if(id==='laborDispute'){openLaborDecision();return;}
     if(id==='learntrade'){openTrainingPicker();return;}
     if(id==='treatment'){openMedicalTreatmentPicker();return;}
     performActionNow('d',id,extra);
@@ -1780,7 +1829,7 @@ function triggerAction(type,id,extra){
 const PER_CONTACT_IDS=new Set(['flirt','flirtsecret','tendcontact','covertracks']);
 function candidateActions(fieldKey,cid){
   const ids=FIELD_ACTIONS[fieldKey]||[];
-  const h=planHours(), used=S.queue.reduce((a,q)=>a+(PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0)),0);
+  const h=planHours(), used=energyUsed();
   const rem=Math.max(0,h-used);
   const out=[];
   ids.forEach(id=>{

@@ -62,6 +62,11 @@
     const rng=context&&context.random;
     const employmentSupport=nationalValue(context,['employmentSupport','employment'],0);
     const pricePressure=nationalValue(context,['pricePressure','prices'],0);
+    const labor=context&&context.laborMarket||null;
+    const distress=clamp(Number(labor&&labor.distressRate)||0,0,1);
+    const layoffs=clamp(Number(labor&&labor.layoffRate)||0,0,1);
+    const opportunities=clamp(Number(labor&&labor.opportunityRate)||0,0,1);
+    const hasMarket=!!(labor&&labor.businesses>0);
     const population=runtime.demographics&&runtime.demographics.population||traits.population;
     const initial=runtime.demographics&&runtime.demographics.initialPopulation||traits.population||1;
     const populationPressure=clamp(population/initial-1,-.35,.35);
@@ -69,12 +74,12 @@
     const industryDemand={};
     Object.keys(previous.industryDemand||{}).forEach(type=>{
       const target=type==='agriculture'?traits.industryBase-traits.urbanity*.12:type==='manufacturing'?traits.industryBase+traits.urbanity*.08:traits.employmentBase;
-      industryDemand[type]=bounded(previous.industryDemand[type]*.82+target*.18+employmentSupport*.08+randomDelta(rng,.018));
+      industryDemand[type]=bounded(previous.industryDemand[type]*.82+target*.18+employmentSupport*.08+(hasMarket?opportunities*.025-distress*.07-layoffs*.05:0)+randomDelta(rng,.018));
     });
     const industryAverage=Object.values(industryDemand).reduce((sum,value)=>sum+value,0)/Math.max(1,Object.keys(industryDemand).length);
-    const employmentTarget=clamp(traits.employmentBase*.62+industryAverage*.35+employmentSupport+randomDelta(rng,.018),0,1);
+    const employmentTarget=clamp(traits.employmentBase*.62+industryAverage*.35+employmentSupport+(hasMarket?opportunities*.06-distress*.12-layoffs*.15:0)+randomDelta(rng,.018),0,1);
     const employmentIndex=bounded(previous.employmentIndex*.72+employmentTarget*.28);
-    const wageTarget=clamp(traits.wageBase+employmentIndex*.12+employmentSupport*.08,MIN_INDEX,MAX_INDEX);
+    const wageTarget=clamp(traits.wageBase+employmentIndex*.12+employmentSupport*.08+(hasMarket?opportunities*.035-distress*.05-layoffs*.055:0),MIN_INDEX,MAX_INDEX);
     const wageIndex=clamp(previous.wageIndex*.8+wageTarget*.2+randomDelta(rng,.012),MIN_INDEX,MAX_INDEX);
     const foodTarget=clamp(traits.foodBase+(1-employmentIndex)*.08+pricePressure*.12,MIN_INDEX,MAX_INDEX);
     const foodPriceIndex=clamp(previous.foodPriceIndex*.82+foodTarget*.18+randomDelta(rng,.01),MIN_INDEX,MAX_INDEX);

@@ -368,6 +368,7 @@ const CHILDCARE=[
 ];
 const LIABILITY_TYPES={
  bankloan:{id:'bankloan',name:'Bank Loan',icon:'🏦',principal:2500,years:6,totalMult:1.3,desc:'a formal loan, modest interest, a strict schedule'},
+ ventureloan:{id:'ventureloan',name:'Venture Loan',icon:'📃',principal:2000,years:5,totalMult:1.3,desc:'borrowed capital invested directly into a speculative venture'},
  storecredit:{id:'storecredit',name:'Store Credit',icon:'🧾',principal:500,years:2,totalMult:1.25,desc:'furniture and goods, paid off in installments'},
  studentloan:{id:'studentloan',name:'Student Loan',icon:'🎓',principal:3000,years:8,totalMult:1.35,desc:'a debt for the degree, paid down over years'},
 };
@@ -1194,6 +1195,13 @@ const DECISIONS=[
      return{fx:{happiness:-4},text:'Subject pressed for the promotion. The promotion pressed back, downward. Subject said it was fine. It was not.'}}},
  {id:'learntrade',cost:2,cat:'work',avail:s=>s.age>=16&&typeof educationProgramOptions==='function'&&educationProgramOptions().length>0,note:()=>`choose a vocational course · certificate, skill, and a clearer work route`,
    apply:()=>({fx:{smarts:6,assets:-150,happiness:1},text:pick(['Subject took night classes. The daytime self was tired; the nighttime self was sharper.','Subject learned a trade by lamplight. The certificate, when it came, was worth the squint.'])})},
+ {id:'laborDispute',cost:1,cat:'work',
+   avail:s=>s.age>=16&&typeof World!=='undefined'&&World&&typeof WorkplaceSystem==='object'&&WorkplaceSystem&&WorkplaceSystem.laborSituation(World).available,
+   note:()=>{const v=WorkplaceSystem.laborSituation(World);return v.available?'negotiate with '+v.businessName+' · pay, coworkers, and political consequences':'requires an active employment contract';},
+   apply:(subject,item)=>{
+     const r=WorkplaceSystem.resolveLaborAction(World,{year:World.year,strategy:item&&item.strategy,subject});
+     return r.ok?{fx:r.fx,text:r.text}:{fx:{},text:'The workplace situation changed before this decision could be filed.'};
+   }},
  {id:'nightshift',cost:1,cat:'work',avail:s=>s.jobTier>0&&s.jobName!=='Unemployed',note:()=>`+overtime pay · −HEALTH`,
    apply:()=>({fx:{assets:400,health:-3},text:'Subject took the night shift. The overtime was real. So was the permanent shadow under the eyes.'})},
  {id:'quitjob',cost:0,cat:'work',avail:s=>s.jobTier>0&&s.freedom>=30,note:()=>`walk out · requires freedom 30+`,
@@ -1205,17 +1213,44 @@ const DECISIONS=[
       return{fx:{happiness:3},text:'Subject quit, on a Tuesday, at noon. The walk home was the best part. The rent, the worst.'};
     }
     S.jobTier=0;S.jobName='Unemployed';S.career=null;return{fx:{happiness:3},text:'Subject quit, on a Tuesday, at noon. The walk home was the best part. The rent, the worst.'}}},
- {id:'relocate',cost:2,cat:'personal',avail:s=>s.age>=18&&s.freedom>=40,note:()=>`the coast · freedom 40+ · +HAPPINESS/HEALTH · −$`,
-   apply:()=>{S.didCoast=true;return{fx:{assets:-500,happiness:6,health:2},text:'Subject relocated to the coastal district. The sea did not fix everything. It fixed some, which was the deal.'}}},
+ {id:'relocate',cost:1,cat:'personal',
+   avail:s=>s.age>=18&&s.freedom>=40&&!s.traveling&&!s.eduStage&&typeof World!=='undefined'&&World&&World.activeSettlementId!=='veskar'&&s.assets>=travelCost(currentSettlement(),settlementById('veskar')),
+   note:()=>{const from=currentSettlement(),to=settlementById('veskar');return 'travel to Veskar · fare '+money(travelCost(from,to))+' · arrival next year, checkpoint risk';},
+   apply:()=>{
+     const r=scheduleTravel('veskar');
+     return r.ok?{fx:{happiness:2},text:'Subject filed for relocation to Veskar. The fare was paid and the journey begins; the address changes upon arrival next year.'}
+       :{fx:{},text:'The relocation could not be scheduled: '+r.reason};
+   }},
  {id:'leave',cost:1,cat:'personal',avail:s=>s.age>=20&&s.age<55&&s.freedom>=50,note:()=>`a year to wander · freedom 50+ · +HAPPINESS −$`,
    apply:()=>{S.didLeave=true;return{fx:{assets:-300,happiness:8},text:'Subject took a year off to “find themselves.” They returned with a beard and a theory about rivers.'}}},
   {id:'leaveschool',cost:0,cat:'personal',avail:s=>!!s.eduStage,note:()=>{const st=SCHOOL_STAGES.find(x=>x.id===S.eduStage);return `leave ${st?st.name:'school'} now · +HAPPINESS · stunts SMARTS growth`;},
     apply:()=>{const st=SCHOOL_STAGES.find(x=>x.id===S.eduStage); S.eduDropped=true; S.eduStage=null; if(typeof ensureEducationState==='function'){ensureEducationState(S);S.education.withdrawn=true;S.education.stageId=null;S.education.status='withdrawn';if(typeof educationSyncLegacy==='function')educationSyncLegacy(S);} S.pendingSchoolStage=null; syncEduJobTitle();
      return{fx:{smarts:-5,happiness:3},text:'Subject walked out of '+(st?st.name:'school')+' for good. No ceremony, no diploma, and — for now — no regrets.'};}},
- {id:'loan',cost:1,cat:'work',avail:s=>s.jobTier>0,note:()=>`+$2,000 now · a venture (risky)`,
-   apply:()=>{const ok=chance(.55);pushFollow({at:S.age+3,t:ok?'The venture turned a profit. The subject bought new shoes and a better mood.':'The venture failed in the manner of most ventures.',fx:ok?{assets:3800,happiness:6}:{assets:-600,happiness:-7}});return{fx:{assets:2000,happiness:3},text:'Subject took the loan and signed four times, in slightly different handwriting. The venture began.'}}},
- {id:'gamblelic',cost:1,cat:'vice',avail:s=>s.age>=25,note:()=>`a gambling hall · +money · +VICE`,
-   apply:()=>{S.vice=Math.min(10,S.vice+2);return{fx:{assets:800,happiness:3},text:'Subject opened a gambling hall. The name appeared in two newspapers, in different sections.'}}},
+ {id:'loan',cost:1,cat:'work',
+   avail:s=>s.age>=18&&s.jobTier>0&&!s.liabilities.some(l=>l.id==='ventureloan'),
+   note:()=>{const t=LIABILITY_TYPES.ventureloan;return 'finance a speculative venture · '+money(liabilityPayment(t))+'/yr for '+t.years+' years · capital tied up';},
+   apply:()=>{
+     const t=LIABILITY_TYPES.ventureloan;
+     if(S.liabilities.some(l=>l.id===t.id))return{fx:{},text:'The venture loan is already on file.'};
+     S.liabilities.push({id:t.id,name:t.name,icon:t.icon,yearsLeft:t.years,annualPayment:liabilityPayment(t)});
+     const expertise=clamp((S.skills.retail||0)/10,0,1);
+     const odds=clamp(.45+expertise*.25,.45,.70);
+     const won=chance(odds);
+     pushFollow({at:S.age+3,t:won?'The financed venture returned a profit after three uncertain years.':'The venture failed. Its debt payments, however, remain due.',
+       fx:won?{assets:5000,happiness:5}:{happiness:-7}});
+     return{fx:{happiness:-1},text:'Subject borrowed '+money(t.principal)+' for a speculative venture. The capital went into the project, not personal savings. The household owes '+money(liabilityPayment(t))+' a year for '+t.years+' years.'};
+   }},
+ {id:'gamblelic',cost:2,cat:'vice',
+   avail:s=>s.age>=25&&s.assets>=3500&&s.freedom>=30&&typeof World!=='undefined'&&World&&typeof ownedActiveBusinesses==='function'&&ownedActiveBusinesses().length===0,
+   note:()=> 'open a gambling hall · invest $3,500 · real business, annual profit/loss, Bureau scrutiny',
+   apply:()=>{
+     const id=typeof subjectSettlementId==='function'?subjectSettlementId():World&&World.activeSettlementId;
+     if(!id||typeof BusinessSystem!=='object'||!BusinessSystem)return{fx:{},text:'No licensed premises were available.'};
+     const business=BusinessSystem.create(World,{settlementId:id,sector:'retail',name:S.last+' Gambling Hall',ownerNpcId:'subject',foundedYear:World.year,finances:{cash:3500}});
+     S.vice=Math.min(10,S.vice+2);
+     S.scrutiny=clamp(S.scrutiny+10,0,100);
+     return{fx:{assets:-3500,happiness:3,freedom:-3},text:'Subject opened '+business.name+'. The $3,500 stake entered its company accounts; future revenue, payroll, taxes, and possible closure now follow the actual business simulation. Bureau scrutiny +10.'};
+   }},
  {id:'expunge',cost:1,cat:'personal',avail:s=>!!s.record,note:()=>`clear the record · −$`,
    apply:()=>{S.record=false;return{fx:{assets:-200},text:'Subject paid to have the record expunged. The file remembers, but the file is professional.'}}},
  {id:'treatment',cost:1,cat:'personal',avail:s=>activeConditions().some(c=>c.known),note:()=>`treat a condition on file · −$`,

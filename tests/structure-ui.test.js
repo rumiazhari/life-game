@@ -47,15 +47,15 @@ test('plan sheet renders three tabs with the sticky seal always present',()=>{
     renderPlan();
     const html=document.getElementById('planSheet').innerHTML;
     return JSON.stringify({
-      tabs:['pursuits','decisions','desk'].every(t=>html.includes('data-plan-tab="'+t+'"')),
-      activePursuits:html.includes('ptab on" data-plan-tab="pursuits"'),
+      tabs:['focus','pursuits','decisions','desk'].every(t=>html.includes('data-plan-tab="'+t+'"')),
+      activeFocus:html.includes('ptab on" data-plan-tab="focus"'),
       seal:html.includes('id="sealAdvance"'),
       queueDock:html.includes('ACTS LAND IMMEDIATELY'),
       noDecisionsYet:!html.includes('data-d="presspromo"')
     });
   })()`));
   assert.equal(result.tabs,true);
-  assert.equal(result.activePursuits,true);
+  assert.equal(result.activeFocus,true);
   assert.equal(result.seal,true);
   assert.equal(result.queueDock,true);
   assert.equal(result.noDecisionsYet,true);
