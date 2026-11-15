@@ -109,7 +109,12 @@ function buildYearReportHtml(){
     // major milestone earns it. Presentation only; quietMode renders none.
     let art='';
     if(!artShown&&e.cls==='milestone'){ art=milestoneArt(e.text); if(art)artShown=true; }
-    h+='<div class="yr-entry'+(i<reportIdx?'':' yr-pending')+'"><span class="yr-head">'+e.head+'</span>'+art+'<div class="etext">'+e.text+'</div>'+
+    const fullText=String(e.text||'');
+    const shortText=clipText(fullText,84);
+    const symbol=e.cls==='milestone'?'book':e.cls==='crisis'?'alert':e.cls==='opportunity'?'money':e.cls==='final'?'shield':'bolt';
+    h+='<div class="yr-entry'+(i<reportIdx?'':' yr-pending')+'"><span class="yr-visual">'+ledgerIcon(symbol)+'</span><span class="yr-head">'+escapePlanText(e.head)+'</span>'+art+
+      '<div class="etext">'+escapePlanText(shortText)+'</div>'+
+      (fullText.length>84?'<details class="yr-details"><summary>READ FULL REPORT</summary><p>'+escapePlanText(fullText)+'</p></details>':'')+
       (e.chips&&e.chips.length?'<div class="yr-chips">'+e.chips.map(c=>'<span class="fx '+(c.plus?'plus':'minus')+'">'+c.txt+'</span>').join('')+'</div>':'')+'</div>';
   });
   if(reportExtra>0&&done)h+='<div class="yr-more">+'+reportExtra+' more filed in CASE LOG</div>';
@@ -1778,9 +1783,10 @@ function planActionButton(def,type,rem){
   const dup=actionReservedThisYear(id);
   const cant=!ok||!afford||dup;
   const label=isP?pursuitLabel(def):decisionLabel(def);
+  const icon=ledgerIcon(def.cat==='work'?'work':def.cat==='family'||def.cat==='social'?'family':def.cat==='health'?'med':def.cat==='education'?'book':def.cat==='vice'?'alert':'bolt');
   const fxLine=(ok&&!dup)?fxPreviewHtmlSafe(def):'';
   const odds=ok&&!dup?oddsHint(id):null;
-  return '<button class="slipbtn'+(def.dark?' dark':'')+(cant?' cant':'')+'" data-'+type+'="'+id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(def.icon?'<span class="sb-icon">'+def.icon+'</span> ':'')+fillLabel(label)+(odds?'<span class="sb-odds">'+odds+'</span>':'')+'</span><span class="sb-cost">'+(def.cost?'⚡'+def.cost:'free')+'</span></div><div class="sb-note">'+planNoteText(def,type,id,ok,afford,dup)+'</div>'+fxLine+'</button>';
+  return '<button class="slipbtn'+(def.dark?' dark':'')+(cant?' cant':'')+'" data-'+type+'="'+id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+'<span class="sb-symbol">'+icon+'</span>'+fillLabel(label)+(odds?'<span class="sb-odds">'+odds+'</span>':'')+'</span><span class="sb-cost">'+(def.cost?'⚡'+def.cost:'free')+'</span></div><div class="sb-note">'+planNoteText(def,type,id,ok,afford,dup)+'</div>'+fxLine+'</button>';
 }
 function fxPreviewHtmlSafe(def){
   try{const h=typeof def.fx==='object'&&def.fx?fxPreviewChips(def.fx):'';return h?'<div class="sb-fx">'+h+'</div>':'';}catch(e){return '';}
@@ -1866,7 +1872,7 @@ function renderPlan(){
     let ih='';
     items.forEach(p=>{const ok=p.avail(S); const afford=rem>=p.cost;
       const dup=actionReservedThisYear(p.id); const cant=!ok||!afford||dup;
-      ih+='<button class="slipbtn'+(p.dark?' dark':'')+(cant?' cant':'')+'" data-p="'+p.id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(p.icon?'<span class="sb-icon">'+p.icon+'</span> ':'')+fillLabel(pursuitLabel(p))+'</span><span class="sb-cost">'+(p.cost?'⚡'+p.cost:'free')+'</span></div><div class="sb-note">'+(ok?(dup?actionReservedNote(p.id):fillLabel(p.note(S))):(dup?actionReservedNote(p.id):'— not available now'))+'</div></button>';});
+      ih+='<button class="slipbtn'+(p.dark?' dark':'')+(cant?' cant':'')+'" data-p="'+p.id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+'<span class="sb-symbol">'+ledgerIcon(p.cat==='work'?'work':p.cat==='family'?'family':p.cat==='health'?'med':p.cat==='education'?'book':'bolt')+'</span>'+fillLabel(pursuitLabel(p))+'</span><span class="sb-cost">'+(p.cost?'⚡'+p.cost:'free')+'</span></div><div class="sb-note">'+(ok?(dup?actionReservedNote(p.id):fillLabel(p.note(S))):(dup?actionReservedNote(p.id):'— not available now'))+'</div></button>';});
     ph+='<div class="ps-catlab">'+cat.label+'</div><div class="sliplist">'+ih+'</div>';
   });
   let hh='';
