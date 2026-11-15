@@ -1,0 +1,34 @@
+name: Quest Gameplay Tests
+on:
+  pull_request:
+    paths:
+      - "js/data/quest-arcs.js"
+      - "js/systems/quest-engine.js"
+      - "js/ui/quest-ui.js"
+      - "js/ui.js"
+      - "css/quest.css"
+      - "life-game.html"
+      - "tests/quest-engine.test.js"
+      - ".github/workflows/quest-tests.yml"
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate new gameplay source
+        run: |
+          node --check js/data/quest-arcs.js
+          node --check js/systems/quest-engine.js
+          node --check js/ui/quest-ui.js
+          node --check js/ui.js
+          node --check tests/quest-engine.test.js
+      - name: Run all regression tests
+        run: npm test
+      - name: Check world and NPC diagnostics
+        run: |
+          npm run diagnostic:world
+          npm run diagnostic:npcs

@@ -4562,6 +4562,11 @@ function advanceYear(suppressBurst,quiet){
   schoolYearTick();
   runRandomEvents();
   runStoryYearTick();
+  // Parallel story-quest callbacks: independent of map state.
+  if(typeof QuestEngine==='object'&&QuestEngine&&World){
+    QuestEngine.tickWorld(World,{year:World.year,subject:S});
+    if(typeof QuestUI==='object'&&QuestUI)QuestUI.badge();
+  }
   runStateCareYearTick();
   // Government (Phase 5): the regime's posture is recomputed after the world
   // sim, state care, and story have run, and expressed on the subject's file.
