@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=Special+Elite&family=Stardos+Stencil:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css?v=20261115-visual1">
+<link rel="stylesheet" href="css/story-rpg.css?v=20261116-quest1">
 </head>
 <body>
 <div class="desk">
@@ -58,6 +59,7 @@
   <section id="dossier" class="dossier folder hidden">
     <div class="tabstrip" id="tabstrip">
       <div class="dtab dtab-file" id="tab-name">FILE: —</div>
+      <button id="btn-stories" class="dtab dtab-story">🎲 STORIES ▸</button>
       <button id="btn-map" class="dtab">MAP ▸</button>
       <button id="btn-hold" class="dtab">THE HOLD ▸</button>
       <button id="btn-caselog" class="dtab">CASE LOG ▸</button>
@@ -159,6 +161,7 @@
   <div id="medicalWrap" class="overlay hidden"><div class="plansheet" id="medicalSheet"></div></div>
   <div id="familyMedicalWrap" class="overlay hidden"><div class="plansheet" id="familyMedicalSheet"></div></div>
   <div id="mapWrap" class="overlay hidden"><div class="plansheet map-sheet" id="mapSheet"></div></div>
+  <div id="storyWrap" class="overlay hidden"><div class="plansheet story-sheet" id="storySheet"></div></div>
   <div id="intentWrap" class="overlay hidden"><div class="intentslip" id="intentSlip"></div></div>
   <div id="planWrap" class="overlay hidden"><div class="plansheet" id="planSheet"></div></div>
   <div id="slipWrap" class="overlay hidden"><div class="slipcard" id="slipCard" role="dialog" aria-modal="true"></div></div>
@@ -245,8 +248,10 @@
   <script src="js/systems/tax-system.js?v=20260826-tax1"></script>
   <script src="js/systems/state-care-system.js?v=20260823-care1"></script>
   <script src="js/systems/story-episodes.js?v=20260823-story2"></script>
+<script src="js/systems/story-quests.js?v=20261116-quest1"></script>
   <script src="js/systems/story-system.js?v=20260823-story2"></script>
 <script src="js/systems/rpg-system.js?v=20260822-rpg1"></script>
+<script src="js/systems/story-rpg-checks.js?v=20261116-quest1"></script>
 <script src="js/systems/world-simulation.js?v=20260803-phase3"></script>
 <script src="js/systems/relationship-memory.js?v=20260803-phase3"></script>
 <script src="js/systems/condition-registry.js?v=20260803-phase4a"></script>
@@ -260,6 +265,7 @@
 <script src="js/medical.js?v=20260804-phase4a3"></script>
 <script src="js/education.js?v=20260803-phase3"></script>
 <script src="js/ui.js?v=20261115-visual1"></script>
+<script src="js/ui/story-quest-ui.js?v=20261116-quest1"></script>
 <script src="js/systems/world-gameplay.js?v=20260804-phase4a2"></script>
 <script src="js/main.js?v=20261115-command1"></script>
 </body>
