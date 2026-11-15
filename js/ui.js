@@ -529,12 +529,18 @@ function recommendedActions(rem){
       if(out.length)return out;
     }
   }
+  if(S.health<45)add('p','doctor','Medical attention');
+  if(S.assets<0&&S.age>=16)add('p','gig','Supplement income');
   if(S.age>=16&&S.jobTier<1)add('p','lookwork','Find work');
+  else if(S.age>=16)add('d','laborDispute','Workplace negotiation');
+  if(S.married&&S.partnerMood<45)add('p','tendspouse','Care for your marriage');
+  if(S.age<16)add('p','study','Build foundations');
   else if(S.age>=16)add('d','laborDispute','Workplace negotiation');
   if(S.age>=18&&S.jobTier>=1)add('d','presspromo','Career progression');
   else if(S.assets<-500)add('p','overtime','Earn overtime');
-  if(S.health<45)add('p','doctor','See the doctor');
   if(S.happiness<32)add('p',S.age<16?'family':'walk','Lift your mood');
+  if(S.age>=18&&S.assets>=5000)add('d','foundBusiness','Build a business');
+  if(S.liabilities&&S.liabilities.length)add('d','payoffdebt','Reduce debt');
   return out.slice(0,3);
 }
 let coachMem={};
@@ -632,6 +638,70 @@ function typeNext(){
     logEl.appendChild(el);
   }
   if(i)logEl.scrollTop=logEl.scrollHeight;
+}
+
+
+/* The dossier overview has no independent game state: each field reads the
+   authoritative simulation and the player record at render time. */
+function renderWorldBrief(){
+  const el=$('#worldBrief');
+  if(!el||!S||!World)return;
+  const sid=World.activeSettlementId;
+  const settlement=typeof WorldSimulation==='object'&&WorldSimulation&&WorldSimulation.getSettlementState?
+    WorldSimulation.getSettlementState(World,sid):null;
+  const market=typeof WorldSimulation==='object'&&WorldSimulation&&WorldSimulation.laborMarketFor?
+    WorldSimulation.laborMarketFor(World,sid,World.year):null;
+  const economy=settlement&&settlement.economy||{},security=settlement&&settlement.security||{};
+  const work=typeof EmploymentSystem==='object'&&EmploymentSystem&&EmploymentSystem.activeForPerson?
+    EmploymentSystem.activeForPerson(World,'subject')[0]:null;
+  const business=work&&typeof BusinessSystem==='object'&&BusinessSystem&&BusinessSystem.get?
+    BusinessSystem.get(World,work.businessId):null;
+  const settlementName=World.place||sid||'Karsen';
+  const unrest=Number(security.unrest)||0;
+  const employment=Number(economy.employmentIndex)||0;
+  const issue=S.health<38?{
+    title:'Your health needs attention',note:'Low health restricts the time available for decisions. Treatment competes with work, money, and family.'}:
+    S.assets<0?{title:'Your household is in deficit',note:'Debts and living costs threaten future choices. Money earned now may come at the cost of health or relationships.'}:
+    business&&business.status==='struggling'?{
+      title:'Your employer is under strain',note:'A struggling company can cut positions. Higher wages increase payroll, while workplace loyalty affects future relations.'}:
+    S.age>=16&&!work?{title:'Finding a livelihood',note:'Open positions and competing applicants depend on the local labor market and available qualifications.'}:
+    unrest>.58?{title:'Political tension is rising',note:'Surveillance and unrest create risks around work, public activity, and travel.'}:
+    work?{title:'Your next move matters',note:'Your employer, coworkers, and the Bureau react to choices beyond their immediate statistical effects.'}:
+    {title:'A life is taking shape',note:'Family, education, and the world around you will shape your later options.'};
+  const distressed=market&&market.businesses?Math.round(market.distressRate*market.businesses):0;
+  const metrics=[
+    {label:'PERSONAL ASSETS',value:money(Number(S.assets)||0),note:S.assets<0?'Deficit on file':'Available balance',tone:S.assets<0?'danger':''},
+    {label:'LABOR MARKET',value:settlement?Math.round(employment*100)+'/100':'—',note:'Employment index',tone:employment<.35?'danger':employment<.50?'warning':''},
+    {label:'PUBLIC UNREST',value:settlement?Math.round(unrest*100)+'/100':'—',note:'Unrest index',tone:unrest>.58?'danger':unrest>.34?'warning':''},
+    {label:'EMPLOYERS UNDER STRAIN',value:market&&market.businesses?distressed+' / '+market.businesses:'—',note:'Known local businesses',tone:market&&market.businesses&&market.distressRate>.45?'warning':''}
+  ];
+  const canChoose=typeof planHours==='function'&&planHours()>0&&S.alive&&S.jailUntil<=S.age;
+  el.innerHTML='<div class="wb-top"><div><span class="wb-overline">SECTION D · CURRENT SITUATION</span>'+
+    '<span class="wb-place">'+escapePlanText(settlementName)+' · '+escapePlanText(World.year)+'</span></div>'+
+    '<span class="wb-file">LIVE WORLD RECORD</span></div>'+
+    '<div class="wb-main"><div class="wb-lead"><span class="wb-section">PRIMARY CONSIDERATION</span>'+
+      '<h3>'+escapePlanText(issue.title)+'</h3><p>'+escapePlanText(issue.note)+'</p></div>'+
+      '<div class="wb-metrics">'+metrics.map(m=>'<div class="wb-metric'+(m.tone?' '+m.tone:'')+'"><span>'+
+        m.label+'</span><strong>'+escapePlanText(m.value)+'</strong><small>'+m.note+'</small></div>').join('')+'</div></div>'+
+    '<div class="wb-bottom"><span>'+(work&&business?'EMPLOYED AT '+escapePlanText(business.name)+
+      ' · '+escapePlanText(work.occupationName):'YOUR FILE · '+escapePlanText(S.age)+' YEARS OLD')+
+    '</span><button type="button" data-open-priorities '+(canChoose?'':'disabled')+
+      '>REVIEW YOUR CHOICES <span aria-hidden="true">▸</span></button></div>';
+}
+function renderActionReceipt(type,id,result,chips){
+  const el=$('#actionReceipt');if(!el)return;
+  const def=(type==='p'?PUR_MAP:DEC_MAP)[id];
+  const label=def?fillLabel(type==='p'?pursuitLabel(def):decisionLabel(def)):id;
+  const text=result&&result.text?fill(result.text):'The action was filed.';
+  const deltas=(chips||[]).map(c=>'<span class="ar-delta '+(c.plus?'up':'down')+'">'+escapePlanText(c.txt)+'</span>').join('');
+  el.innerHTML='<div class="ar-copy"><span class="ar-eyebrow">ACTION ENTERED · YEAR '+escapePlanText(S.age)+'</span>'+
+    '<strong>'+escapePlanText(label)+'</strong><p>'+escapePlanText(text)+'</p></div>'+
+    '<div class="ar-actions">'+(deltas?'<div class="ar-deltas">'+deltas+'</div>':'')+
+    '<button type="button" data-receipt-log>FULL CASE LOG ▸</button><button type="button" data-receipt-close aria-label="Dismiss action receipt">✕</button></div>';
+  el.classList.remove('hidden');
+}
+function clearActionReceipt(){
+  const el=$('#actionReceipt');if(el){el.classList.add('hidden');el.innerHTML='';}
 }
 
 /* ================= RENDER ================= */
@@ -754,6 +824,7 @@ function renderStats(changed){
   renderSparks();
   renderCoach();
   syncHoldTab();
+  renderWorldBrief();
 }
   /* Employer + ownership panels for the personal standing view. Guards mirror
    * the other EmploymentSystem call sites so older saves/partial loads render
@@ -1606,41 +1677,82 @@ function fxPreviewHtmlSafe(def){
 }
 
 function escapePlanText(value){return String(value==null?'':value).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
+
 function focusSituationHtml(rem){
-  const cards=recommendedActions(rem),sid=World&&World.activeSettlementId;
-  const market=typeof WorldSimulation==='object'&&WorldSimulation&&sid&&WorldSimulation.laborMarketFor?WorldSimulation.laborMarketFor(World,sid,World.year):null;
-  const local=typeof WorldSimulation==='object'&&WorldSimulation&&sid&&WorldSimulation.getSettlementState?WorldSimulation.getSettlementState(World,sid):null;
-  const labor=typeof WorkplaceSystem==='object'&&WorkplaceSystem&&World?WorkplaceSystem.laborSituation(World):null;
-  const economy=local&&local.economy||{},security=local&&local.security||{};
-  const condition=market&&market.businesses?
-    Math.round(market.distressRate*100)+'% of local employers are struggling; recent layoffs: '+Math.round(market.layoffRate*100)+'% of known positions.':
-    'No local business report is available yet.';
-  const employer=labor&&labor.available?
-    '<div class="ps-catlab">YOUR EMPLOYER</div><div class="qempty">'+escapePlanText(labor.businessName)+
-    ': annual salary '+money(labor.salary)+'; recorded profit '+money(labor.profit)+'; '+labor.peers+
-    ' coworkers. Negotiations can change multiple contracts and next year’s payroll.</div>':'';
-  const district='<div class="ps-catlab">LOCAL ECONOMY · '+escapePlanText(World&&World.place||'Karsen')+'</div>'+
-    '<div class="qempty">'+escapePlanText(condition)+' Employment index: '+Math.round((Number(economy.employmentIndex)||0)*100)+
-    '%; unrest: '+Math.round((Number(security.unrest)||0)*100)+'%. These values come from the simulated world.</div>';
-  const quick=cards.length?'<div class="rec-strip"><span class="rec-lab">DECIDE NOW</span>'+cards.join('')+'</div>':
-    '<div class="qempty">No urgent action is recommended. End the year or browse the full decisions.</div>';
-  return district+employer+quick+'<div class="qempty">Other actions remain under ACT NOW and DECISIONS.</div>';
+  const sid=World&&World.activeSettlementId;
+  const state=typeof WorldSimulation==='object'&&WorldSimulation&&sid&&WorldSimulation.getSettlementState?
+    WorldSimulation.getSettlementState(World,sid):null;
+  const market=typeof WorldSimulation==='object'&&WorldSimulation&&sid&&WorldSimulation.laborMarketFor?
+    WorldSimulation.laborMarketFor(World,sid,World.year):null;
+  const company=typeof WorkplaceSystem==='object'&&WorkplaceSystem&&World?WorkplaceSystem.laborSituation(World):null;
+  const active=typeof EmploymentSystem==='object'&&EmploymentSystem&&World?
+    EmploymentSystem.activeForPerson(World,'subject')[0]:null;
+  const details=active&&typeof BusinessSystem==='object'&&BusinessSystem&&World?
+    BusinessSystem.get(World,active.businessId):null;
+  const security=state&&state.security||{},economy=state&&state.economy||{};
+  const unrest=Number(security.unrest)||0,employment=Number(economy.employmentIndex)||0;
+  let headline='Choose what matters this year',narrative='Your time is limited. The world changes without waiting for your approval.';
+  if(S.health<38){headline='Protect your ability to act';narrative='Injuries and poor health reduce agency. A year spent recovering may cost earnings but preserve future options.';}
+  else if(S.assets<0){headline='Keep the household afloat';narrative='Loans, housing and employment affect your finances every year. Short-term income can carry health or social costs.';}
+  else if(details&&details.status==='struggling'){headline='Your employer is under pressure';narrative='Wages affect company payroll, and an unprofitable company can cut positions. Relationships at work affect future decisions.';}
+  else if(S.age>=16&&!active){headline='Find a place in the economy';narrative='A job is more than salary: it connects you to a company, coworkers, and the stability of the surrounding city.';}
+  else if(unrest>.58){headline='The district is politically unstable';narrative='Public unrest affects surveillance, economic confidence, and the risks of political participation.';}
+  else if(S.age<16){headline='Early choices shape later opportunities';narrative='Family conditions, education, and health determine which paths open in adulthood.';}
+  const marketNote=market&&market.businesses?
+    Math.round(market.distressRate*market.businesses)+' of '+market.businesses+' employers under strain':
+    'No active employer data';
+  const metrics='<div class="focus-signal-grid">'+
+    '<div class="focus-signal"><span>AVAILABLE ASSETS</span><strong>'+escapePlanText(money(S.assets))+'</strong>'+
+      '<small>'+(S.liabilities&&S.liabilities.length?S.liabilities.length+' active liability file(s)':'Household balance')+'</small></div>'+
+    '<div class="focus-signal"><span>EMPLOYMENT INDEX</span><strong>'+(state?Math.round(employment*100)+'/100':'—')+
+      '</strong><small>'+escapePlanText(marketNote)+'</small></div>'+
+    '<div class="focus-signal'+(unrest>.58?' warning':'')+'"><span>LOCAL UNREST</span><strong>'+
+      (state?Math.round(unrest*100)+'/100':'—')+'</strong><small>Changes with economic and political conditions</small></div>'+
+    '</div>';
+  const work=company&&company.available?
+    '<div class="focus-work"><div class="focus-work-h"><span>CONTRACT ON FILE</span><b>'+escapePlanText(company.businessName)+'</b></div>'+
+      '<p>Salary <strong>'+money(company.salary)+'/year</strong> · Company profit <strong>'+money(company.profit)+
+      '</strong> · '+company.peers+' coworkers. These values inform bargaining outcomes.</p>'+
+      '<div class="focus-odds">'+company.choices.map(c=>'<span><b>'+escapePlanText(c.label)+'</b>'+
+        (c.id==='cooperate'?' · no chance roll':' · '+Math.round(c.odds*100)+'% acceptance')+'</span>').join('')+'</div>'+
+      '<div class="focus-causal">Wage decision <span>→</span> employment contracts <span>→</span> employer payroll <span>→</span> company finances and job security</div></div>':
+    '';
+  const choices=recommendedActions(rem);
+  const decisionBody=choices.length?
+    '<div class="focus-choice-grid">'+choices.join('')+'</div>':
+    '<p class="focus-empty">No suggested actions are currently available at this energy level. You can finish the year or explore the full action registry.</p>';
+  return '<div class="focus-lead"><span class="focus-kicker">DECISION BRIEF · '+escapePlanText(currentYear())+
+    ' · '+rem+' ENERGY AVAILABLE</span><h3>'+escapePlanText(headline)+'</h3><p>'+escapePlanText(narrative)+'</p></div>'+
+    metrics+work+
+    '<div class="focus-section-head"><span>OPTIONS YOU CAN TAKE NOW</span><small>Every action costs energy and is filed immediately</small></div>'+
+    decisionBody+
+    '<div class="focus-browse"><span>Need a different strategy?</span><button type="button" data-plan-tab="pursuits">ALL PURSUITS</button>'+
+    '<button type="button" data-plan-tab="decisions">ALL DECISIONS</button></div>';
 }
 
 let planTab='focus';
+let planShowUnavailable=false;
 function renderPlan(){
   const h=planHours(), used=energyUsed();
   const rem=Math.max(0,h-used);
   let qh='';
   const doneList=doneActionsThisYear();
   if(doneList.length){
-    qh='<div class="qempty">Already done this year: '+doneList.map(id=>{const d=PUR_MAP[id]||DEC_MAP[id];return d?fillLabel(pursuitLabel(d)||decisionLabel(d)):id;}).filter(Boolean).join(' · ')+'.</div>';
+    qh='<div class="plan-completed"><b>FILED THIS YEAR</b><span>'+doneList.map(id=>{
+      const d=PUR_MAP[id]||DEC_MAP[id];return escapePlanText(d?fillLabel(PUR_MAP[id]?pursuitLabel(d):decisionLabel(d)):id);
+    }).filter(Boolean).join(' · ')+'</span></div>';
+  }
+  const receipt=$('#actionReceipt');
+  if(receipt&&!receipt.classList.contains('hidden')){
+    const text=receipt.querySelector&&receipt.querySelector('.ar-copy p');
+    const copy=text&&text.textContent?text.textContent:'Your last action was filed in the case log.';
+    qh+='<div class="plan-last-result"><span>LAST ACTION</span><p>'+escapePlanText(copy)+'</p></div>';
   }
   const autoRow='<button class="autotrain-toggle'+(S.autoTrain?' on':'')+'" id="autoTrainBtn"><b>AUTO-TRAIN A SKILL</b><span>'+(S.autoTrain?'ON · reserves ⚡1 for year-end practice':'OFF · keep all your energy for now')+'</span></button>';
   let ph='';
   PUR_CATS.forEach(cat=>{
     if(cat.id==='hold') return;
-    const items=PURSUITS.filter(p=>p.cat===cat.id); if(!items.length) return;
+    const items=PURSUITS.filter(p=>p.cat===cat.id&&(planShowUnavailable||(p.avail(S)&&!actionReservedThisYear(p.id)))); if(!items.length) return;
     let ih='';
     items.forEach(p=>{const ok=p.avail(S); const afford=rem>=p.cost;
       const dup=actionReservedThisYear(p.id); const cant=!ok||!afford||dup;
@@ -1656,7 +1768,7 @@ function renderPlan(){
   let dh='';
   DEC_CATS.forEach(cat=>{
     if(cat.id==='hold') return;
-    const items=DECISIONS.filter(d=>d.cat===cat.id); if(!items.length) return;
+    const items=DECISIONS.filter(d=>d.cat===cat.id&&(planShowUnavailable||(d.avail(S)&&!actionReservedThisYear(d.id)))); if(!items.length) return;
     let ih='';
     items.forEach(d=>{ih+=planActionButton(d,'d',rem);});
     dh+='<div class="ps-catlab">'+cat.label+'</div><div class="sliplist">'+ih+'</div>';
@@ -1687,6 +1799,13 @@ function renderPlan(){
     const recChips=recommendedActions(rem);
     const recStrip=recChips.length?'<div class="rec-strip"><span class="rec-lab">SUGGESTED NOW</span>'+recChips.join('')+'</div>':'';
     body=recStrip+autoRow+ph;
+  }
+  if(planTab==='pursuits'||planTab==='decisions'){
+    const all=planTab==='pursuits'?PURSUITS:DECISIONS;
+    const excluded=all.filter(d=>d.cat!=='hold'&&(!d.avail(S)||actionReservedThisYear(d.id))).length;
+    body='<div class="browse-options"><span>'+excluded+' unavailable or already filed · '+(planShowUnavailable?'full registry':'available actions')+'</span>'+
+      '<button type="button" id="showUnavailable" aria-pressed="'+planShowUnavailable+'">'+
+      (planShowUnavailable?'HIDE UNAVAILABLE':'SHOW ALL ACTIONS')+'</button></div>'+body;
   }
   $('#planSheet').innerHTML=
     '<div class="ps-head"><span>DIRECT ORDERS · FORM 7</span><span style="display:flex;align-items:center;gap:10px"><span class="hrs">⚡ '+rem+'/'+h+' ENERGY '+pipsHTML(rem,h)+'</span><button class="ps-close" id="planClose" aria-label="Close">✕</button></span></div>'+
@@ -1728,6 +1847,7 @@ $('#planSheet').addEventListener('pointercancel',()=>{ endPress(); });
 $('#planSheet').addEventListener('click',e=>{
   if(longPressActive){ longPressActive=false; return; }
   if(e.target.closest('#planClose')){ closePlan(); return; }
+  if(e.target.closest('#showUnavailable')){planShowUnavailable=!planShowUnavailable;renderPlan();return;}
   const tb=e.target.closest('[data-plan-tab]');
   if(tb){ const t=tb.dataset.planTab; if(t!==planTab){ planTab=t; renderPlan(); snd('paper'); } return; }
   if(e.target.closest('#autoTrainBtn')){
@@ -1766,6 +1886,7 @@ function performActionNow(type,id,extra){
   if(r&&r.follow) pushFollow(r.follow);
   logChips(r&&r.text?fill(r.text):'It was done.',chips,type==='p'?'plan':'decision',(type==='p'?'PURSUIT':'DECISION')+' · NOW');
   markActionDone(id);
+  renderActionReceipt(type,id,r,chips);
   renderStats(window.C); updateBar(); renderPlanIfOpen();
 }
 const CONTACT_TARGET_ROLES={flirt:null,flirtsecret:'affair',tendcontact:'friend',cutcontact:null};
@@ -1789,22 +1910,44 @@ function openContactTargetPicker(id){
   $('#skillWrap').classList.remove('hidden');
 }
 
+
 function openLaborDecision(){
   const ctx=typeof WorkplaceSystem==='object'&&WorkplaceSystem&&World?WorkplaceSystem.laborSituation(World):null;
   if(!ctx||!ctx.available)return;
   const sheet=$('#skillSheet');
-  sheet.innerHTML='<div class="ps-head"><span>WORKPLACE · NEGOTIATION</span></div>'+
-    '<div class="qempty">'+escapePlanText(ctx.businessName)+' · salary '+money(ctx.salary)+
-    ' · coworkers '+ctx.peers+' · recent profit '+money(ctx.profit)+
-    '. The choices below alter real employment contracts and workplace relationships.</div>'+
-    '<div class="chips">'+ctx.choices.map(c=>
-      '<button class="chipbtn" data-labor="'+c.id+'"><b>'+escapePlanText(c.label)+'</b>'+
-      '<span>'+Math.round(c.odds*100)+'% accepted · '+escapePlanText(c.note)+'</span></button>').join('')+'</div>'+
+  const percent=p=>Math.round(p*100)+'%';
+  const choices=ctx.choices.map(choice=>{
+    let positive='',negative='';
+    if(choice.id==='petition'){
+      const raise=Math.min(5000000,ctx.salary+Math.max(60,Math.round(ctx.salary*.075)));
+      positive='Accepted: your annual pay becomes '+money(raise)+'.';
+      negative='Refused: your workplace stress rises by up to 5.5 points.';
+    }else if(choice.id==='organize'){
+      const raise=Math.min(5000000,ctx.salary+Math.max(45,Math.round(ctx.salary*.05)));
+      positive='Accepted: your pay becomes '+money(raise)+'; up to 5 coworker contracts also receive raises.';
+      negative='Refused: Bureau scrutiny +8; local unrest +7 points; workplace stress increases.';
+    }else{
+      positive='Workplace stress falls by up to 12 points; annual salary remains '+money(ctx.salary)+'.';
+      negative='No success roll or additional pay.';
+    }
+    return '<button class="strategy-option" data-labor="'+choice.id+'">'+
+      '<span class="strategy-heading"><b>'+escapePlanText(choice.label)+'</b><em>'+
+        (choice.id==='cooperate'?'CERTAIN':'ACCEPTANCE '+percent(choice.odds))+'</em></span>'+
+      '<span class="strategy-up">'+escapePlanText(positive)+'</span>'+
+      '<span class="strategy-down">'+escapePlanText(negative)+'</span></button>';
+  }).join('');
+  sheet.innerHTML='<div class="ps-head"><span>WORKPLACE · NEGOTIATION</span>'+
+    '<button type="button" class="ps-close" id="laborCancelTop" aria-label="Close workplace choices">✕</button></div>'+
+    '<div class="strategy-context"><strong>'+escapePlanText(ctx.businessName)+'</strong><span>Current wage '+money(ctx.salary)+
+    '/year · '+ctx.peers+' coworkers · recorded business profit '+money(ctx.profit)+'</span>'+
+    '<p>These probabilities follow your current performance, company finances, relationships, and Bureau surveillance. Wages and consequences are applied to actual game records.</p></div>'+
+    '<div class="strategy-grid">'+choices+'</div>'+
+    '<div class="strategy-note">Higher payroll affects next year’s business finances. A struggling firm may subsequently reduce its workforce.</div>'+
     '<div class="ps-foot"><button class="btn" id="laborCancel">Never Mind ▸</button></div>';
   sheet.onclick=e=>{
     const choice=e.target.closest('[data-labor]');
     if(choice){$('#skillWrap').classList.add('hidden');performActionNow('d','laborDispute',{strategy:choice.dataset.labor});return;}
-    if(e.target.closest('#laborCancel'))$('#skillWrap').classList.add('hidden');
+    if(e.target.closest('#laborCancel')||e.target.closest('#laborCancelTop'))$('#skillWrap').classList.add('hidden');
   };
   $('#skillWrap').classList.remove('hidden');
 }
@@ -4008,6 +4151,7 @@ function syncPlayerVacancyPortal(){
 }
 function advanceYear(suppressBurst,quiet){
   if(!S||!S.alive||slipOpen) return;
+  clearActionReceipt();
   captureYearSnapshot();
   rpgTierBefore=S.jobTier||0;
   // New year: prune old done-action years. The "acted this year" flag is
