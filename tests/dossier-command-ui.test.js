@@ -47,7 +47,8 @@ test('world briefing renders actual employment, company and security indicators 
  get(ctx,'renderWorldBrief()');
  const display=html(ctx,'worldBrief');
  assert.match(display,/LIVE WORLD RECORD/);
- assert.match(display,/EMPLOYMENT INDEX/);
+ assert.match(display,/LABOR MARKET/);
+ assert.match(display,/Employment index/);
  assert.match(display,/PUBLIC UNREST/);
  assert.match(display,/EMPLOYERS UNDER STRAIN/);
  assert.match(display,/REVIEW YOUR CHOICES/);
