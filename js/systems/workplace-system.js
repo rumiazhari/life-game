@@ -308,7 +308,6 @@
     return Object.assign({year,applied:true},counts);
   }
 
-
   // Derive the player's workplace situation from live, single-owner records.
   function laborSituation(world){
     const es=root.EmploymentSystem;
@@ -354,146 +353,7 @@
       intensity:.7,valence:strategy==='cooperate'?.3:success?.6:-.6,decay:.025,summary:'Labor negotiations at '+businessName(b)+': '+strategy, tags:['workplace','labor']});
     c.history.push({type:'labor_dispute',year,strategy,success,salaryBefore:before,salaryAfter:c.annualSalary,peersRaised});c.history=c.history.slice(-64);
     const text=strategy==='cooperate'?'Cooperated with management: workplace stress fell, salary unchanged.'
-      :success?'Wage negotiation accepted at '+businessName(b)+'. Your annual pay: 
-    ensure(world);
-    const result={active:0,onLeave:0,averageStress:0,totalIncidents:0,totalStrikes:0,onLeaveBurnout:0,onLeaveMedical:0};
-    if(!root.EmploymentSystem||typeof root.EmploymentSystem.activeForPerson!=='function') return result;
-    let stressSum=0,stressN=0;
-    root.EmploymentSystem.all(world).forEach(contract=>{
-      if(!ACTIVE_STATUSES.has(contract.status)) return;
-      const wp=contract.workplace&&typeof contract.workplace==='object'?contract.workplace:{};
-      if(contract.status==='on_leave'){
-        result.onLeave++;
-        if(wp.leaveKind==='burnout') result.onLeaveBurnout++;
-        else if(wp.leaveKind==='medical') result.onLeaveMedical++;
-      } else {
-        result.active++;
-      }
-      stressSum+=clampUnit(wp.stress,.25); stressN++;
-      result.totalIncidents+=Array.isArray(wp.incidents)?wp.incidents.length:0;
-      result.totalStrikes+=wp.strikes||0;
-    });
-    result.averageStress=stressN?round4(stressSum/stressN):0;
-    return result;
-  }
-
-  function checkInvariants(world){
-    const issues=[];
-    if(!world||typeof world!=='object') return ['world must be an object'];
-    if(typeof world.workplaceSchemaVersion!=='number'||world.workplaceSchemaVersion!==SCHEMA_VERSION) issues.push('workplaceSchemaVersion must be '+SCHEMA_VERSION);
-    const tickYear=world.workplaceLastTickYear;
-    if(tickYear!=null&&(typeof tickYear!=='number'||!Number.isFinite(tickYear)||!Number.isInteger(tickYear)||tickYear<MIN_YEAR||tickYear>MAX_YEAR)){
-      issues.push('workplaceLastTickYear must be null or a bounded integer');
-    }
-    if(root.EmploymentSystem&&typeof root.EmploymentSystem.normalizeWorkplace==='function'&&typeof root.EmploymentSystem.all==='function'){
-      root.EmploymentSystem.all(world).forEach(contract=>{
-        const wp=contract.workplace;
-        if(!wp||typeof wp!=='object'||Array.isArray(wp)){
-          issues.push('employment contract '+contract.id+' is missing its workplace object');
-          return;
-        }
-        const expected=root.EmploymentSystem.normalizeWorkplace(wp);
-        if(JSON.stringify(expected)!==JSON.stringify(wp)){
-          issues.push('employment contract '+contract.id+' workplace object is not in normalized form');
-        }
-        if(ACTIVE_STATUSES.has(contract.status)&&wp.lastTickYear!=null&&world.workplaceLastTickYear!=null&&wp.lastTickYear>world.workplaceLastTickYear){
-          issues.push('employment contract '+contract.id+' workplace lastTickYear is ahead of the world tick year');
-        }
-      });
-    }
-    return issues;
-  }
-
-  root.WorkplaceSystem={
-    SCHEMA_VERSION,
-    SUBSYSTEM,
-    STRESS_HIGH_THRESHOLD,
-    LEAVE_ENTER_STRESS,
-    LEAVE_EXIT_STRESS,
-    HIGH_STRESS_YEARS_REQUIRED,
-    MEDICAL_LEAVE_MAX_YEARS,
-    SECTOR_SAFETY_RISK,
-    INCIDENT_KINDS,
-    MAX_ROSTER_PEERS,
-    ensure,
-    migrate,
-    rosterFor,
-    tickWorld,
-    summary,
-    laborSituation,resolveLaborAction,
-    checkInvariants
-  };
-})(typeof globalThis!=='undefined'?globalThis:this);
-+before+' → 
-    ensure(world);
-    const result={active:0,onLeave:0,averageStress:0,totalIncidents:0,totalStrikes:0,onLeaveBurnout:0,onLeaveMedical:0};
-    if(!root.EmploymentSystem||typeof root.EmploymentSystem.activeForPerson!=='function') return result;
-    let stressSum=0,stressN=0;
-    root.EmploymentSystem.all(world).forEach(contract=>{
-      if(!ACTIVE_STATUSES.has(contract.status)) return;
-      const wp=contract.workplace&&typeof contract.workplace==='object'?contract.workplace:{};
-      if(contract.status==='on_leave'){
-        result.onLeave++;
-        if(wp.leaveKind==='burnout') result.onLeaveBurnout++;
-        else if(wp.leaveKind==='medical') result.onLeaveMedical++;
-      } else {
-        result.active++;
-      }
-      stressSum+=clampUnit(wp.stress,.25); stressN++;
-      result.totalIncidents+=Array.isArray(wp.incidents)?wp.incidents.length:0;
-      result.totalStrikes+=wp.strikes||0;
-    });
-    result.averageStress=stressN?round4(stressSum/stressN):0;
-    return result;
-  }
-
-  function checkInvariants(world){
-    const issues=[];
-    if(!world||typeof world!=='object') return ['world must be an object'];
-    if(typeof world.workplaceSchemaVersion!=='number'||world.workplaceSchemaVersion!==SCHEMA_VERSION) issues.push('workplaceSchemaVersion must be '+SCHEMA_VERSION);
-    const tickYear=world.workplaceLastTickYear;
-    if(tickYear!=null&&(typeof tickYear!=='number'||!Number.isFinite(tickYear)||!Number.isInteger(tickYear)||tickYear<MIN_YEAR||tickYear>MAX_YEAR)){
-      issues.push('workplaceLastTickYear must be null or a bounded integer');
-    }
-    if(root.EmploymentSystem&&typeof root.EmploymentSystem.normalizeWorkplace==='function'&&typeof root.EmploymentSystem.all==='function'){
-      root.EmploymentSystem.all(world).forEach(contract=>{
-        const wp=contract.workplace;
-        if(!wp||typeof wp!=='object'||Array.isArray(wp)){
-          issues.push('employment contract '+contract.id+' is missing its workplace object');
-          return;
-        }
-        const expected=root.EmploymentSystem.normalizeWorkplace(wp);
-        if(JSON.stringify(expected)!==JSON.stringify(wp)){
-          issues.push('employment contract '+contract.id+' workplace object is not in normalized form');
-        }
-        if(ACTIVE_STATUSES.has(contract.status)&&wp.lastTickYear!=null&&world.workplaceLastTickYear!=null&&wp.lastTickYear>world.workplaceLastTickYear){
-          issues.push('employment contract '+contract.id+' workplace lastTickYear is ahead of the world tick year');
-        }
-      });
-    }
-    return issues;
-  }
-
-  root.WorkplaceSystem={
-    SCHEMA_VERSION,
-    SUBSYSTEM,
-    STRESS_HIGH_THRESHOLD,
-    LEAVE_ENTER_STRESS,
-    LEAVE_EXIT_STRESS,
-    HIGH_STRESS_YEARS_REQUIRED,
-    MEDICAL_LEAVE_MAX_YEARS,
-    SECTOR_SAFETY_RISK,
-    INCIDENT_KINDS,
-    MAX_ROSTER_PEERS,
-    ensure,
-    migrate,
-    rosterFor,
-    tickWorld,
-    summary,
-    checkInvariants
-  };
-})(typeof globalThis!=='undefined'?globalThis:this);
-+c.annualSalary+
+      :success?'Wage negotiation accepted at '+businessName(b)+'. Your annual pay: $'+before+' to $'+c.annualSalary+
         (strategy==='organize'?'; '+peersRaised+' coworkers received raises.':'')+' Employer payroll will reflect the change next year.'
       :strategy==='organize'?'Collective demand rejected. Stress, public unrest, and Bureau scrutiny rose.':'Individual raise refused. Workplace stress rose.';
     return {ok:true,strategy,success,peersRaised,attention,unrest,salaryBefore:before,salaryAfter:c.annualSalary,text,fx:{happiness:strategy==='cooperate'?2:success?4:-4}};
@@ -565,6 +425,7 @@
     rosterFor,
     tickWorld,
     summary,
+    laborSituation,resolveLaborAction,
     checkInvariants
   };
 })(typeof globalThis!=='undefined'?globalThis:this);
