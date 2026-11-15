@@ -86,3 +86,40 @@ test('the plan sheet is now LIVE: renames and energy units are in place',()=>{
   expose(context,'updateBar();');
   assert.equal(expose(context,"document.getElementById('plan-label').textContent"),'LIVE THE YEAR','the main button is renamed');
 });
+
+test('venture financing enters the debt schedule rather than gifting cash',()=>{
+ const context=liveContext('venture-debt');
+ expose(context,"S.assets=1200; S.skills.retail=2; S.liabilities=[];");
+ const cash=expose(context,"S.assets");
+ expose(context,"performActionNow('d','loan')");
+ assert.equal(expose(context,"S.assets"),cash);
+ assert.equal(expose(context,"S.liabilities.length"),1);
+ assert.equal(expose(context,"S.liabilities[0].id"),'ventureloan');
+ assert.equal(expose(context,"S.liabilities[0].annualPayment"),520);
+ assert.equal(expose(context,"S.liabilities[0].yearsLeft"),5);
+});
+test('gambling hall enters the real business registry and risks scrutiny',()=>{
+ const context=liveContext('real-ownership');
+ expose(context,"S.assets=6000;S.freedom=70;");
+ const old=expose(context,"ownedActiveBusinesses().length");
+ assert.equal(old,0);
+ expose(context,"performActionNow('d','gamblelic')");
+ assert.equal(expose(context,"ownedActiveBusinesses().length"),1);
+ assert.equal(expose(context,"S.assets"),2500);
+ assert.ok(expose(context,"S.scrutiny")>5);
+ const b=JSON.parse(expose(context,"JSON.stringify(ownedActiveBusinesses()[0])"));
+ assert.equal(b.sector,'retail');
+ assert.equal(b.ownerNpcId,'subject');
+ assert.equal(b.finances.cash,3500);
+});
+test('relocate uses the map journey and changes place only upon arrival',()=>{
+ const context=liveContext('coastal-route');
+ expose(context,"World.activeSettlementId='branec';World.place='Branec';S.location={settlementId:'branec'};S.assets=5000;S.freedom=70;S.didCoast=false;S.traveling=null;");
+ expose(context,"performActionNow('d','relocate')");
+ assert.equal(expose(context,"World.activeSettlementId"),'branec');
+ assert.equal(expose(context,"S.traveling.to"),'veskar');
+ assert.equal(expose(context,"S.didCoast"),false);
+ expose(context,"World.year++; resolveTravel()");
+ assert.equal(expose(context,"World.activeSettlementId"),'veskar');
+ assert.equal(expose(context,"S.didCoast"),true);
+});
