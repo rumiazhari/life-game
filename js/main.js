@@ -64,7 +64,7 @@ $('#recentRecordOpen').addEventListener('click',()=>{ snd('paper'); openCaseLog(
 $('#inventory').addEventListener('click',e=>{ if(e.target.closest('#invOpenHousehold')){ snd('paper'); openHousehold(); return; } if(e.target.closest('#invOpenMedical')){ snd('paper'); openMedicalFile(); return; } if(e.target.closest('#invOpenFamilyHealth')){ snd('paper'); openFamilyHealth(); } });
 $('#logClose').addEventListener('click',()=>{ $('#logWrap').classList.add('hidden'); });
 document.addEventListener('keydown',e=>{
-  const blocked=['#planWrap','#slipWrap','#closedWrap','#intentWrap','#mapWrap','#medicalWrap','#familyMedicalWrap','#householdWrap','#jobWrap','#jobDetailWrap','#skillWrap','#educationWrap','#logWrap','#holdWrap','#archiveWrap','#achieveListWrap']
+  const blocked=['#planWrap','#slipWrap','#closedWrap','#intentWrap','#mapWrap','#storyWrap','#medicalWrap','#familyMedicalWrap','#householdWrap','#jobWrap','#jobDetailWrap','#skillWrap','#educationWrap','#logWrap','#holdWrap','#archiveWrap','#achieveListWrap']
     .some(s=>{const el=$(s);return el&&!el.classList.contains('hidden');});
   if(e.code==='Escape'){ if(closeTopOverlay())e.preventDefault(); return; }
   if(!$('#dossier')||$('#dossier').classList.contains('hidden')||blocked||e.repeat)return;

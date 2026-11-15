@@ -46,6 +46,7 @@
     if(!world||typeof world!=='object') throw new Error('StorySystem.ensure requires a world object');
     if(!world.storyRuns||typeof world.storyRuns!=='object'||Array.isArray(world.storyRuns)) world.storyRuns={};
     if(!world.storyArchive||typeof world.storyArchive!=='object'||Array.isArray(world.storyArchive)) world.storyArchive={};
+    if(!world.storyItems||typeof world.storyItems!=='object'||Array.isArray(world.storyItems))world.storyItems={};
     if(!isValidCounter(world.storyCounter)) world.storyCounter=0;
     if(!isValidCounter(world.storyArchiveCounter)) world.storyArchiveCounter=0;
     world.storyLastTickYear=boundedYearOrNull(world.storyLastTickYear);
@@ -173,6 +174,23 @@
           }
           break;
         }
+        case 'storyItem': {
+          const id=String(op.id||'').slice(0,48);
+          if(world&&id&&!world.storyItems[id]){
+            world.storyItems[id]={id,label:String(op.label||id).slice(0,60),
+              icon:String(op.icon||'📜').slice(0,4),year};
+            chips.push({txt:'FOUND: '+String(op.label||id).slice(0,35),plus:true});
+          }
+          break;
+        }
+        case 'takeStoryItem': {
+          const id=String(op.id||'').slice(0,48);
+          if(world&&world.storyItems&&world.storyItems[id]){
+            delete world.storyItems[id];
+            chips.push({txt:'USED: '+id.slice(0,35),plus:false});
+          }
+          break;
+        }
         case 'memory': {
           if(root.RelationshipMemory&&typeof root.RelationshipMemory.add==='function'){
             const participants=[...new Set([String((S&&S.npcId)||'subject')].concat((op.participants||[]).filter(Boolean).map(String)))];
@@ -220,7 +238,7 @@
   function selectEpisode(world,S,lineage,year,rng){
     const candidates=[];
     episodes().forEach(def=>{
-      if(episodeAlreadyLived(world,def.id)) return;
+      if(def.quest||episodeAlreadyLived(world,def.id)) return;
       if(typeof def.eligible!=='function') return;
       let bind=null;
       try{ bind=def.cast?def.cast.call(def,world,S,lineage):{}; }catch(e){ bind=null; }

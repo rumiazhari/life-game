@@ -583,7 +583,7 @@ $('#coachBar').addEventListener('click',e=>{
   else if(!coachGet('seal'))coachSet('seal');
   else coachSet('report');
 });
-const OVERLAY_CLOSE_ORDER=['jobDetailWrap','skillWrap','educationWrap','familyMedicalWrap','medicalWrap','householdWrap','logWrap','achieveListWrap','archiveWrap','holdWrap','mapWrap','planWrap'];
+const OVERLAY_CLOSE_ORDER=['jobDetailWrap','skillWrap','educationWrap','familyMedicalWrap','medicalWrap','householdWrap','logWrap','achieveListWrap','archiveWrap','holdWrap','mapWrap','storyWrap','planWrap'];
 function closeTopOverlay(){
   for(const id of OVERLAY_CLOSE_ORDER){
     const el=document.getElementById(id);
@@ -3045,7 +3045,7 @@ function startNewLife(){ playIntroCinematic(function(){ newFile(); }); }
  * consequences have already landed on the real file. */
 function currentStoryChain(){
   if(typeof StorySystem!=='object'||!StorySystem||typeof World==='undefined'||!World) return null;
-  try{ return StorySystem.currentView(World,{year:World.year}); }catch(e){ return null; }
+  try{ return StorySystem.currentView(World,{year:World.year,subject:S}); }catch(e){ return null; }
 }
 // STATE CARE (Form 11-C): annual intake sweep + ward upkeep.
 function stateCareActive(){
@@ -3330,9 +3330,18 @@ function openStorySlip(force){
       html+='<div class="sl-actions"><button class="sl-btn ok" data-vn="next">'+(view.isLastLine?'The scene turns ▸':'NEXT ▸')+'</button></div>';
     } else if(view.type==='choice'){
       html+='<div class="vn-prompt">'+escapeHtml(fill(view.prompt||'Choose.'))+'</div>';
-      html+='<div class="vn-choices">'+view.options.map(o=>
-        '<button class="sl-btn '+(o.tone==='greedy'?'no':o.tone==='kind'?'ok':'maybe')+'" data-vn-opt="'+o.index+'"><span>'+escapeHtml(fill(o.t))+'</span>'+(o.note?'<small>'+escapeHtml(o.note)+' …will be remembered.</small>':'<small>…will be remembered.</small>')+'</button>'
-      ).join('')+'</div>';
+      html+='<div class="vn-choices">'+view.options.map(o=>{
+        const odds=o.check?'<b class="vn-odds '+(o.check.percent>=75?'high':o.check.percent<40?'low':'')+'">🎲 '+o.check.percent+'%</b>':'';
+        const mods=o.check?'<em class="vn-breakdown">'+
+          escapeHtml(o.check.domain.toUpperCase()+' · 3d6 '+(o.check.mod>=0?'+':'')+o.check.mod+' vs '+o.check.tn)+
+          (o.check.breakdown.length?' · '+o.check.breakdown.map(x=>x.label+' '+(x.value>=0?'+':'')+x.value).join(' / '):'')+'</em>':'';
+        const unavailable=o.available===false;
+        return '<button class="sl-btn '+(o.tone==='greedy'?'no':o.tone==='kind'?'ok':'maybe')+'" data-vn-opt="'+o.index+'"'+
+          (unavailable?' disabled aria-disabled="true"':'')+'>'+
+          '<span class="vn-option-head"><span>'+escapeHtml(fill(o.t))+'</span>'+odds+'</span>'+
+          (unavailable?'<small>🔒 '+escapeHtml(o.unavailableReason)+'</small>':
+          (o.note?'<small>'+escapeHtml(o.note)+' · will be remembered.</small>':'<small>Will be remembered.</small>'))+mods+'</button>';
+      }).join('')+'</div>';
     }
   }
   void echo;
@@ -3348,9 +3357,20 @@ function openStorySlip(force){
     const opt=e.target.closest('[data-vn-opt]');
     if(opt){
       const res=StorySystem.choose(World,+opt.dataset.vnOpt,{year:World.year,subject:S,lineage:Lineage});
+      if(!res.applied)return;
       snd('stamp');
-      if(res.applied){ window.C={}; renderStats(window.C); }
-      openStorySlip(true); updateBar(); return;
+      window.C={}; renderStats(window.C);
+      if(res.check&&res.check.ok){
+        const r=res.check;
+        const faces=r.rolls.map(v=>'<span class="vn-roll-die">'+v+'</span>').join('');
+        card.onclick=null; // the committed roll cannot be pressed twice during its reveal
+        card.innerHTML+='<div class="vn-roll-fx" role="status" aria-live="assertive"><div class="vn-roll-icons">'+faces+'</div>'+
+          '<div class="vn-roll-result '+(r.success?'good':'bad')+'">'+(r.success?'SUCCESS':'SETBACK')+
+          '<strong>'+r.total+' / '+r.tn+'</strong></div></div>';
+        const reduced=typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+        setTimeout(()=>{openStorySlip(true);updateBar();},reduced?200:900);
+      }else{openStorySlip(true);updateBar();}
+      return;
     }
   };
   $('#slipWrap').classList.remove('hidden'); snd('paper'); updateBar();
