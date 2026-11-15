@@ -65,6 +65,7 @@ test('disabled plan buttons surface the reason instead of a bare not-available',
   configureAdult(context);
   const result=JSON.parse(expose(context,`(function(){
     planTab='decisions';
+    planShowUnavailable=true;
     renderPlan();
     const html=document.getElementById('planSheet').innerHTML;
     return JSON.stringify({hasReasons:/— (no job|needs marriage|record already clean|no debts on file)/.test(html)});
