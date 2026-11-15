@@ -109,7 +109,12 @@ function buildYearReportHtml(){
     // major milestone earns it. Presentation only; quietMode renders none.
     let art='';
     if(!artShown&&e.cls==='milestone'){ art=milestoneArt(e.text); if(art)artShown=true; }
-    h+='<div class="yr-entry'+(i<reportIdx?'':' yr-pending')+'"><span class="yr-head">'+e.head+'</span>'+art+'<div class="etext">'+e.text+'</div>'+
+    const fullText=String(e.text||'');
+    const shortText=clipText(fullText,84);
+    const symbol=e.cls==='milestone'?'book':e.cls==='crisis'?'alert':e.cls==='opportunity'?'money':e.cls==='final'?'shield':'bolt';
+    h+='<div class="yr-entry'+(i<reportIdx?'':' yr-pending')+'"><span class="yr-visual">'+ledgerIcon(symbol)+'</span><span class="yr-head">'+escapePlanText(e.head)+'</span>'+art+
+      '<div class="etext">'+escapePlanText(shortText)+'</div>'+
+      (fullText.length>84?'<details class="yr-details"><summary>READ FULL REPORT</summary><p>'+escapePlanText(fullText)+'</p></details>':'')+
       (e.chips&&e.chips.length?'<div class="yr-chips">'+e.chips.map(c=>'<span class="fx '+(c.plus?'plus':'minus')+'">'+c.txt+'</span>').join('')+'</div>':'')+'</div>';
   });
   if(reportExtra>0&&done)h+='<div class="yr-more">+'+reportExtra+' more filed in CASE LOG</div>';
@@ -500,11 +505,20 @@ function recommendedActions(rem){
     if(!d||actionReservedThisYear(id))return;
     if(typeof d.avail==='function'&&!d.avail(S))return;
     if(d.cost&&rem<d.cost)return;
-    out.push('<button class="rec-chip" data-'+type+'="'+id+'" '+(extra?'data-extra=\''+JSON.stringify(extra).replace(/'/g,'&#39;')+'\'':'')+' title="'+label+'"><b>'+label+'</b><span>'+clipText(fillLabel(d.note?d.note(S):''),46)+'</span></button>');
+    const icon=d.cat==='work'||['lookwork','laborDispute','gig'].includes(id)?'work':
+      d.cat==='social'||d.cat==='family'?'family':
+      d.cat==='health'||['doctor','treatment'].includes(id)?'med':
+      d.cat==='education'||id==='study'?'book':d.cat==='money'?'money':'bolt';
+    const note=fillLabel(d.note?d.note(S):'');
+    out.push('<button class="rec-chip" data-'+type+'="'+id+'" '+
+      (extra?'data-extra=\''+JSON.stringify(extra).replace(/'/g,'&#39;')+'\' ':'')+
+      'title="'+escapePlanText(note)+'"><span class="rec-graphic">'+ledgerIcon(icon)+'</span>'+
+      '<b>'+escapePlanText(label)+'</b><span>'+escapePlanText(clipText(note,46))+'</span>'+
+      '<em class="rec-energy">'+(d.cost?'⚡ '+d.cost:'FREE')+'</em></button>');
   };
   const addUi=(id,label,note)=>{
     if(actionReservedThisYear('openHousehold')&&id==='household')return;
-    out.push('<button class="rec-chip" data-ui-open="'+id+'" title="'+label+'"><b>'+label+'</b><span>'+clipText(note,46)+'</span></button>');
+    out.push('<button class="rec-chip" data-ui-open="'+id+'" title="'+escapePlanText(note)+'"><span class="rec-graphic">'+ledgerIcon('house')+'</span><b>'+escapePlanText(label)+'</b><span>'+escapePlanText(clipText(note,46))+'</span></button>');
   };
   if(S.jailUntil>S.age)return out;
   // The Ways Out advisor: when the file is genuinely struggling, the Bureau
@@ -535,7 +549,6 @@ function recommendedActions(rem){
   else if(S.age>=16)add('d','laborDispute','Workplace negotiation');
   if(S.married&&S.partnerMood<45)add('p','tendspouse','Care for your marriage');
   if(S.age<16)add('p','study','Build foundations');
-  else if(S.age>=16)add('d','laborDispute','Workplace negotiation');
   if(S.age>=18&&S.jobTier>=1)add('d','presspromo','Career progression');
   else if(S.assets<-500)add('p','overtime','Earn overtime');
   if(S.happiness<32)add('p',S.age<16?'family':'walk','Lift your mood');
@@ -660,29 +673,29 @@ function renderWorldBrief(){
   const unrest=Number(security.unrest)||0;
   const employment=Number(economy.employmentIndex)||0;
   const issue=S.health<38?{
-    title:'Your health needs attention',note:'Low health restricts the time available for decisions. Treatment competes with work, money, and family.'}:
-    S.assets<0?{title:'Your household is in deficit',note:'Debts and living costs threaten future choices. Money earned now may come at the cost of health or relationships.'}:
+    title:'Health at risk',note:'Care vs income',icon:'med'}:
+    S.assets<0?{title:'Household deficit',note:'Earn · borrow · reduce costs',icon:'money'}:
     business&&business.status==='struggling'?{
-      title:'Your employer is under strain',note:'A struggling company can cut positions. Higher wages increase payroll, while workplace loyalty affects future relations.'}:
-    S.age>=16&&!work?{title:'Finding a livelihood',note:'Open positions and competing applicants depend on the local labor market and available qualifications.'}:
-    unrest>.58?{title:'Political tension is rising',note:'Surveillance and unrest create risks around work, public activity, and travel.'}:
-    work?{title:'Your next move matters',note:'Your employer, coworkers, and the Bureau react to choices beyond their immediate statistical effects.'}:
-    {title:'A life is taking shape',note:'Family, education, and the world around you will shape your later options.'};
+      title:'Employer under strain',note:'Payroll vs job security',icon:'work'}:
+    S.age>=16&&!work?{title:'Find a livelihood',note:'Openings · qualifications · wages',icon:'work'}:
+    unrest>.58?{title:'Political unrest',note:'Surveillance · public action · risk',icon:'alert'}:
+    work?{title:'Workplace and alliances',note:'Wages · coworkers · Bureau',icon:'family'}:
+    {title:'Life ahead',note:'Family · learning · opportunity',icon:'book'};
   const distressed=market&&market.businesses?Math.round(market.distressRate*market.businesses):0;
   const metrics=[
-    {label:'PERSONAL ASSETS',value:money(Number(S.assets)||0),note:S.assets<0?'Deficit on file':'Available balance',tone:S.assets<0?'danger':''},
-    {label:'LABOR MARKET',value:settlement?Math.round(employment*100)+'/100':'—',note:'Employment index',tone:employment<.35?'danger':employment<.50?'warning':''},
-    {label:'PUBLIC UNREST',value:settlement?Math.round(unrest*100)+'/100':'—',note:'Unrest index',tone:unrest>.58?'danger':unrest>.34?'warning':''},
-    {label:'EMPLOYERS UNDER STRAIN',value:market&&market.businesses?distressed+' / '+market.businesses:'—',note:'Known local businesses',tone:market&&market.businesses&&market.distressRate>.45?'warning':''}
+    {icon:'money',label:'PERSONAL ASSETS',value:money(Number(S.assets)||0),note:S.assets<0?'Deficit':'Balance',tone:S.assets<0?'danger':''},
+    {icon:'work',label:'LABOR MARKET',value:settlement?Math.round(employment*100)+'/100':'—',note:'Employment',tone:employment<.35?'danger':employment<.50?'warning':''},
+    {icon:'alert',label:'PUBLIC UNREST',value:settlement?Math.round(unrest*100)+'/100':'—',note:'Public order',tone:unrest>.58?'danger':unrest>.34?'warning':''},
+    {icon:'bank',label:'EMPLOYERS UNDER STRAIN',value:market&&market.businesses?distressed+' / '+market.businesses:'—',note:'Companies',tone:market&&market.businesses&&market.distressRate>.45?'warning':''}
   ];
   const canChoose=typeof planHours==='function'&&planHours()>0&&S.alive&&S.jailUntil<=S.age;
   el.innerHTML='<div class="wb-top"><div><span class="wb-overline">SECTION D · CURRENT SITUATION</span>'+
     '<span class="wb-place">'+escapePlanText(settlementName)+' · '+escapePlanText(World.year)+'</span></div>'+
     '<span class="wb-file">LIVE WORLD RECORD</span></div>'+
-    '<div class="wb-main"><div class="wb-lead"><span class="wb-section">PRIMARY CONSIDERATION</span>'+
+    '<div class="wb-main"><div class="wb-lead"><span class="wb-section">THIS YEAR</span>'+ledgerIcon(issue.icon)+
       '<h3>'+escapePlanText(issue.title)+'</h3><p>'+escapePlanText(issue.note)+'</p></div>'+
       '<div class="wb-metrics">'+metrics.map(m=>'<div class="wb-metric'+(m.tone?' '+m.tone:'')+'"><span>'+
-        m.label+'</span><strong>'+escapePlanText(m.value)+'</strong><small>'+m.note+'</small></div>').join('')+'</div></div>'+
+        ledgerIcon(m.icon)+m.label+'</span><strong>'+escapePlanText(m.value)+'</strong><small>'+m.note+'</small></div>').join('')+'</div></div>'+
     '<div class="wb-bottom"><span>'+(work&&business?'EMPLOYED AT '+escapePlanText(business.name)+
       ' · '+escapePlanText(work.occupationName):'YOUR FILE · '+escapePlanText(S.age)+' YEARS OLD')+
     '</span><button type="button" data-open-priorities '+(canChoose?'':'disabled')+
@@ -695,7 +708,7 @@ function renderActionReceipt(type,id,result,chips){
   const text=result&&result.text?fill(result.text):'The action was filed.';
   const deltas=(chips||[]).map(c=>'<span class="ar-delta '+(c.plus?'up':'down')+'">'+escapePlanText(c.txt)+'</span>').join('');
   el.innerHTML='<div class="ar-copy"><span class="ar-eyebrow">ACTION ENTERED · YEAR '+escapePlanText(S.age)+'</span>'+
-    '<strong>'+escapePlanText(label)+'</strong><p>'+escapePlanText(text)+'</p></div>'+
+    '<strong>'+escapePlanText(label)+'</strong><p>'+escapePlanText(clipText(text,100))+'</p>'+(text.length>100?'<details class="ar-full"><summary>MORE ▾</summary><p>'+escapePlanText(text)+'</p></details>':'')+'</div>'+
     '<div class="ar-actions">'+(deltas?'<div class="ar-deltas">'+deltas+'</div>':'')+
     '<button type="button" data-receipt-log>FULL CASE LOG ▸</button><button type="button" data-receipt-close aria-label="Dismiss action receipt">✕</button></div>';
   el.classList.remove('hidden');
@@ -859,64 +872,166 @@ function renderServiceRecord(){
     (perks.length?'<div class="svc-perks">'+perks.map(p=>'<i title="'+p.desc+'">'+p.name+'</i>').join('')+'</div>':'')+
     '</div>';
 }
-function renderInventory(){
-  const el=$('#inventory'); if(!el) return;
-  ensurePersonalSystems(S); updatePersonalStanding();
-  const house=currentHousing(), food=currentFood();
-  const conditions=activeConditions();
-  const location=currentSettlement(), building=currentBuilding(), travel=S.traveling?settlementById(S.traveling.to):null;
-  const settlementConditions=typeof WorldSimulation==='object'&&WorldSimulation&&World?WorldSimulation.getSettlementConditions(World,location.id):null;
-  const standing='<div class="personal-ledger"><div class="sec-h">PERSONAL STANDING <span>LIVE FILE</span></div>'+ 
-    '<div class="standing-grid"><div><b>FREEDOM</b><span>'+S.freedom+' · '+freedomLabel(S.freedom)+'</span></div><div><b>SCRUTINY</b><span>'+S.scrutiny+' · '+scrutinyLabel(S.scrutiny)+'</span></div>'+ 
-    '<div><b>BUREAU FAVOR</b><span>'+S.bureauFavor+' / 3</span></div><div><b>SECURITY</b><span>'+securityLabel(Math.min(S.housingSecurity,S.financialSecurity))+'</span></div>'+
-    '<div><b>RELATIONSHIP</b><span>'+(S.married?'Married to '+S.partner:(S.status==='Attached'?('Partner: '+S.partner||'—'):(S.status==='Single'?'Single':'—')))+'</span></div></div>'+ 
-    '<div class="medical-line"><b>MEDICAL FILE</b><span>'+(conditions.length?conditions.map(c=>medicalInfo(c.id).name+(c.known?'':' · unexamined')).join(' · '):(S.medicalRecord?'no active condition':'not yet opened'))+'</span></div>'+
-    '<div class="location-line"><b>LOCATION</b><span>'+location.name+' · '+(building?building.name:'address pending')+(travel?' · travelling to '+travel.name:'')+'</span></div>'+
-    '</div>'+
-    (settlementConditions?'<div class="settlement-conditions"><div class="sec-h">SETTLEMENT CONDITIONS <span>SIMULATION</span></div><div class="condition-grid"><div><b>EMPLOYMENT</b><span>'+settlementConditions.employment+'</span></div><div><b>COST OF LIVING</b><span>'+settlementConditions.costOfLiving+'</span></div><div><b>HEALTHCARE PRESSURE</b><span>'+settlementConditions.healthcare+'</span></div><div><b>UNREST</b><span>'+settlementConditions.unrest+'</span></div><div><b>SURVEILLANCE</b><span>'+settlementConditions.surveillance+'</span></div></div></div>':'')+employmentUiPanels()+renderServiceRecord();
-  if(S.age<16||S.livingAtHome){
-    const famT=FAMILY_TIERS.find(f=>f.id===S.familyTier);
-    let hc='<div class="aempty">'+(S.age<16?'Dependent on parents — the family provides.':'Still living at home — rent-free, fed at the family table.')+'</div>';
-    if(S.age<16) hc+='<div class="frow"><span class="flabel">FAMILY OF ORIGIN</span><span class="fval">'+(famT?famT.label:'—')+'</span></div>';
-    hc+='<div class="frow"><span class="flabel">HOUSING</span><span class="fval">'+house.icon+' '+house.name+'</span></div>';
-    hc+='<div class="hh-risk">'+fxSummary(house.fx)+' · '+house.risk+'</div>';
-    hc+='<div class="frow"><span class="flabel">FOOD</span><span class="fval">'+food.icon+' '+food.name+'</span></div>';
-    hc+='<div class="hh-risk">'+fxSummary(food.fx)+' · '+food.risk+'</div>';
-    const gt=guardTier(), gi=GUARD_INFO[gt];
-    hc+='<div class="frow"><span class="flabel">GUARDIANSHIP</span><span class="fval">'+gi.label+'</span></div>';
-    hc+='<div class="hh-risk">'+gi.line+'</div>';
-    el.innerHTML=standing+'<div class="gbox"><div class="sec-h">AT THE FAMILY TABLE</div>'+hc+'</div>'; return;
-  }
-  let h='<div class="gbox"><div class="sec-h">HOUSEHOLD & LIFESTYLE <span>ANNUAL</span></div>';
-  h+='<div class="hotspot" data-hotspot="housing"><div class="frow"><span class="flabel">HOUSING</span><span class="fval">'+house.icon+' '+house.name+' · '+(house.rent?money(house.rent)+'/yr':'free')+'</span></div>'+
-    '<div class="hh-risk">'+fxSummary(house.fx)+' · '+house.risk+'</div></div>';
-  h+='<div class="hotspot" data-hotspot="food"><div class="frow"><span class="flabel">FOOD</span><span class="fval">'+food.icon+' '+food.name+' · '+money(food.cost)+'/yr</span></div>'+
-    '<div class="hh-risk">'+fxSummary(food.fx)+' · '+food.risk+'</div></div>';
-  if(S.kids>0){ const care=currentChildcare();
-    h+='<div class="frow"><span class="flabel">DEPENDENTS</span><span class="fval">'+care.icon+' '+care.name+' · '+money(care.costPerKid)+'/yr × '+S.kids+'</span></div>';
-    h+='<div class="hh-risk">'+fxSummary(care.fx)+' · '+care.risk+'</div>'; }
-  h+='</div>';
-  const subjectHousehold=typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.findByMember==='function'?HouseholdSystem.findByMember(World,S.npcId):null;
-  const outlay=typeof HouseholdSystem==='object'&&HouseholdSystem&&typeof HouseholdSystem.estimateOutlay==='function'?HouseholdSystem.estimateOutlay(World,subjectHousehold,S,{year:currentYear()}):{personalLifestyleOutlay:0,additionalHouseholdCosts:0,projectedTotalOutlay:0};
-  h+='<div class="gbox"><div class="sec-h">LIABILITIES <span>'+(S.liabilities.length||'NONE')+'</span></div>';
-  if(S.liabilities.length){
-    S.liabilities.forEach(l=>{ h+='<div class="arow"><div class="ar-grade">'+l.icon+'</div><div style="flex:1"><div class="ar-name">'+l.name+'</div><div class="ar-meta">'+money(l.annualPayment)+'/yr · '+l.yearsLeft+'y remaining</div></div></div>'; });
-  } else {
-    h+='<div class="aempty">No debts on file.</div>';
-  }
-  h+='</div>';
-  h+='<div class="gbox"><div class="sec-h">ANNUAL OUTLAY <span>PROJECTED</span></div>';
-  h+='<div class="frow moneyrow hotspot" data-hotspot="outlay"><span class="flabel">PERSONAL LIFESTYLE OUTLAY</span><span class="fval big">'+money(outlay.personalLifestyleOutlay)+'</span></div>';
-  h+='<div class="frow moneyrow"><span class="flabel">ADDITIONAL HOUSEHOLD COSTS</span><span class="fval big">'+money(outlay.additionalHouseholdCosts)+'</span></div>';
-  h+='<div class="frow moneyrow"><span class="flabel">PROJECTED TOTAL OUTLAY</span><span class="fval big">'+money(outlay.projectedTotalOutlay)+'</span></div>';
-  h+='</div>';
-  h+='<div class="inv-actions">'+
-    '<button class="btn small" id="invOpenMedical">MEDICAL FILE ▸</button>'+
-    '<button class="btn small" id="invOpenHousehold">HOUSEHOLD ▸</button>'+
-    '<button class="btn small" id="invOpenFamilyHealth">FAMILY HEALTH ▸'+(familyHealthPendingCount()?' <span class="family-health-badge">'+familyHealthPendingCount()+'</span>':'')+'</button>'+
-  '</div>';
-  el.innerHTML=standing+h;
+
+/* Visual Section C. Everything below is read-only presentation of existing
+   player, household and World records. The management buttons still invoke
+   the authoritative housing, medical and employment interfaces. */
+const LEDGER_PATHS={
+  house:'<path d="M4 15 16 5l12 10M8 13v14h16V13M13 27v-9h6v9"/>',
+  meal:'<path d="M4 19h24M7 19a9 9 0 0 0 18 0M9 12c0-3 4-3 4-6M16 12c0-3 4-3 4-6M23 12c0-3 4-3 4-6"/>',
+  care:'<circle cx="16" cy="9" r="4"/><path d="M6 27v-4c0-6 4-9 10-9s10 3 10 9v4M16 19v7M12.5 22.5h7"/>',
+  family:'<circle cx="11" cy="9" r="4"/><circle cx="23" cy="12" r="3"/><path d="M3 27v-5c0-6 4-9 8-9s8 3 8 9v5M19 18c5 0 9 3 9 8v1"/>',
+  shield:'<path d="m16 3 11 5v8c0 8-5 12-11 14C10 28 5 24 5 16V8z"/><path d="m11 16 4 4 7-8"/>',
+  eye:'<path d="M2 16s5-8 14-8 14 8 14 8-5 8-14 8S2 16 2 16z"/><circle cx="16" cy="16" r="4"/>',
+  freedom:'<path d="M7 20v7h18v-7M12 20V6a4 4 0 0 1 8 0v7M6 14h20v7H6z"/>',
+  money:'<rect x="3" y="8" width="26" height="17" rx="2"/><path d="M8 13h5M19 20h5"/><circle cx="16" cy="16.5" r="4"/>',
+  map:'<path d="m3 8 9-4 8 4 9-4v20l-9 4-8-4-9 4zM12 4v20M20 8v20"/>',
+  med:'<path d="M11 4h10v7h7v10h-7v7H11v-7H4V11h7z"/>',
+  work:'<rect x="4" y="10" width="24" height="19" rx="2"/><path d="M12 10V5h8v5M4 18h24M13 18v3h6v-3"/>',
+  bolt:'<path d="m18 2-12 16h10l-2 12 12-17H16z"/>',
+  bank:'<path d="M3 12 16 4l13 8M5 27h22M8 15v9M14 15v9M20 15v9M26 15v9M3 12h26"/>',
+  alert:'<path d="m16 3 14 26H2zM16 12v8M16 24v1"/>',
+  heart:'<path d="M16 28 4 16C-2 9 8-1 16 9c8-10 18 0 12 7z"/>',
+  book:'<path d="M16 7C12 4 7 4 3 5v22c5-1 10-1 13 2 3-3 8-3 13-2V5c-4-1-9-1-13 2zM16 7v22"/>'
+};
+function ledgerIcon(name){
+  return '<svg class="lv-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+
+    (LEDGER_PATHS[name]||LEDGER_PATHS.bank)+'</svg>';
 }
+function ledgerScene(home,children,place){
+  // A little architectural vignette, not an image request or a second map.
+  // The main silhouette actually responds to the selected housing type.
+  const unhoused=home&&home.id==='none';
+  const people=Array.from({length:Math.min(5,Math.max(1,Number(children)||0)+1)},(_,i)=>
+    '<g transform="translate('+(450+i*26)+' 0)" class="lv-person">'+
+      '<circle cx="0" cy="121" r="'+(i?6:8)+'" fill="#483e32"/>'+
+      '<path d="M-9 157v-17q9-12 18 0v17" fill="'+(i%2?'#70543c':'#37516a')+'"/>'+
+    '</g>').join('');
+  const building=unhoused
+    ?'<path d="M123 109h213l-38-58H168z" fill="#bca57d" stroke="#634c34" stroke-width="4"/>'+
+      '<path d="M166 109v52h133v-52" fill="#d4c29c"/><path d="M208 161v-31h35v31" fill="#66553e"/>'
+    :'<g class="lv-house"><path d="M134 72h205l-18 91H146z" fill="#d5c7a5" stroke="#6c5941" stroke-width="3"/>'+
+      '<path d="m113 77 121-62 122 62-10 14-112-53-112 53z" fill="#735047" stroke="#614439" stroke-width="3"/>'+
+      '<rect x="195" y="111" width="56" height="52" fill="#795f46"/>'+
+      '<rect x="153" y="101" width="30" height="33" fill="#688a94" stroke="#695b47" stroke-width="4"/>'+
+      '<rect x="269" y="101" width="30" height="33" fill="#688a94" stroke="#695b47" stroke-width="4"/>'+
+      '<path d="M168 101v33M284 101v33" stroke="#d4ccae" stroke-width="3"/>'+
+      '<rect x="295" y="29" width="19" height="36" fill="#7b5644"/>'+
+      '<circle class="lv-smoke" cx="304" cy="18" r="9" fill="#eee9de" opacity=".62"/>'+
+      '</g>';
+  return '<svg class="lv-scene-svg" viewBox="0 0 640 184" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Illustration of '+escapePlanText(unhoused?'temporary shelter':'home')+' and household in '+escapePlanText(place)+'">'+
+    '<rect width="640" height="184" fill="#b9c2bb"/><circle cx="538" cy="37" r="23" fill="#efdfad"/>'+
+    '<path d="M0 111 82 77l97 37 95-33 106 40 89-35 171 42v56H0z" fill="#90a29a"/>'+
+    '<g opacity=".50" fill="#6e8985"><rect x="11" y="55" width="55" height="83"/><rect x="69" y="78" width="40" height="55"/>'+
+    '<rect x="359" y="67" width="64" height="72"/><rect x="432" y="42" width="51" height="97"/><rect x="501" y="66" width="46" height="73"/>'+
+    '<rect x="555" y="48" width="71" height="90"/></g>'+
+    '<path d="M0 151q160-10 320 2t320-7v38H0z" fill="#718478"/>'+
+    '<path d="M0 166h640v18H0z" fill="#6b7169"/>'+
+    building+
+    '<g><path d="M48 161v-47" stroke="#544f3e" stroke-width="7"/><circle cx="48" cy="103" r="25" fill="#596c50"/>'+
+    '<circle cx="65" cy="112" r="18" fill="#687a5c"/></g>'+people+
+    '<path d="M0 172h640" stroke="#d7c8a0" stroke-width="2" stroke-dasharray="19 15" opacity=".6"/>'+
+    '</svg>';
+}
+function ledgerGauge(label,value,icon,reverse){
+  const n=clamp(Number(value)||0,0,100),p=Math.round(n);
+  const tone=reverse?(p>=65?'danger':p>=35?'caution':'steady'):(p<35?'danger':p<60?'caution':'steady');
+  return '<div class="lv-gauge '+tone+'" role="meter" aria-label="'+escapePlanText(label)+'" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+p+'">'+
+    '<svg class="lv-gauge-ring" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="19" class="lv-ring-base"/>'+
+    '<circle cx="24" cy="24" r="19" class="lv-ring-value" stroke-dasharray="'+(p*1.194).toFixed(2)+' 120"/></svg>'+
+    '<span class="lv-gauge-symbol">'+ledgerIcon(icon)+'</span>'+
+    '<div class="lv-gauge-txt"><b>'+p+'<small>/100</small></b><span>'+label+'</span></div></div>';
+}
+function ledgerHouseCard(icon,label,name,sub,hotspot){
+  return '<div class="lv-home-card'+(hotspot?' hotspot':'')+'"'+(hotspot?' data-hotspot="'+hotspot+'"':'')+'>'+
+    '<span class="lv-card-symbol">'+ledgerIcon(icon)+'</span>'+
+    '<div class="lv-home-meta"><small>'+escapePlanText(label)+'</small><strong>'+escapePlanText(name)+'</strong><span>'+escapePlanText(sub)+'</span></div>'+
+    (hotspot?'<span class="lv-card-link" aria-hidden="true">▸</span>':'')+'</div>';
+}
+function renderInventory(){
+  const el=$('#inventory');if(!el||!S)return;
+  ensurePersonalSystems(S);updatePersonalStanding();
+  const home=currentHousing(),food=currentFood(),care=S.kids>0?currentChildcare():null;
+  const dependent=S.age<16||S.livingAtHome,conditions=activeConditions();
+  const here=currentSettlement(),building=currentBuilding(),travel=S.traveling?settlementById(S.traveling.to):null;
+  const locale=typeof WorldSimulation==='object'&&WorldSimulation&&World?
+    WorldSimulation.getSettlementConditions(World,here.id):null;
+  const illnesses=conditions.length;
+  const title=dependent?'AT THE FAMILY TABLE':'HOUSEHOLD & LIFESTYLE';
+  const count=Math.max(0,Number(S.kids)||0);
+  const homeSub=dependent?'Family household':home.rent?money(home.rent)+'/yr':'No rent';
+  const foodSub=dependent?'Family meals':money(food.cost)+'/yr';
+  const careSub=care?money(care.costPerKid)+'/yr × '+count:'';
+  const housing=ledgerHouseCard('house','HOME',home.name,homeSub,dependent?'':'housing');
+  const meals=ledgerHouseCard('meal','FOOD',food.name,foodSub,dependent?'':'food');
+  const caregiving=care?ledgerHouseCard('care','CHILDCARE',care.name,careSub,''):'';
+  const guards=dependent?'<span class="lv-guardian">GUARDIANSHIP · '+escapePlanText(GUARD_INFO[guardTier()].label)+'</span>':'';
+  const glance='<div class="lv-glance"><div class="lv-section-title">PERSONAL STANDING <span>LIVE</span></div>'+
+    '<div class="lv-gauges">'+ledgerGauge('FREEDOM',S.freedom,'freedom',false)+
+       ledgerGauge('SCRUTINY',S.scrutiny,'eye',true)+
+       ledgerGauge('SECURITY',Math.min(S.housingSecurity,S.financialSecurity),'shield',false)+'</div>'+
+    '<div class="lv-personal-flags">'+
+       '<div>'+ledgerIcon('family')+'<span>'+escapePlanText(S.married?S.partner||'Married':S.status==='Attached'?S.partner||'Partner':'Single')+'</span></div>'+
+       '<div>'+ledgerIcon('med')+'<span>'+(illnesses?illnesses+' ACTIVE CONDITION'+(illnesses===1?'':'S'):'HEALTH: '+Math.round(S.health)+'/100')+'</span></div>'+
+       '<div>'+ledgerIcon('map')+'<span>'+escapePlanText(here.name)+(travel?' → '+escapePlanText(travel.name):'')+'</span></div>'+
+    '</div></div>';
+  let expense='';
+  if(!dependent){
+    const household=typeof HouseholdSystem==='object'&&HouseholdSystem&&World?
+      HouseholdSystem.findByMember(World,S.npcId):null;
+    const out=typeof HouseholdSystem==='object'&&HouseholdSystem&&World?
+      HouseholdSystem.estimateOutlay(World,household,S,{year:currentYear()}):
+      {personalLifestyleOutlay:0,additionalHouseholdCosts:0,projectedTotalOutlay:0};
+    const total=Math.max(0,Number(out.projectedTotalOutlay)||0);
+    const personal=Math.max(0,Math.min(total,Number(out.personalLifestyleOutlay)||0));
+    const extra=Math.max(0,Math.min(total-personal,Number(out.additionalHouseholdCosts)||0));
+    const other=Math.max(0,total-personal-extra);
+    const width=(v)=>total?(100*v/total).toFixed(2)+'%':'0%';
+    expense='<div class="lv-budget"><div class="lv-section-title">ANNUAL OUTLAY <span>PROJECTED</span></div>'+
+      '<div class="lv-budget-top"><div><span>TOTAL COST / YEAR</span><strong>'+money(total)+'</strong></div>'+
+      '<span class="lv-budget-symbol">'+ledgerIcon('money')+'</span></div>'+
+      '<div class="lv-budget-track" role="img" aria-label="Annual household cost breakdown">'+
+        '<span class="lv-cost-personal" title="PERSONAL LIFESTYLE OUTLAY" style="width:'+width(personal)+'"></span>'+
+        '<span class="lv-cost-additional" title="ADDITIONAL HOUSEHOLD COSTS" style="width:'+width(extra)+'"></span>'+
+        '<span class="lv-cost-other" title="Other projected outlay" style="width:'+width(other)+'"></span></div>'+
+      '<div class="lv-budget-labels">'+
+        '<span title="PERSONAL LIFESTYLE OUTLAY"><i class="lv-key personal"></i>LIFESTYLE <b>'+money(personal)+'</b></span>'+
+        '<span title="ADDITIONAL HOUSEHOLD COSTS"><i class="lv-key additional"></i>FAMILY <b>'+money(extra)+'</b></span>'+
+        (other?'<span><i class="lv-key other"></i>OTHER <b>'+money(other)+'</b></span>':'')+'</div>'+
+      '<span class="lv-a11y-total" aria-label="PROJECTED TOTAL OUTLAY">PROJECTED TOTAL OUTLAY</span></div>';
+  }
+  const dues=(S.liabilities||[]);
+  const debts='<div class="lv-debts"><div class="lv-section-title">LIABILITIES <span>'+dues.length+'</span></div>'+
+    (dues.length?dues.map(l=>'<div class="lv-debt">'+ledgerIcon('bank')+
+      '<b>'+escapePlanText(l.name)+'</b><span>'+money(l.annualPayment)+'/yr</span>'+
+      '<small>'+Math.max(0,l.yearsLeft)+'y</small></div>').join(''):
+      '<span class="lv-debt-none">'+ledgerIcon('shield')+' 0 ACTIVE DEBTS</span>')+'</div>';
+  const world=locale?'<div class="lv-world"><div class="lv-section-title">SETTLEMENT CONDITIONS <span>'+escapePlanText(here.name)+'</span></div>'+
+    '<div class="lv-world-grid">'+[
+      ['work','EMPLOYMENT',locale.employment],['money','COST OF LIVING',locale.costOfLiving],
+      ['med','HEALTHCARE',locale.healthcare],['alert','UNREST',locale.unrest],['eye','SURVEILLANCE',locale.surveillance]
+    ].map(([icon,label,value])=>'<div title="'+escapePlanText(label+': '+value)+'">'+ledgerIcon(icon)+
+      '<span>'+label+'</span><b>'+escapePlanText(value)+'</b></div>').join('')+'</div></div>':'';
+  const actions='<div class="inv-actions lv-actions">'+
+    '<button type="button" class="btn small" id="invOpenMedical">'+ledgerIcon('med')+'<span>HEALTH</span></button>'+
+    '<button type="button" class="btn small" id="invOpenHousehold">'+ledgerIcon('house')+'<span>HOME</span></button>'+
+    '<button type="button" class="btn small" id="invOpenFamilyHealth">'+ledgerIcon('family')+'<span>FAMILY</span>'+
+      (familyHealthPendingCount()?'<span class="family-health-badge">'+familyHealthPendingCount()+'</span>':'')+'</button></div>';
+  // Authority-heavy simulations are retained, accessible but collapsed.
+  const extended=employmentUiPanels()+renderServiceRecord();
+  el.innerHTML='<div class="lv-ledger">'+
+    '<div class="lv-scene"><div class="lv-illustration">'+ledgerScene(home,count,here.name)+'</div>'+
+      '<div class="lv-scene-head"><small>YOUR HOUSEHOLD · '+escapePlanText(currentYear())+'</small><strong>'+
+        escapePlanText(here.name)+'</strong><span>'+escapePlanText(building?building.name:home.name)+'</span>'+guards+'</div></div>'+
+    '<div class="lv-section-title">'+title+' <span>'+ (dependent?'FAMILY':'ANNUAL')+'</span></div>'+
+    '<div class="lv-home-grid">'+housing+meals+caregiving+'</div>'+glance+
+    '<div class="lv-finance-grid">'+expense+debts+'</div>'+world+actions+
+    (extended?'<details class="lv-archive"><summary>'+ledgerIcon('book')+
+      '<span>WORK · GOVERNMENT · SERVICE FILES</span><i aria-hidden="true">▾</i></summary>'+
+      '<div class="lv-archive-body">'+extended+'</div></details>':'')+
+    '</div>';
+}
+
 function openMedicalTreatmentPicker(conditionId){
   const condition=conditionById(conditionId||((activeConditions()[0]||{}).instanceId));
   if(!condition||!condition.known) return;
@@ -1668,9 +1783,10 @@ function planActionButton(def,type,rem){
   const dup=actionReservedThisYear(id);
   const cant=!ok||!afford||dup;
   const label=isP?pursuitLabel(def):decisionLabel(def);
+  const icon=ledgerIcon(def.cat==='work'?'work':def.cat==='family'||def.cat==='social'?'family':def.cat==='health'?'med':def.cat==='education'?'book':def.cat==='vice'?'alert':'bolt');
   const fxLine=(ok&&!dup)?fxPreviewHtmlSafe(def):'';
   const odds=ok&&!dup?oddsHint(id):null;
-  return '<button class="slipbtn'+(def.dark?' dark':'')+(cant?' cant':'')+'" data-'+type+'="'+id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(def.icon?'<span class="sb-icon">'+def.icon+'</span> ':'')+fillLabel(label)+(odds?'<span class="sb-odds">'+odds+'</span>':'')+'</span><span class="sb-cost">'+(def.cost?'⚡'+def.cost:'free')+'</span></div><div class="sb-note">'+planNoteText(def,type,id,ok,afford,dup)+'</div>'+fxLine+'</button>';
+  return '<button class="slipbtn'+(def.dark?' dark':'')+(cant?' cant':'')+'" data-'+type+'="'+id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+'<span class="sb-symbol">'+icon+'</span>'+fillLabel(label)+(odds?'<span class="sb-odds">'+odds+'</span>':'')+'</span><span class="sb-cost">'+(def.cost?'⚡'+def.cost:'free')+'</span></div><div class="sb-note">'+planNoteText(def,type,id,ok,afford,dup)+'</div>'+fxLine+'</button>';
 }
 function fxPreviewHtmlSafe(def){
   try{const h=typeof def.fx==='object'&&def.fx?fxPreviewChips(def.fx):'';return h?'<div class="sb-fx">'+h+'</div>':'';}catch(e){return '';}
@@ -1691,42 +1807,42 @@ function focusSituationHtml(rem){
     BusinessSystem.get(World,active.businessId):null;
   const security=state&&state.security||{},economy=state&&state.economy||{};
   const unrest=Number(security.unrest)||0,employment=Number(economy.employmentIndex)||0;
-  let headline='Choose what matters this year',narrative='Your time is limited. The world changes without waiting for your approval.';
-  if(S.health<38){headline='Protect your ability to act';narrative='Injuries and poor health reduce agency. A year spent recovering may cost earnings but preserve future options.';}
-  else if(S.assets<0){headline='Keep the household afloat';narrative='Loans, housing and employment affect your finances every year. Short-term income can carry health or social costs.';}
-  else if(details&&details.status==='struggling'){headline='Your employer is under pressure';narrative='Wages affect company payroll, and an unprofitable company can cut positions. Relationships at work affect future decisions.';}
-  else if(S.age>=16&&!active){headline='Find a place in the economy';narrative='A job is more than salary: it connects you to a company, coworkers, and the stability of the surrounding city.';}
-  else if(unrest>.58){headline='The district is politically unstable';narrative='Public unrest affects surveillance, economic confidence, and the risks of political participation.';}
-  else if(S.age<16){headline='Early choices shape later opportunities';narrative='Family conditions, education, and health determine which paths open in adulthood.';}
+  let headline='Choose what matters this year',narrative='Few actions. Many consequences.';
+  if(S.health<38){headline='Protect your ability to act';narrative='Health vs income.';}
+  else if(S.assets<0){headline='Keep the household afloat';narrative='Income vs debt.';}
+  else if(details&&details.status==='struggling'){headline='Your employer is under pressure';narrative='Pay vs job security.';}
+  else if(S.age>=16&&!active){headline='Find a place in the economy';narrative='Wages · skills · coworkers.';}
+  else if(unrest>.58){headline='The district is politically unstable';narrative='Safety vs influence.';}
+  else if(S.age<16){headline='Early choices shape later opportunities';narrative='Family · learning · opportunity.';}
   const marketNote=market&&market.businesses?
     Math.round(market.distressRate*market.businesses)+' of '+market.businesses+' employers under strain':
-    'No active employer data';
+    'No employers recorded';
   const metrics='<div class="focus-signal-grid">'+
-    '<div class="focus-signal"><span>AVAILABLE ASSETS</span><strong>'+escapePlanText(money(S.assets))+'</strong>'+
+    '<div class="focus-signal">'+ledgerIcon('money')+'<span>AVAILABLE ASSETS</span><strong>'+escapePlanText(money(S.assets))+'</strong>'+
       '<small>'+(S.liabilities&&S.liabilities.length?S.liabilities.length+' active liability file(s)':'Household balance')+'</small></div>'+
-    '<div class="focus-signal"><span>EMPLOYMENT INDEX</span><strong>'+(state?Math.round(employment*100)+'/100':'—')+
+    '<div class="focus-signal">'+ledgerIcon('work')+'<span>EMPLOYMENT INDEX</span><strong>'+(state?Math.round(employment*100)+'/100':'—')+
       '</strong><small>'+escapePlanText(marketNote)+'</small></div>'+
-    '<div class="focus-signal'+(unrest>.58?' warning':'')+'"><span>LOCAL UNREST</span><strong>'+
-      (state?Math.round(unrest*100)+'/100':'—')+'</strong><small>Changes with economic and political conditions</small></div>'+
+    '<div class="focus-signal'+(unrest>.58?' warning':'')+'">'+ledgerIcon('alert')+'<span>LOCAL UNREST</span><strong>'+
+      (state?Math.round(unrest*100)+'/100':'—')+'</strong><small>Political pressure</small></div>'+
     '</div>';
   const work=company&&company.available?
     '<div class="focus-work"><div class="focus-work-h"><span>CONTRACT ON FILE</span><b>'+escapePlanText(company.businessName)+'</b></div>'+
       '<p>Salary <strong>'+money(company.salary)+'/year</strong> · Company profit <strong>'+money(company.profit)+
-      '</strong> · '+company.peers+' coworkers. These values inform bargaining outcomes.</p>'+
+      '</strong> · '+company.peers+' coworkers.</p>'+
       '<div class="focus-odds">'+company.choices.map(c=>'<span><b>'+escapePlanText(c.label)+'</b>'+
         (c.id==='cooperate'?' · no chance roll':' · '+Math.round(c.odds*100)+'% acceptance')+'</span>').join('')+'</div>'+
-      '<div class="focus-causal">Wage decision <span>→</span> employment contracts <span>→</span> employer payroll <span>→</span> company finances and job security</div></div>':
+      '<div class="focus-causal" aria-label="Wage decision impacts contracts, payroll, finances, and job security"><b>YOU</b><span>→</span><b>WAGES</b><span>→</span><b>FIRM</b><span>→</span><b>JOBS</b></div></div>':
     '';
   const choices=recommendedActions(rem);
   const decisionBody=choices.length?
     '<div class="focus-choice-grid">'+choices.join('')+'</div>':
-    '<p class="focus-empty">No suggested actions are currently available at this energy level. You can finish the year or explore the full action registry.</p>';
+    '<p class="focus-empty">No available actions. Advance or browse.</p>';
   return '<div class="focus-lead"><span class="focus-kicker">DECISION BRIEF · '+escapePlanText(currentYear())+
-    ' · '+rem+' ENERGY AVAILABLE</span><h3>'+escapePlanText(headline)+'</h3><p>'+escapePlanText(narrative)+'</p></div>'+
+    ' · '+rem+' ENERGY AVAILABLE</span><span class="focus-symbol">'+ledgerIcon(S.health<38?'med':S.assets<0?'money':details?'work':unrest>.58?'alert':'book')+'</span><h3>'+escapePlanText(headline)+'</h3><p>'+escapePlanText(narrative)+'</p></div>'+
     metrics+work+
-    '<div class="focus-section-head"><span>OPTIONS YOU CAN TAKE NOW</span><small>Every action costs energy and is filed immediately</small></div>'+
+    '<div class="focus-section-head"><span>OPTIONS YOU CAN TAKE NOW</span><small>Instant effect · energy cost</small></div>'+
     decisionBody+
-    '<div class="focus-browse"><span>Need a different strategy?</span><button type="button" data-plan-tab="pursuits">ALL PURSUITS</button>'+
+    '<div class="focus-browse"><span>More choices</span><button type="button" data-plan-tab="pursuits">ALL PURSUITS</button>'+
     '<button type="button" data-plan-tab="decisions">ALL DECISIONS</button></div>';
 }
 
@@ -1756,7 +1872,7 @@ function renderPlan(){
     let ih='';
     items.forEach(p=>{const ok=p.avail(S); const afford=rem>=p.cost;
       const dup=actionReservedThisYear(p.id); const cant=!ok||!afford||dup;
-      ih+='<button class="slipbtn'+(p.dark?' dark':'')+(cant?' cant':'')+'" data-p="'+p.id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+(p.icon?'<span class="sb-icon">'+p.icon+'</span> ':'')+fillLabel(pursuitLabel(p))+'</span><span class="sb-cost">'+(p.cost?'⚡'+p.cost:'free')+'</span></div><div class="sb-note">'+(ok?(dup?actionReservedNote(p.id):fillLabel(p.note(S))):(dup?actionReservedNote(p.id):'— not available now'))+'</div></button>';});
+      ih+='<button class="slipbtn'+(p.dark?' dark':'')+(cant?' cant':'')+'" data-p="'+p.id+'" '+(cant?'disabled':'')+'><div class="sb-top"><span class="sb-name">'+'<span class="sb-symbol">'+ledgerIcon(p.cat==='work'?'work':p.cat==='family'?'family':p.cat==='health'?'med':p.cat==='education'?'book':'bolt')+'</span>'+fillLabel(pursuitLabel(p))+'</span><span class="sb-cost">'+(p.cost?'⚡'+p.cost:'free')+'</span></div><div class="sb-note">'+(ok?(dup?actionReservedNote(p.id):fillLabel(p.note(S))):(dup?actionReservedNote(p.id):'— not available now'))+'</div></button>';});
     ph+='<div class="ps-catlab">'+cat.label+'</div><div class="sliplist">'+ih+'</div>';
   });
   let hh='';
