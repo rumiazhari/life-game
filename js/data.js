@@ -1194,6 +1194,13 @@ const DECISIONS=[
      return{fx:{happiness:-4},text:'Subject pressed for the promotion. The promotion pressed back, downward. Subject said it was fine. It was not.'}}},
  {id:'learntrade',cost:2,cat:'work',avail:s=>s.age>=16&&typeof educationProgramOptions==='function'&&educationProgramOptions().length>0,note:()=>`choose a vocational course · certificate, skill, and a clearer work route`,
    apply:()=>({fx:{smarts:6,assets:-150,happiness:1},text:pick(['Subject took night classes. The daytime self was tired; the nighttime self was sharper.','Subject learned a trade by lamplight. The certificate, when it came, was worth the squint.'])})},
+ {id:'laborDispute',cost:1,cat:'work',
+   avail:s=>s.age>=16&&typeof World!=='undefined'&&World&&typeof WorkplaceSystem==='object'&&WorkplaceSystem&&WorkplaceSystem.laborSituation(World).available,
+   note:()=>{const v=WorkplaceSystem.laborSituation(World);return v.available?'negotiate with '+v.businessName+' · pay, coworkers, and political consequences':'requires an active employment contract';},
+   apply:(subject,item)=>{
+     const r=WorkplaceSystem.resolveLaborAction(World,{year:World.year,strategy:item&&item.strategy,subject});
+     return r.ok?{fx:r.fx,text:r.text}:{fx:{},text:'The workplace situation changed before this decision could be filed.'};
+   }},
  {id:'nightshift',cost:1,cat:'work',avail:s=>s.jobTier>0&&s.jobName!=='Unemployed',note:()=>`+overtime pay · −HEALTH`,
    apply:()=>({fx:{assets:400,health:-3},text:'Subject took the night shift. The overtime was real. So was the permanent shadow under the eyes.'})},
  {id:'quitjob',cost:0,cat:'work',avail:s=>s.jobTier>0&&s.freedom>=30,note:()=>`walk out · requires freedom 30+`,
