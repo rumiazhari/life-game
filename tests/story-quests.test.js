@@ -7,7 +7,7 @@ function ready(seed='story-quests'){
  loadGameFiles(ctx,['js/systems/story-quests.js','js/systems/story-rpg-checks.js','js/systems/story-quest-engine.js']);
  expose(ctx,"Random.setSeed("+JSON.stringify(seed)+");newWorld();newLineage();newHold();newSubject();"+
   "S.age=24;S.alive=true;S.assets=600;S.mother.alive=true;S.health=83;S.happiness=60;"+
-  "World.year=S.dob+S.age;");
+  "World.year=S.dob+S.age;StorySystem.ensure(World);");
  return ctx;
 }
 function action(ctx,js){return JSON.parse(expose(ctx,'JSON.stringify((function(){'+js+'})())'));}
