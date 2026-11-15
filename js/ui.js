@@ -1910,22 +1910,44 @@ function openContactTargetPicker(id){
   $('#skillWrap').classList.remove('hidden');
 }
 
+
 function openLaborDecision(){
   const ctx=typeof WorkplaceSystem==='object'&&WorkplaceSystem&&World?WorkplaceSystem.laborSituation(World):null;
   if(!ctx||!ctx.available)return;
   const sheet=$('#skillSheet');
-  sheet.innerHTML='<div class="ps-head"><span>WORKPLACE · NEGOTIATION</span></div>'+
-    '<div class="qempty">'+escapePlanText(ctx.businessName)+' · salary '+money(ctx.salary)+
-    ' · coworkers '+ctx.peers+' · recent profit '+money(ctx.profit)+
-    '. The choices below alter real employment contracts and workplace relationships.</div>'+
-    '<div class="chips">'+ctx.choices.map(c=>
-      '<button class="chipbtn" data-labor="'+c.id+'"><b>'+escapePlanText(c.label)+'</b>'+
-      '<span>'+Math.round(c.odds*100)+'% accepted · '+escapePlanText(c.note)+'</span></button>').join('')+'</div>'+
+  const percent=p=>Math.round(p*100)+'%';
+  const choices=ctx.choices.map(choice=>{
+    let positive='',negative='';
+    if(choice.id==='petition'){
+      const raise=Math.min(5000000,ctx.salary+Math.max(60,Math.round(ctx.salary*.075)));
+      positive='Accepted: your annual pay becomes '+money(raise)+'.';
+      negative='Refused: your workplace stress rises by up to 5.5 points.';
+    }else if(choice.id==='organize'){
+      const raise=Math.min(5000000,ctx.salary+Math.max(45,Math.round(ctx.salary*.05)));
+      positive='Accepted: your pay becomes '+money(raise)+'; up to 5 coworker contracts also receive raises.';
+      negative='Refused: Bureau scrutiny +8; local unrest +7 points; workplace stress increases.';
+    }else{
+      positive='Workplace stress falls by up to 12 points; annual salary remains '+money(ctx.salary)+'.';
+      negative='No success roll or additional pay.';
+    }
+    return '<button class="strategy-option" data-labor="'+choice.id+'">'+
+      '<span class="strategy-heading"><b>'+escapePlanText(choice.label)+'</b><em>'+
+        (choice.id==='cooperate'?'CERTAIN':'ACCEPTANCE '+percent(choice.odds))+'</em></span>'+
+      '<span class="strategy-up">'+escapePlanText(positive)+'</span>'+
+      '<span class="strategy-down">'+escapePlanText(negative)+'</span></button>';
+  }).join('');
+  sheet.innerHTML='<div class="ps-head"><span>WORKPLACE · NEGOTIATION</span>'+
+    '<button type="button" class="ps-close" id="laborCancelTop" aria-label="Close workplace choices">✕</button></div>'+
+    '<div class="strategy-context"><strong>'+escapePlanText(ctx.businessName)+'</strong><span>Current wage '+money(ctx.salary)+
+    '/year · '+ctx.peers+' coworkers · recorded business profit '+money(ctx.profit)+'</span>'+
+    '<p>These probabilities follow your current performance, company finances, relationships, and Bureau surveillance. Wages and consequences are applied to actual game records.</p></div>'+
+    '<div class="strategy-grid">'+choices+'</div>'+
+    '<div class="strategy-note">Higher payroll affects next year’s business finances. A struggling firm may subsequently reduce its workforce.</div>'+
     '<div class="ps-foot"><button class="btn" id="laborCancel">Never Mind ▸</button></div>';
   sheet.onclick=e=>{
     const choice=e.target.closest('[data-labor]');
     if(choice){$('#skillWrap').classList.add('hidden');performActionNow('d','laborDispute',{strategy:choice.dataset.labor});return;}
-    if(e.target.closest('#laborCancel'))$('#skillWrap').classList.add('hidden');
+    if(e.target.closest('#laborCancel')||e.target.closest('#laborCancelTop'))$('#skillWrap').classList.add('hidden');
   };
   $('#skillWrap').classList.remove('hidden');
 }
