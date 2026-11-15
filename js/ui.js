@@ -1801,42 +1801,42 @@ function focusSituationHtml(rem){
     BusinessSystem.get(World,active.businessId):null;
   const security=state&&state.security||{},economy=state&&state.economy||{};
   const unrest=Number(security.unrest)||0,employment=Number(economy.employmentIndex)||0;
-  let headline='Choose what matters this year',narrative='Your time is limited. The world changes without waiting for your approval.';
-  if(S.health<38){headline='Protect your ability to act';narrative='Injuries and poor health reduce agency. A year spent recovering may cost earnings but preserve future options.';}
-  else if(S.assets<0){headline='Keep the household afloat';narrative='Loans, housing and employment affect your finances every year. Short-term income can carry health or social costs.';}
-  else if(details&&details.status==='struggling'){headline='Your employer is under pressure';narrative='Wages affect company payroll, and an unprofitable company can cut positions. Relationships at work affect future decisions.';}
-  else if(S.age>=16&&!active){headline='Find a place in the economy';narrative='A job is more than salary: it connects you to a company, coworkers, and the stability of the surrounding city.';}
-  else if(unrest>.58){headline='The district is politically unstable';narrative='Public unrest affects surveillance, economic confidence, and the risks of political participation.';}
-  else if(S.age<16){headline='Early choices shape later opportunities';narrative='Family conditions, education, and health determine which paths open in adulthood.';}
+  let headline='Choose what matters this year',narrative='Few actions. Many consequences.';
+  if(S.health<38){headline='Protect your ability to act';narrative='Health vs income.';}
+  else if(S.assets<0){headline='Keep the household afloat';narrative='Income vs debt.';}
+  else if(details&&details.status==='struggling'){headline='Your employer is under pressure';narrative='Pay vs job security.';}
+  else if(S.age>=16&&!active){headline='Find a place in the economy';narrative='Wages · skills · coworkers.';}
+  else if(unrest>.58){headline='The district is politically unstable';narrative='Safety vs influence.';}
+  else if(S.age<16){headline='Early choices shape later opportunities';narrative='Family · learning · opportunity.';}
   const marketNote=market&&market.businesses?
     Math.round(market.distressRate*market.businesses)+' of '+market.businesses+' employers under strain':
-    'No active employer data';
+    'No employers recorded';
   const metrics='<div class="focus-signal-grid">'+
-    '<div class="focus-signal"><span>AVAILABLE ASSETS</span><strong>'+escapePlanText(money(S.assets))+'</strong>'+
+    '<div class="focus-signal">'+ledgerIcon('money')+'<span>AVAILABLE ASSETS</span><strong>'+escapePlanText(money(S.assets))+'</strong>'+
       '<small>'+(S.liabilities&&S.liabilities.length?S.liabilities.length+' active liability file(s)':'Household balance')+'</small></div>'+
-    '<div class="focus-signal"><span>EMPLOYMENT INDEX</span><strong>'+(state?Math.round(employment*100)+'/100':'—')+
+    '<div class="focus-signal">'+ledgerIcon('work')+'<span>EMPLOYMENT INDEX</span><strong>'+(state?Math.round(employment*100)+'/100':'—')+
       '</strong><small>'+escapePlanText(marketNote)+'</small></div>'+
-    '<div class="focus-signal'+(unrest>.58?' warning':'')+'"><span>LOCAL UNREST</span><strong>'+
-      (state?Math.round(unrest*100)+'/100':'—')+'</strong><small>Changes with economic and political conditions</small></div>'+
+    '<div class="focus-signal'+(unrest>.58?' warning':'')+'">'+ledgerIcon('alert')+'<span>LOCAL UNREST</span><strong>'+
+      (state?Math.round(unrest*100)+'/100':'—')+'</strong><small>Political pressure</small></div>'+
     '</div>';
   const work=company&&company.available?
     '<div class="focus-work"><div class="focus-work-h"><span>CONTRACT ON FILE</span><b>'+escapePlanText(company.businessName)+'</b></div>'+
       '<p>Salary <strong>'+money(company.salary)+'/year</strong> · Company profit <strong>'+money(company.profit)+
-      '</strong> · '+company.peers+' coworkers. These values inform bargaining outcomes.</p>'+
+      '</strong> · '+company.peers+' coworkers.</p>'+
       '<div class="focus-odds">'+company.choices.map(c=>'<span><b>'+escapePlanText(c.label)+'</b>'+
         (c.id==='cooperate'?' · no chance roll':' · '+Math.round(c.odds*100)+'% acceptance')+'</span>').join('')+'</div>'+
-      '<div class="focus-causal">Wage decision <span>→</span> employment contracts <span>→</span> employer payroll <span>→</span> company finances and job security</div></div>':
+      '<div class="focus-causal" aria-label="Wage decision impacts contracts, payroll, finances, and job security"><b>YOU</b><span>→</span><b>WAGES</b><span>→</span><b>FIRM</b><span>→</span><b>JOBS</b></div></div>':
     '';
   const choices=recommendedActions(rem);
   const decisionBody=choices.length?
     '<div class="focus-choice-grid">'+choices.join('')+'</div>':
-    '<p class="focus-empty">No suggested actions are currently available at this energy level. You can finish the year or explore the full action registry.</p>';
+    '<p class="focus-empty">No available actions. Advance or browse.</p>';
   return '<div class="focus-lead"><span class="focus-kicker">DECISION BRIEF · '+escapePlanText(currentYear())+
-    ' · '+rem+' ENERGY AVAILABLE</span><h3>'+escapePlanText(headline)+'</h3><p>'+escapePlanText(narrative)+'</p></div>'+
+    ' · '+rem+' ENERGY AVAILABLE</span><span class="focus-symbol">'+ledgerIcon(S.health<38?'med':S.assets<0?'money':details?'work':unrest>.58?'alert':'book')+'</span><h3>'+escapePlanText(headline)+'</h3><p>'+escapePlanText(narrative)+'</p></div>'+
     metrics+work+
-    '<div class="focus-section-head"><span>OPTIONS YOU CAN TAKE NOW</span><small>Every action costs energy and is filed immediately</small></div>'+
+    '<div class="focus-section-head"><span>OPTIONS YOU CAN TAKE NOW</span><small>Instant effect · energy cost</small></div>'+
     decisionBody+
-    '<div class="focus-browse"><span>Need a different strategy?</span><button type="button" data-plan-tab="pursuits">ALL PURSUITS</button>'+
+    '<div class="focus-browse"><span>More choices</span><button type="button" data-plan-tab="pursuits">ALL PURSUITS</button>'+
     '<button type="button" data-plan-tab="decisions">ALL DECISIONS</button></div>';
 }
 
