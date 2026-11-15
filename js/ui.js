@@ -500,11 +500,20 @@ function recommendedActions(rem){
     if(!d||actionReservedThisYear(id))return;
     if(typeof d.avail==='function'&&!d.avail(S))return;
     if(d.cost&&rem<d.cost)return;
-    out.push('<button class="rec-chip" data-'+type+'="'+id+'" '+(extra?'data-extra=\''+JSON.stringify(extra).replace(/'/g,'&#39;')+'\'':'')+' title="'+label+'"><b>'+label+'</b><span>'+clipText(fillLabel(d.note?d.note(S):''),46)+'</span></button>');
+    const icon=d.cat==='work'||['lookwork','laborDispute','gig'].includes(id)?'work':
+      d.cat==='social'||d.cat==='family'?'family':
+      d.cat==='health'||['doctor','treatment'].includes(id)?'med':
+      d.cat==='education'||id==='study'?'book':d.cat==='money'?'money':'bolt';
+    const note=fillLabel(d.note?d.note(S):'');
+    out.push('<button class="rec-chip" data-'+type+'="'+id+'" '+
+      (extra?'data-extra=\''+JSON.stringify(extra).replace(/'/g,'&#39;')+'\' ':'')+
+      'title="'+escapePlanText(note)+'"><span class="rec-graphic">'+ledgerIcon(icon)+'</span>'+
+      '<b>'+escapePlanText(label)+'</b><span>'+escapePlanText(clipText(note,46))+'</span>'+
+      '<em class="rec-energy">'+(d.cost?'⚡ '+d.cost:'FREE')+'</em></button>');
   };
   const addUi=(id,label,note)=>{
     if(actionReservedThisYear('openHousehold')&&id==='household')return;
-    out.push('<button class="rec-chip" data-ui-open="'+id+'" title="'+label+'"><b>'+label+'</b><span>'+clipText(note,46)+'</span></button>');
+    out.push('<button class="rec-chip" data-ui-open="'+id+'" title="'+escapePlanText(note)+'"><span class="rec-graphic">'+ledgerIcon('house')+'</span><b>'+escapePlanText(label)+'</b><span>'+escapePlanText(clipText(note,46))+'</span></button>');
   };
   if(S.jailUntil>S.age)return out;
   // The Ways Out advisor: when the file is genuinely struggling, the Bureau
@@ -535,7 +544,6 @@ function recommendedActions(rem){
   else if(S.age>=16)add('d','laborDispute','Workplace negotiation');
   if(S.married&&S.partnerMood<45)add('p','tendspouse','Care for your marriage');
   if(S.age<16)add('p','study','Build foundations');
-  else if(S.age>=16)add('d','laborDispute','Workplace negotiation');
   if(S.age>=18&&S.jobTier>=1)add('d','presspromo','Career progression');
   else if(S.assets<-500)add('p','overtime','Earn overtime');
   if(S.happiness<32)add('p',S.age<16?'family':'walk','Lift your mood');
@@ -660,29 +668,29 @@ function renderWorldBrief(){
   const unrest=Number(security.unrest)||0;
   const employment=Number(economy.employmentIndex)||0;
   const issue=S.health<38?{
-    title:'Your health needs attention',note:'Low health restricts the time available for decisions. Treatment competes with work, money, and family.'}:
-    S.assets<0?{title:'Your household is in deficit',note:'Debts and living costs threaten future choices. Money earned now may come at the cost of health or relationships.'}:
+    title:'Health at risk',note:'Care vs income',icon:'med'}:
+    S.assets<0?{title:'Household deficit',note:'Earn · borrow · reduce costs',icon:'money'}:
     business&&business.status==='struggling'?{
-      title:'Your employer is under strain',note:'A struggling company can cut positions. Higher wages increase payroll, while workplace loyalty affects future relations.'}:
-    S.age>=16&&!work?{title:'Finding a livelihood',note:'Open positions and competing applicants depend on the local labor market and available qualifications.'}:
-    unrest>.58?{title:'Political tension is rising',note:'Surveillance and unrest create risks around work, public activity, and travel.'}:
-    work?{title:'Your next move matters',note:'Your employer, coworkers, and the Bureau react to choices beyond their immediate statistical effects.'}:
-    {title:'A life is taking shape',note:'Family, education, and the world around you will shape your later options.'};
+      title:'Employer under strain',note:'Payroll vs job security',icon:'work'}:
+    S.age>=16&&!work?{title:'Find a livelihood',note:'Openings · qualifications · wages',icon:'work'}:
+    unrest>.58?{title:'Political unrest',note:'Surveillance · public action · risk',icon:'alert'}:
+    work?{title:'Workplace and alliances',note:'Wages · coworkers · Bureau',icon:'family'}:
+    {title:'Life ahead',note:'Family · learning · opportunity',icon:'book'};
   const distressed=market&&market.businesses?Math.round(market.distressRate*market.businesses):0;
   const metrics=[
-    {label:'PERSONAL ASSETS',value:money(Number(S.assets)||0),note:S.assets<0?'Deficit on file':'Available balance',tone:S.assets<0?'danger':''},
-    {label:'LABOR MARKET',value:settlement?Math.round(employment*100)+'/100':'—',note:'Employment index',tone:employment<.35?'danger':employment<.50?'warning':''},
-    {label:'PUBLIC UNREST',value:settlement?Math.round(unrest*100)+'/100':'—',note:'Unrest index',tone:unrest>.58?'danger':unrest>.34?'warning':''},
-    {label:'EMPLOYERS UNDER STRAIN',value:market&&market.businesses?distressed+' / '+market.businesses:'—',note:'Known local businesses',tone:market&&market.businesses&&market.distressRate>.45?'warning':''}
+    {icon:'money',label:'PERSONAL ASSETS',value:money(Number(S.assets)||0),note:S.assets<0?'Deficit':'Balance',tone:S.assets<0?'danger':''},
+    {icon:'work',label:'LABOR MARKET',value:settlement?Math.round(employment*100)+'/100':'—',note:'Employment',tone:employment<.35?'danger':employment<.50?'warning':''},
+    {icon:'alert',label:'PUBLIC UNREST',value:settlement?Math.round(unrest*100)+'/100':'—',note:'Public order',tone:unrest>.58?'danger':unrest>.34?'warning':''},
+    {icon:'bank',label:'EMPLOYERS UNDER STRAIN',value:market&&market.businesses?distressed+' / '+market.businesses:'—',note:'Companies',tone:market&&market.businesses&&market.distressRate>.45?'warning':''}
   ];
   const canChoose=typeof planHours==='function'&&planHours()>0&&S.alive&&S.jailUntil<=S.age;
   el.innerHTML='<div class="wb-top"><div><span class="wb-overline">SECTION D · CURRENT SITUATION</span>'+
     '<span class="wb-place">'+escapePlanText(settlementName)+' · '+escapePlanText(World.year)+'</span></div>'+
     '<span class="wb-file">LIVE WORLD RECORD</span></div>'+
-    '<div class="wb-main"><div class="wb-lead"><span class="wb-section">PRIMARY CONSIDERATION</span>'+
+    '<div class="wb-main"><div class="wb-lead"><span class="wb-section">THIS YEAR</span>'+ledgerIcon(issue.icon)+
       '<h3>'+escapePlanText(issue.title)+'</h3><p>'+escapePlanText(issue.note)+'</p></div>'+
       '<div class="wb-metrics">'+metrics.map(m=>'<div class="wb-metric'+(m.tone?' '+m.tone:'')+'"><span>'+
-        m.label+'</span><strong>'+escapePlanText(m.value)+'</strong><small>'+m.note+'</small></div>').join('')+'</div></div>'+
+        ledgerIcon(m.icon)+m.label+'</span><strong>'+escapePlanText(m.value)+'</strong><small>'+m.note+'</small></div>').join('')+'</div></div>'+
     '<div class="wb-bottom"><span>'+(work&&business?'EMPLOYED AT '+escapePlanText(business.name)+
       ' · '+escapePlanText(work.occupationName):'YOUR FILE · '+escapePlanText(S.age)+' YEARS OLD')+
     '</span><button type="button" data-open-priorities '+(canChoose?'':'disabled')+
@@ -695,7 +703,7 @@ function renderActionReceipt(type,id,result,chips){
   const text=result&&result.text?fill(result.text):'The action was filed.';
   const deltas=(chips||[]).map(c=>'<span class="ar-delta '+(c.plus?'up':'down')+'">'+escapePlanText(c.txt)+'</span>').join('');
   el.innerHTML='<div class="ar-copy"><span class="ar-eyebrow">ACTION ENTERED · YEAR '+escapePlanText(S.age)+'</span>'+
-    '<strong>'+escapePlanText(label)+'</strong><p>'+escapePlanText(text)+'</p></div>'+
+    '<strong>'+escapePlanText(label)+'</strong><p>'+escapePlanText(clipText(text,100))+'</p>'+(text.length>100?'<details class="ar-full"><summary>MORE ▾</summary><p>'+escapePlanText(text)+'</p></details>':'')+'</div>'+
     '<div class="ar-actions">'+(deltas?'<div class="ar-deltas">'+deltas+'</div>':'')+
     '<button type="button" data-receipt-log>FULL CASE LOG ▸</button><button type="button" data-receipt-close aria-label="Dismiss action receipt">✕</button></div>';
   el.classList.remove('hidden');
