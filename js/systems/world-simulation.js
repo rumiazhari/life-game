@@ -266,6 +266,12 @@
     return world.settlements;
   }
   function getSettlementState(world,id){ return world&&world.settlements&&world.settlements[id]||null; }
+  function applyUnrestShock(world,settlementId,delta){
+    const runtime=getSettlementState(world,settlementId);
+    if(!runtime||!runtime.security||!Number.isFinite(Number(delta))) return false;
+    runtime.security.unrest=clamp(Number(runtime.security.unrest||0)+clamp(Number(delta),-.12,.12));
+    return true;
+  }
   function getCostOfLiving(world,id){ return root.SettlementEconomy.costOfLiving(getSettlementState(world,id)); }
   function getEmploymentConditions(world,id){ return root.SettlementEconomy.employmentConditions(getSettlementState(world,id)); }
   function getHealthcarePressure(world,id){ return root.PublicHealth.pressure(getSettlementState(world,id)); }
@@ -278,5 +284,5 @@
     if(!state)return {employment:'Unknown',costOfLiving:'Unknown',healthcare:'Unknown',unrest:'Unknown',surveillance:'Unknown'};
     return {employment:getEmploymentConditions(world,id),costOfLiving:costLabel(getCostOfLiving(world,id)),healthcare:root.PublicHealth.pressureLabel(getHealthcarePressure(world,id)),unrest:unrestLabel(state.security.unrest),surveillance:securityLabel(state.security.surveillance)};
   }
-  root.WorldSimulation={SIMULATION_SCHEMA_VERSION,RANGES,migrate,initialize,tick,laborMarketFor,getSettlementState,getCostOfLiving,getEmploymentConditions,getHealthcarePressure,getSettlementConditions,definitions,streamFor,attractiveness};
+  root.WorldSimulation={SIMULATION_SCHEMA_VERSION,RANGES,migrate,initialize,tick,laborMarketFor,applyUnrestShock,getSettlementState,getCostOfLiving,getEmploymentConditions,getHealthcarePressure,getSettlementConditions,definitions,streamFor,attractiveness};
 })(typeof globalThis!=='undefined'?globalThis:this);
