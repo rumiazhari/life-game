@@ -3185,7 +3185,7 @@ function openStorySlip(force){
           (unavailable?' disabled aria-disabled="true"':'')+'>'+
           '<span class="vn-option-head"><span>'+escapeHtml(fill(o.t))+'</span>'+odds+'</span>'+
           (unavailable?'<small>🔒 '+escapeHtml(o.unavailableReason)+'</small>':
-          (o.note?'<small>'+escapeHtml(o.note)+'</small>':''))+mods+'</button>';
+          (o.note?'<small>'+escapeHtml(o.note)+' · will be remembered.</small>':'<small>Will be remembered.</small>'))+mods+'</button>';
       }).join('')+'</div>';
     }
   }
