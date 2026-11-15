@@ -107,7 +107,7 @@ test('gambling hall enters the real business registry and risks scrutiny',()=>{
  assert.equal(expose(context,"ownedActiveBusinesses().length"),1);
  assert.equal(expose(context,"S.assets"),2500);
  assert.ok(expose(context,"S.scrutiny")>5);
- const b=JSON.parse(expose(context,"JSON.stringify(ownedActiveBusinesses()[0])"));
+ const b=JSON.parse(expose(context,"JSON.stringify(BusinessSystem.get(World,ownedActiveBusinesses()[0]))"));
  assert.equal(b.sector,'retail');
  assert.equal(b.ownerNpcId,'subject');
  assert.equal(b.finances.cash,3500);
