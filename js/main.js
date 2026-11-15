@@ -23,6 +23,8 @@ function newFile(){
   pendingSlips=[]; clearSlipQueue(); resetYearReport();
   introRerolls=3;
   recentYearReports=[]; renderRecentRecord();
+  clearActionReceipt();
+  planTab='focus'; planShowUnavailable=false;
   document.body.classList.remove('slip-open','petition-open');
   newWorld(); newLineage(); newHold(); newSubject(); window.C={}; $('#log').innerHTML='';
   $('#slipWrap').classList.add('hidden'); $('#planWrap').classList.add('hidden'); $('#medicalWrap').classList.add('hidden');
@@ -40,6 +42,14 @@ renderAchieveCount();
 $('#btn-advance').addEventListener('click',advance);
 $('#btn-fastforward').addEventListener('click',fastForward);
 $('#btn-plan').addEventListener('click',openPlan);
+$('#worldBrief').addEventListener('click',e=>{
+  if(!e.target.closest('[data-open-priorities]'))return;
+  planTab='focus';openPlan();
+});
+$('#actionReceipt').addEventListener('click',e=>{
+  if(e.target.closest('[data-receipt-log]')){snd('paper');openCaseLog();return;}
+  if(e.target.closest('[data-receipt-close]'))clearActionReceipt();
+});
 $('#planWrap').addEventListener('click',e=>{ if(e.target.id==='planWrap') closePlan(); });
 $('#medicalWrap').addEventListener('click',e=>{ if(e.target.id==='medicalWrap') $('#medicalWrap').classList.add('hidden'); });
 $('#btn-sound').addEventListener('click',e=>{
@@ -57,9 +67,12 @@ document.addEventListener('keydown',e=>{
   const blocked=['#planWrap','#slipWrap','#closedWrap','#intentWrap','#mapWrap','#medicalWrap','#familyMedicalWrap','#householdWrap','#jobWrap','#jobDetailWrap','#skillWrap','#educationWrap','#logWrap','#holdWrap','#archiveWrap','#achieveListWrap']
     .some(s=>{const el=$(s);return el&&!el.classList.contains('hidden');});
   if(e.code==='Escape'){ if(closeTopOverlay())e.preventDefault(); return; }
-  if(!$('#dossier')||$('#dossier').classList.contains('hidden')||blocked) return;
+  if(!$('#dossier')||$('#dossier').classList.contains('hidden')||blocked||e.repeat)return;
+  if(e.target&&['INPUT','TEXTAREA','SELECT','BUTTON'].includes(e.target.tagName))return;
   if(e.code==='Space'){ e.preventDefault(); advance(); }
-  else if(e.code==='KeyP'){ e.preventDefault(); openPlan(); }
+  else if(e.code==='KeyP'){ e.preventDefault(); planTab='focus';openPlan(); }
+  else if(e.code==='KeyD'){ e.preventDefault(); planTab='decisions';openPlan(); }
+  else if(e.code==='KeyM'){ e.preventDefault(); openMap(); }
   else if(e.code==='KeyF'){ e.preventDefault(); fastForward(); }
 });
 
