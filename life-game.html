@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=Special+Elite&family=Stardos+Stencil:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=20261115-command1">
+<link rel="stylesheet" href="css/style.css?v=20261115-visual1">
 </head>
 <body>
 <div class="desk">
@@ -20,7 +20,27 @@
       <p class="kicker">FORM 114-A · DOSSIER SECTION</p>
       <h1 class="masthead">LIFE<br>FILE</h1>
       <div class="division">RECORDS &amp; ARCHIVES DIVISION</div>
-      <p class="coverline">Every subject gets one file. You steer the life; the Bureau rules on what's allowed; the century decides what happens. Spend each year's hours, sign the decisions, and stamp it forward — there's no going back.</p>
+      <div class="cover-world-art" aria-label="Illustration of Karsen's houses, factories and government buildings">
+        <svg viewBox="0 0 640 124" role="img" aria-hidden="true" preserveAspectRatio="xMidYMid slice">
+          <rect width="640" height="124" fill="#b8c6be"/>
+          <circle cx="539" cy="29" r="20" fill="#f2ddaa"/>
+          <path d="M0 93 112 50l76 34 100-40 82 34 96-47 174 72v21H0Z" fill="#7e938b" opacity=".45"/>
+          <rect x="18" y="45" width="73" height="74" fill="#647e7b"/><rect x="33" y="58" width="12" height="11" fill="#d7ceb0"/><rect x="55" y="58" width="12" height="11" fill="#d7ceb0"/>
+          <rect x="107" y="26" width="104" height="96" fill="#9a8569"/><path d="m102 30 56-25 58 25" fill="none" stroke="#554b3d" stroke-width="9"/>
+          <rect x="145" y="51" width="31" height="71" fill="#e0cba1"/><rect x="116" y="50" width="20" height="25" fill="#d3c4a0"/><rect x="183" y="50" width="18" height="25" fill="#d3c4a0"/>
+          <path d="M233 118V63h124v55" fill="#7f7364"/><path d="m223 63 71-30 72 30" fill="none" stroke="#534737" stroke-width="8"/>
+          <rect x="245" y="78" width="28" height="25" fill="#b0beae"/><rect x="290" y="78" width="28" height="40" fill="#b0beae"/>
+          <path d="M387 121V46h126v75" fill="#775a4d"/><path d="M382 46h136L501 27H401Z" fill="#4c4d48"/>
+          <rect x="408" y="15" width="17" height="50" fill="#705449"/><rect x="465" y="4" width="20" height="52" fill="#705449"/>
+          <circle class="cover-smoke" cx="417" cy="10" r="8" fill="#f0e7d1" opacity=".6"/>
+          <rect x="404" y="65" width="14" height="23" fill="#ddc39d"/><rect x="432" y="65" width="14" height="23" fill="#ddc39d"/><rect x="460" y="65" width="14" height="23" fill="#ddc39d"/>
+          <rect x="525" y="70" width="95" height="52" fill="#b1a081"/><path d="m522 76 50-28 51 28" fill="none" stroke="#624c42" stroke-width="8"/>
+          <rect x="558" y="92" width="18" height="30" fill="#6c5545"/>
+          <path d="M0 113H640" stroke="#3c473e" stroke-width="11"/>
+          <g fill="#2d3730"><circle cx="357" cy="104" r="6"/><path d="M350 123v-12q7-9 14 0v12"/><circle cx="375" cy="108" r="5"/><path d="M370 123v-10q5-6 10 0v10"/></g>
+        </svg>
+      </div>
+      <p class="coverline">One life. A changing society. Every choice leaves a mark.</p>
       <div class="cover-actions">
         <button id="btn-open" class="btn btn-big">Open a New File ▸</button>
         <span class="micro">you drive · the bureau vetoes · no appeals</span>
@@ -29,7 +49,7 @@
       <button id="btn-achieve-cover" class="archive-link">COMMENDATIONS <span id="achieve-count"></span> ▸</button>
       <div class="note">
         <span class="paperclip"></span>
-        CLERK'S NOTE — Contents may include: war, inflation, ambition, matrimony, the racetrack, the back room, beekeeping, and worse. The subject chooses the worse, sometimes. Handle the years with care.
+        CLERK'S NOTE · Karsen records people, not just numbers. Every year changes the file.
       </div>
       <div class="formno">FORM 114-A · REV. 1962 · PRINTED IN QUADRUPLICATE</div>
     </div>
@@ -49,9 +69,9 @@
         <div>
           <p class="kicker">SUBJECT DOSSIER · SECTION 114-A</p>
           <h2 class="dtitle">LIFE FILE</h2>
-          <p class="dintent">READ ON FILE — INTENT — <b id="d-intent">—</b></p>
-          <p class="dintent">READ ON FILE — DISPOSITION — <b id="d-disp">—</b></p>
-          <p class="dintent">LIFE STAGE — <b id="d-stage">—</b></p>
+          <p class="dintent">GOAL <b id="d-intent">—</b></p>
+          <p class="dintent">CHARACTER <b id="d-disp">—</b></p>
+          <p class="dintent">STAGE <b id="d-stage">—</b></p>
         </div>
         <div class="stamp mini">Confidential</div>
       </div>
@@ -94,9 +114,8 @@
       </div>
       <div class="page page-right">
         <span class="hole t"></span><span class="hole b"></span>
-        <div class="sec-h">SECTION C — HOUSEHOLD LEDGER <span>ANNUAL</span></div>
+        <div class="sec-h">SECTION C — HOME &amp; WORLD <span>LIVE</span></div>
         <div id="inventory"></div>
-        <p class="pagefoot">The full case log is filed separately — see CASE LOG, above.</p>
         <div class="coffeering"></div>
       </div>
     </div>
@@ -240,7 +259,7 @@
 <script src="js/ui/employment-ui.js?v=20260826-dis1"></script>
 <script src="js/medical.js?v=20260804-phase4a3"></script>
 <script src="js/education.js?v=20260803-phase3"></script>
-<script src="js/ui.js?v=20261115-command1"></script>
+<script src="js/ui.js?v=20261115-visual1"></script>
 <script src="js/systems/world-gameplay.js?v=20260804-phase4a2"></script>
 <script src="js/main.js?v=20261115-command1"></script>
 </body>
