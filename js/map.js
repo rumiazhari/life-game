@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 /* ================= MAP SYSTEM ===========================================
    DOM-free module behind the Karsen map screens. Pure data and math only:
    no document/window/$ access, no random, no World/S coupling.
@@ -500,8 +500,10 @@ const MapSystem=(function(){
     const max=num(zoom&&zoom.max,14), s=num(scale,1);
     return s>=max*0.45?2:s>=max*0.16?1:0;
   }
+  // Geographic base: Natural Earth 10m Lithuania (public domain); Karsen is fictitious.
+  const LT_ACTUAL_BORDER="M 131.72 35.46 L 131.94 37.68 L 130.42 39.82 L 130.65 41.46 L 129.74 42.37 L 128.72 45.3 L 130.28 45.85 L 135.33 46.08 L 136 46.86 L 133.02 48.53 L 131.85 51.27 L 129.2 50.55 L 128.28 51.06 L 124.87 50.71 L 124.21 51.54 L 124.04 53.18 L 122.25 55.67 L 116.68 56.54 L 114.86 58.54 L 114.78 60.41 L 113.59 61.52 L 113.32 64.53 L 113.98 66.13 L 113.99 67.26 L 111.71 69 L 111.33 71.51 L 109.62 73.7 L 109.59 74.43 L 110.32 74.95 L 113.06 74.43 L 113.55 75.57 L 115 76.88 L 114.46 79.19 L 112.18 80 L 109.33 79.53 L 108.7 78.64 L 109.6 78.06 L 109.03 77.3 L 110.12 77.03 L 108.15 75.07 L 106.29 76.55 L 102.9 76.29 L 101.86 78.64 L 100.11 79.9 L 96.58 79.39 L 94.91 79.83 L 94.84 80.53 L 94.1 81.03 L 94.9 83.15 L 94.86 83.94 L 94.23 84.6 L 92.5 84.76 L 91.7 83.9 L 88.83 84.93 L 85.7 87 L 83.19 86.79 L 82.61 85.68 L 81.37 84.91 L 78.79 85.73 L 76.19 85.24 L 74.29 86.04 L 73.43 85.81 L 70.11 86.67 L 67.17 85.48 L 66.61 84.26 L 67.4 83.09 L 66.93 80.46 L 66.41 79.24 L 64.45 77.44 L 59.52 74.94 L 58.13 75.19 L 57.76 74.76 L 57.95 73.85 L 56.88 73.49 L 56.31 72.67 L 53.72 72.12 L 52.26 73.41 L 51.01 71.6 L 50.33 69.47 L 51.03 65.32 L 50.88 64.05 L 51.38 62.78 L 53.62 61.18 L 53.94 60.16 L 53.38 58.08 L 51.88 57.38 L 51.94 56.76 L 51.18 56.18 L 49.48 55.99 L 48.07 52.81 L 41.55 52.72 L 37.92 53.94 L 36.9 53.48 L 36.4 52.06 L 35.14 52.5 L 31.15 51.06 L 28.13 49.2 L 26.03 49.14 L 23.35 46.37 L 21.12 47.57 L 21.06 46.55 L 21.61 46.17 L 20.9 44.07 L 19.37 44.75 L 20.72 42.67 L 20.19 39.71 L 19.71 39.2 L 19.62 37.83 L 18.62 35.13 L 17.11 33.2 L 16.82 31.92 L 16.49 29.47 L 16.67 23.71 L 19.52 23.37 L 20.33 21.09 L 22.37 19.32 L 24.27 18.94 L 27.94 16.9 L 29.78 16.84 L 38.28 13.73 L 40.79 14.51 L 46.95 14.35 L 50.16 15.71 L 55.52 13.88 L 56.2 14.18 L 57.44 16.44 L 58.38 17.01 L 59.43 16.81 L 60.67 15.45 L 63.08 15.01 L 67.09 16.26 L 71.76 15.55 L 72.14 16.29 L 74.91 16.13 L 80.74 18.36 L 84.47 17.17 L 86.45 18.13 L 87.85 18.03 L 91.94 14.89 L 95.41 14.09 L 95.93 13 L 96.75 13.6 L 98.06 17.11 L 100.13 20.09 L 112.36 21.74 L 113.08 23.27 L 123.08 30.17 L 125.18 33.25 L 129.36 35.13 L 131.72 35.46 Z M 15.35 46.86 L 14 46.59 L 15.56 44.43 L 17.28 40.36 L 17.63 37.43 L 17.34 33.84 L 18 34.51 L 18.3 35.79 L 18.06 40.6 L 17.38 42 L 17.77 42.57 L 15.35 46.86 Z";
   const TERRAIN={
-    border:'M 18 49 C 14 41 22 31 38 29 C 52 27 58 18 75 20 C 91 21 99 30 111 27 C 125 23 138 28 145 38 C 150 46 147 55 139 60 C 147 68 141 78 130 82 C 116 86 105 78 93 84 C 81 91 69 82 56 86 C 43 91 30 86 24 78 C 16 74 20 66 14 61 C 9 57 11 52 18 49 Z',
+    border:LT_ACTUAL_BORDER,
     shore:'M 18 49 C 14 41 22 31 38 29',
     rivers:{
       main:'M 56 28 C 61 36 68 43 76 48 C 83 53 91 58 102 60 C 112 62 121 59 132 54',
@@ -540,17 +542,16 @@ const MapSystem=(function(){
         'M 136 72 C 139 68 145 69 146 73 C 144 77 139 78 136 76 Z'
       ],
       labels:[
-        {text:'WESTERN SEA',x:8,y:17,anchor:'start'},
-        {text:'SOUTHERN SEA',x:107,y:96,anchor:'middle'}
+        {text:'BALTIC SEA',x:3,y:49,anchor:'start'}
       ]
     },
     regions:[
-      {text:'WESTERN COAST',x:30,y:69},
-      {text:'NORTH WOODS',x:52,y:22},
-      {text:'CENTRAL LOWLAND',x:82,y:46},
-      {text:'IRON COUNTRY',x:111,y:61},
-      {text:'SOUTHERN FARMLAND',x:75,y:77},
-      {text:'EASTERN GRAIN PLAIN',x:126,y:49}
+      {text:'WESTERN COAST',x:33,y:47},
+      {text:'NORTH WOODS',x:55,y:18},
+      {text:'CENTRAL LOWLAND',x:78,y:49},
+      {text:'IRON COUNTRY',x:105,y:35},
+      {text:'SOUTHERN FARMLAND',x:68,y:77},
+      {text:'EASTERN GRAIN PLAIN',x:126,y:50}
     ]
   };
   function seaDetailsMarkup(includeLabels){
@@ -562,17 +563,40 @@ const MapSystem=(function(){
   function greeneryMarkup(){
     return '<g class="map-greenery" aria-hidden="true">'+paths('map-forest',TERRAIN.forests)+paths('map-meadow',TERRAIN.meadows)+paths('map-wetland',TERRAIN.wetlands)+paths('map-industrial',TERRAIN.industrial)+'</g>';
   }
-  function nationalGeographyMarkup(layout){
-    const inner='<path class="map-border" d="'+TERRAIN.border+'"'+nsAttr()+'></path>'
-      +seaDetailsMarkup(!(layout&&layout.tall))
-      +greeneryMarkup()
-      +'<path class="map-river-main" d="'+TERRAIN.rivers.main+'"'+nsAttr()+'></path>'
-      +paths('map-river',TERRAIN.rivers.branches)
-      +paths('map-river-small',TERRAIN.rivers.small)
-      +paths('map-minor-road',TERRAIN.minorRoads);
-    const transform=geoTransform(layout);
-    return patternDefs()+'<g'+(transform?' transform="'+transform+'"':'')+'>'+inner+'</g>';
+
+  // Public-domain boundary has 10m Natural Earth geometry, simplified to
+  // ~160 segments. The basemap is geographical; Karsen cities and inland
+  // waterways remain fictional. The gradients below are an artistic relief.
+  function nationalReliefMarkup(){
+    const bands=[
+      {cls:'west',d:'M 12 25 C 28 14 50 13 68 19 C 56 31 46 38 29 46 L 13 59 Z'},
+      {cls:'north',d:'M 45 7 C 68 7 94 15 116 27 C 107 40 88 43 72 34 C 60 28 53 22 45 7 Z'},
+      {cls:'east',d:'M 100 26 C 121 22 143 37 146 61 C 124 66 106 59 96 48 Z'},
+      {cls:'south',d:'M 56 64 C 69 52 96 52 116 67 C 106 87 83 97 63 87 C 57 83 53 72 56 64 Z'}
+    ];
+    return '<g class="map-geographic-relief" aria-hidden="true">'+
+      bands.map((b,i)=>'<path class="map-relief-band relief-'+b.cls+'" d="'+b.d+'"></path>').join('')+
+      '<path class="map-relief-ridge" d="M 38 20 Q 56 29 78 23 T 121 32 M 51 63 Q 79 54 107 75 M 86 29 Q 99 39 118 41"></path>'+
+      '</g>';
   }
+  function nationalGeographyMarkup(layout){
+    const land=TERRAIN.border,transform=geoTransform(layout);
+    const decorated='<path class="map-land-shadow" d="'+land+'" transform="translate(1.1 4.3)"></path>'+
+      '<path class="map-land-side" d="'+land+'" transform="translate(.6 2.6)"></path>'+
+      '<path class="map-land-surface" d="'+land+'"></path>'+
+      '<g clip-path="url(#lf-real-lithuania-clip)">'+nationalReliefMarkup()+
+        greeneryMarkup()+
+        '<path class="map-river-main" d="'+TERRAIN.rivers.main+'"'+nsAttr()+'></path>'+
+        paths('map-river',TERRAIN.rivers.branches)+
+        paths('map-river-small',TERRAIN.rivers.small)+
+        paths('map-minor-road',TERRAIN.minorRoads)+
+      '</g>'+
+      '<path class="map-border" d="'+land+'"'+nsAttr()+'></path>';
+    return patternDefs()+
+      '<defs><clipPath id="lf-real-lithuania-clip"><path d="'+land+'"></path></clipPath></defs>'+
+      '<g'+(transform?' transform="'+transform+'"':'')+' class="national-landmass">'+decorated+'</g>';
+  }
+
   function regionLabelsMarkup(layout,tier){
     const y=v=>transformY(layout,v);
     const all=TERRAIN.regions;
@@ -1823,6 +1847,122 @@ const MapSystem=(function(){
       +fabricMarkup(scene.visuals);
   }
 
+
+  /* ============= 3D BUILDING MESH / 2.5D PROJECTION =============
+     The source footprints are exact polygon geometry generated by
+     settlementScene(), not decorative boxes. A vertex has x,y,z;
+     projected into an oblique view so camera pan/zoom still works.
+     Every canonical building remains one accessible gameplay target. */
+  const MESH_HEIGHT={bureau:34,civic:26,transport:19,workplace:23,
+    clinic:18,school:19,market:15,worship:23,residence:13,public:16};
+  function meshHeight(v){
+    const kind=v.kind||'residence';
+    let hash=2166136261, id=String(v.id||kind);
+    for(let i=0;i<id.length;i++)hash=Math.imul(hash^id.charCodeAt(i),16777619)>>>0;
+    let h=(MESH_HEIGHT[kind]||12)*(0.74+(hash%9)*0.055);
+    if(!v.canonicalBuildingId)h*=kind==='workplace'?1:0.8;
+    return Math.round(h*100)/100;
+  }
+  function meshForVisual(v){
+    if(!v||!Array.isArray(v.poly)||v.poly.length<3)return null;
+    const h=meshHeight(v),n=v.poly.length;
+    const vertices=v.poly.map(p=>[p[0],p[1],0]).concat(v.poly.map(p=>[p[0],p[1],h]));
+    const roof=Array.from({length:n},(_,i)=>n+i);
+    const walls=Array.from({length:n},(_,i)=>[i,(i+1)%n,(i+1)%n+n,n+i]);
+    return {id:v.id,kind:v.kind||'residence',height:h,vertices,roof,walls,canonicalBuildingId:v.canonicalBuildingId||null};
+  }
+  function meshProject(point){return [point[0]+point[2]*.32,point[1]-point[2]*.78];}
+  function meshPath(poly){return poly.map((p,i)=>(i?'L':'M')+p[0].toFixed(2)+' '+p[1].toFixed(2)).join(' ')+'Z';}
+  function meshProjectedFaces(mesh){
+    if(!mesh)return null;
+    const n=mesh.vertices.length/2,pr=mesh.vertices.map(meshProject);
+    const roof=meshPath(mesh.roof.map(i=>pr[i]));
+    let dark='',light='';
+    for(let i=0;i<n;i++){
+      const p=mesh.vertices[i],q=mesh.vertices[(i+1)%n];
+      const dx=q[0]-p[0],dy=q[1]-p[1];
+      if(dx>=0&&dy<=0)continue;
+      const face=meshPath(mesh.walls[i].map(j=>pr[j]));
+      if(dy>0)dark+=face+' ';else light+=face+' ';
+    }
+    return {roof,dark,light};
+  }
+
+  function roofFeatureMarkup(v,mesh){
+    if(!v||!v.canonicalBuildingId||!mesh)return '';
+    const [cx,cy]=meshProject([v.cx,v.cy,mesh.height]);
+    const x=Number(cx.toFixed(2)),y=Number(cy.toFixed(2));
+    const kind=v.kind||'residence';
+    if(kind==='workplace')return '<g class="map-rooftop industry">'+
+      '<rect x="'+(x-6)+'" y="'+(y-15)+'" width="7" height="16"></rect>'+
+      '<rect x="'+(x+3)+'" y="'+(y-21)+'" width="5" height="22"></rect>'+
+      '<path class="smoke" d="M '+(x+5)+' '+(y-24)+' q 8 -8 1 -15"></path></g>';
+    if(kind==='bureau'||kind==='civic')return '<g class="map-rooftop civic">'+
+      '<path d="M '+(x-7)+' '+y+' v-15 h14 v15Z"></path>'+
+      '<path d="M '+(x-9)+' '+(y-15)+' l9 -9 l9 9Z"></path>'+
+      '<path class="tower-line" d="M '+x+' '+(y-17)+' v13"></path></g>';
+    if(kind==='worship')return '<g class="map-rooftop worship">'+
+      '<path d="M '+(x-5)+' '+y+' L '+x+' '+(y-25)+' L '+(x+5)+' '+y+' Z"></path>'+
+      '<path class="cross" d="M '+x+' '+(y-33)+' v9 M '+(x-4)+' '+(y-29)+' h8"></path></g>';
+    if(kind==='clinic')return '<g class="map-rooftop clinic">'+
+      '<rect x="'+(x-11)+'" y="'+(y-9)+'" width="22" height="13" rx="1"></rect>'+
+      '<path class="cross" d="M '+x+' '+(y-8)+' v12 M '+(x-6)+' '+(y-2)+' h12"></path></g>';
+    if(kind==='transport')return '<g class="map-rooftop rail">'+
+      '<path d="M '+(x-11)+' '+(y-4)+' h22 l-4 -6 h-14Z"></path>'+
+      '<path class="tower-line" d="M '+x+' '+(y-11)+' v-10 M '+x+' '+(y-21)+' l7 3 l-7 4"></path></g>';
+    if(kind==='market')return '<g class="map-rooftop market">'+
+      '<path d="M '+(x-13)+' '+y+' l4 -9 h18 l4 9 Z"></path>'+
+      '<path class="roof-line" d="M '+(x-9)+' '+(y-8)+' l5 8 M '+x+' '+(y-8)+' l5 8"></path></g>';
+    if(kind==='school')return '<g class="map-rooftop school">'+
+      '<path class="tower-line" d="M '+x+' '+(y+1)+' v-19"></path>'+
+      '<path d="M '+x+' '+(y-18)+' l12 4 l-12 4 Z"></path></g>';
+    if(kind==='residence')return '<path class="map-residence-gable" d="M '+(x-13)+' '+(y+2)+' l13 -10 l13 10"></path>';
+    return '';
+  }
+
+  function extrudedBuildingMarkup(v){
+    const mesh=meshForVisual(v),faces=meshProjectedFaces(mesh);
+    if(!faces)return '';
+    const cls='mesh-'+(mesh.kind in MESH_HEIGHT?mesh.kind:'residence');
+    return '<g class="map-mesh-building '+cls+'" aria-hidden="true">'+
+      '<path class="mesh-wall-dark" d="'+faces.dark+'"></path>'+
+      '<path class="mesh-wall-light" d="'+faces.light+'"></path>'+
+      '<path class="mesh-roof" d="'+faces.roof+'"></path>'+roofFeatureMarkup(v,mesh)+'</g>';
+  }
+  // Merge thousands of isometric building meshes into a few dozen SVG paths:
+  // 1-3 DOM nodes per material/batch rather than one SVG group per building.
+  function settlementExtrusionsMarkup(scene,opts){
+    if(!scene||!scene.visuals)return '';
+    const all=scene.visuals.filter(v=>!v.canonicalBuildingId);
+    const max=Math.max(40,Number(opts&&opts.maxBuildings)||1250);
+    const skip=Math.max(1,Math.ceil(all.length/max));
+    let result='', batch=null,count=0;
+    function flush(){
+      if(!batch||!batch.count)return;
+      for(const kind of Object.keys(batch.materials).sort()){
+        const p=batch.materials[kind];
+        const cls='mesh-'+(kind in MESH_HEIGHT?kind:'residence');
+        result+='<g class="map-mesh-batch '+cls+'" aria-hidden="true">'+
+          '<path class="mesh-wall-dark" d="'+p.dark+'"></path>'+
+          '<path class="mesh-wall-light" d="'+p.light+'"></path>'+
+          '<path class="mesh-roof" d="'+p.roof+'"></path></g>';
+      }
+    }
+    all.forEach((v,i)=>{
+      if(i%skip!==0)return;
+      if(!batch||batch.count>=90){flush();batch={count:0,materials:{}};}
+      const mesh=meshForVisual(v),faces=meshProjectedFaces(mesh);
+      if(!faces)return;
+      const material=mesh.kind in MESH_HEIGHT?mesh.kind:'residence';
+      if(!batch.materials[material])batch.materials[material]={dark:'',light:'',roof:''};
+      const b=batch.materials[material];
+      b.roof+=faces.roof+' ';b.dark+=faces.dark;b.light+=faces.light;
+      batch.count++;count++;
+    });
+    flush();
+    return '<g class="map-mesh-city" data-building-count="'+count+'">'+result+'</g>';
+  }
+
   /* ---- POI cartographic symbols (presentation only) ---- */
   function starPath(cx,cy,R,r){
     let p='';
@@ -1957,8 +2097,8 @@ const MapSystem=(function(){
   /* ---- cartography furniture ---- */
   function scaleBarMarkup(kind){
     const cfg=kind==='settlement'
-      ?{label:'200 METERS',note:'MUNICIPAL SURVEY - SCALE OF SHEET AT 1X'}
-      :{label:'100 KILOMETERS',note:'PROVISIONAL SURVEY - SCALE OF SHEET'};
+      ?{label:'CITY PLAN',note:'FICTIONAL URBAN GEOMETRY · NOT TO SCALE'}
+      :{label:'LITHUANIA OUTLINE',note:'FICTIONAL CITIES · SCHEMATIC ROUTES'};
     return '<div class="map-scalebar" aria-hidden="true"><span class="sb-bar"><i></i><i></i><i></i><i></i></span><b>'+cfg.label+'</b><em>'+cfg.note+'</em></div>';
   }
   function legendSwatch(kind){
@@ -2023,7 +2163,8 @@ const MapSystem=(function(){
     nationalLayout,transformY,geoTransform,TERRAIN,nationalGeographyMarkup,regionLabelsMarkup,
     seaLabelsMarkup,routePath,routeMidPoint,nationalTier,nationalKindVisible,settlementTier,patternDefs,
     SETTLEMENT_PLANS,settlementPlan,settlementScene,settlementZoomConfig,
-    visualBuildingForCanonicalId,annotationItems,settlementBaseMarkup,    poiSymbolMarkup,scaleBarMarkup,nationalLegendMarkup,settlementLegendMarkup,legendSwatch,
+    visualBuildingForCanonicalId,annotationItems,settlementBaseMarkup,
+    meshForVisual,meshProject,meshProjectedFaces,extrudedBuildingMarkup,settlementExtrusionsMarkup,poiSymbolMarkup,scaleBarMarkup,nationalLegendMarkup,settlementLegendMarkup,legendSwatch,
     generateCorridor,generateShedGrid
   };
 })();

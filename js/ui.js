@@ -1250,80 +1250,230 @@ function scheduleMapRefresh(){
     refreshSettlementAnnotations(false);
   },170);
 }
+let mapDepthMode='raised';
+let mapStrategicMode='economy';
 function mapControlsMarkup(){
   return '<div class="map-controls" role="group" aria-label="Map controls">'
     +'<button class="map-ctl" data-map-zoom="in" title="Zoom in" aria-label="Zoom in">+</button>'
     +'<button class="map-ctl" data-map-zoom="out" title="Zoom out" aria-label="Zoom out">&minus;</button>'
     +'<button class="map-ctl ctl-wide" data-map-fit title="Fit the whole sheet" aria-label="Fit map">FIT</button>'
     +'<button class="map-ctl ctl-wide" data-map-here title="Center on current location" aria-label="Current location">HERE</button>'
+    +'<button class="map-ctl ctl-wide depth-ctl" data-map-depth title="Toggle raised buildings and flat map" aria-pressed="'+(mapDepthMode==='raised')+'">'+(mapDepthMode==='raised'?'2.5D':'FLAT')+'</button>'
     +'</div>';
 }
+
+function mapCityMarker(s,y){
+  // Raised, shadowed skyline sits on the exact location point; the hit circle
+  // and canonical city ID remain accessible to touch and keyboard navigation.
+  const h=s.kind==='city'?3.7:s.kind==='town'?2.7:1.9;
+  const w=s.kind==='city'?5:s.kind==='town'?4.0:2.9;
+  const x=s.x,alt=y-1;
+  return '<g class="map-city-model" aria-hidden="true" transform="translate('+x+' '+alt+')">'+
+    '<path class="city-shadow" d="M '+(-w)+' 1 L 0 3 L '+w+' 1 L 0 -1 Z"></path>'+
+    '<path class="city-wall" d="M '+(-w*.7)+' -1 L 0 1 L 0 '+(-h)+' L '+(-w*.7)+' '+(-h-2)+' Z"></path>'+
+    '<path class="city-wall-right" d="M 0 1 L '+(w*.75)+' -1 L '+(w*.75)+' '+(-h-2)+' L 0 '+(-h)+' Z"></path>'+
+    '<path class="city-roof" d="M '+(-w*.7)+' '+(-h-2)+' L 0 '+(-h-4)+' L '+(w*.75)+' '+(-h-2)+' L 0 '+(-h)+' Z"></path>'+
+    (s.kind==='city'?'<path class="city-tower" d="M -.8 '+(-h-3)+'V'+(-h-7)+'H.8V'+(-h-3)+'Z"></path>':'')+
+    '</g>';
+}
+function mapRouteSummary(plan,from,to){
+  if(!plan)return '<span class="route-unavailable">NO CONNECTED TRANSPORT LINE</span>';
+  const cost=travelCost(from,to,plan.choice);
+  return '<div class="map-route-intel"><div class="map-route-intel-h">'+
+    '<span>ROUTE INTELLIGENCE</span><b>'+plan.legs.length+' '+(plan.legs.length===1?'LEG':'LEGS')+' · '+plan.mode.toUpperCase()+'</b></div>'+
+    '<div class="map-route-metrics">'+
+      '<span>FARE <b>'+money(cost)+'</b></span>'+
+      '<span>CHECK DELAY <b>'+Math.round(plan.checkpointProbability*100)+'%</b></span>'+
+      '<span>GAME DISTANCE <b>'+plan.distance+'</b></span>'+
+    '</div>'+
+    '<div class="map-route-stops">'+plan.stops.map((id,i)=>
+      '<span class="'+(i===0?'origin':i===plan.stops.length-1?'destination':'transfer')+'">'+
+      settlementById(id).name+'</span>').join('<i>→</i>')+'</div></div>';
+}
+function mapResidentCount(s){
+  const rt=typeof WorldSimulation==='object'&&WorldSimulation&&World?
+    WorldSimulation.getSettlementState(World,s.id):null;
+  const pop=Number(rt?.demographics?.population);
+  return Number.isFinite(pop)&&pop>=0?Math.round(pop).toLocaleString('en-US'):s.population;
+}
+function mapRelocationWarning(destinationId){
+  if(typeof EmploymentSystem!=='object'||!EmploymentSystem||!World||
+    typeof EmploymentSystem.activeForPerson!=='function')return '';
+  const contracts=EmploymentSystem.activeForPerson(World,'subject')
+    .filter(c=>c&&c.settlementId!==destinationId);
+  return contracts.length?
+    '<div class="map-relocation-warning"><b>⚠ JOB ENDS ON ARRIVAL</b>'+
+    '<span>'+contracts.map(c=>c.occupationName||'Current position').join(', ')+
+    ' · local employment must be secured after relocating</span></div>':'';
+}
+function mapTownEconomicSummary(s){
+  const runtime=typeof WorldSimulation==='object'&&WorldSimulation&&World&&WorldSimulation.getSettlementState?
+    WorldSimulation.getSettlementState(World,s.id):null;
+  const labor=typeof WorldSimulation==='object'&&WorldSimulation&&World&&WorldSimulation.laborMarketFor?
+    WorldSimulation.laborMarketFor(World,s.id,World.year):null;
+  if(!runtime)return '';
+  const econ=runtime.economy||{},security=runtime.security||{};
+  const format=v=>Math.round((Number(v)||0)*100);
+  return '<div class="map-city-stats">'+
+    '<div><span class="mstat-icon">⚒</span><small>JOBS</small><b>'+format(econ.employmentIndex)+'/100</b></div>'+
+    '<div><span class="mstat-icon">◈</span><small>UNREST</small><b>'+format(security.unrest)+'/100</b></div>'+
+    '<div><span class="mstat-icon">⌂</span><small>FIRMS</small><b>'+(labor?labor.businesses:0)+'</b></div>'+
+    '<div><span class="mstat-icon">⬡</span><small>RENT INDEX</small><b>'+format(econ.rentIndex)+'%</b></div>'+
+    '</div>';
+}
+
+const MAP_ATLAS_MODES={economy:{label:'JOBS',icon:'⚒'},security:{label:'UNREST',icon:'⚑'},health:{label:'HEALTH',icon:'✚'}};
+function mapCityIndicator(s){
+  const rt=typeof WorldSimulation==='object'&&WorldSimulation&&World?
+    WorldSimulation.getSettlementState(World,s.id):null;
+  const value=mapStrategicMode==='economy'?Number(rt?.economy?.employmentIndex)||
+    0:mapStrategicMode==='security'?Number(rt?.security?.unrest)||0:
+    (typeof WorldSimulation==='object'&&WorldSimulation&&World?
+      WorldSimulation.getHealthcarePressure(World,s.id):0);
+  const v=clamp(Number(value)||0,0,1);
+  const low=v<.32, high=v>.65;
+  const cls=mapStrategicMode==='economy'?(high?'good':low?'danger':'mid'):
+    (high?'danger':low?'good':'mid');
+  return {value:v,cls,text:MAP_ATLAS_MODES[mapStrategicMode].label};
+}
+function mapLensControlsMarkup(){
+  const buttons=Object.keys(MAP_ATLAS_MODES).map(id=>{
+    const m=MAP_ATLAS_MODES[id],selected=mapStrategicMode===id;
+    return '<button class="map-lens-button'+(selected?' active':'')+
+      '" data-map-lens="'+id+'" aria-pressed="'+selected+'"><span aria-hidden="true">'+
+      m.icon+'</span>'+m.label+'</button>';
+  }).join('');
+  return '<div class="map-lens-panel" role="group" aria-label="Strategic map layers">'+
+    '<span class="map-lens-kicker">ATLAS</span>'+buttons+
+    '<span class="map-lens-key" aria-label="Green means favorable, red means critical">'+
+    '<i class="atlas-key-good"></i>GOOD <i class="atlas-key-danger"></i>CRITICAL</span></div>';
+}
+
 function renderNationalMap(){
   const selected=settlementById(World.map.selectedSettlementId)||currentSettlement();
   World.map.discoveredSettlementIds=KARSEN_SETTLEMENTS.map(s=>s.id);
-  // Phones receive a true portrait survey sheet: geography and routes spread
-  // vertically, while settlement dots and type remain circular and readable.
-  const layout=nationalMediaLayout();
-  const tier=MapSystem.nationalTier(mapViewport.scale);
-  const points=KARSEN_SETTLEMENTS.map(s=>({id:s.id,x:s.x,y:MapSystem.transformY(layout,s.y),text:s.name,r:nationalDotRadius(s),priority:s.kind==='city'?3:s.kind==='town'?2:1}));
+  const layout=nationalMediaLayout(),tier=MapSystem.nationalTier(mapViewport.scale);
+  const points=KARSEN_SETTLEMENTS.map(s=>({id:s.id,x:s.x,y:MapSystem.transformY(layout,s.y),
+    text:s.name,r:nationalDotRadius(s),priority:s.kind==='city'?3:s.kind==='town'?2:1}));
   const labelled=points.filter(p=>MapSystem.nationalKindVisible(settlementById(p.id).kind,tier));
-  const labels=MapSystem.layoutLabels(labelled,{width:MapSystem.NATIONAL_VIEWBOX.width,height:layout.height,dots:points,fontSize:3});
-  const labelLeaders=labelled.filter(p=>labels.placements[p.id].leader).map(p=>'<path class="map-label-leader" d="'+MapSystem.labelLeaderPath(p,labels.placements[p.id],p.r)+'"></path>').join('');
+  const labels=MapSystem.layoutLabels(labelled,{width:150,height:layout.height,dots:points,fontSize:3});
+  const labelLeaders=labelled.filter(p=>labels.placements[p.id].leader).map(p=>
+    '<path class="map-label-leader" d="'+MapSystem.labelLeaderPath(p,labels.placements[p.id],p.r)+'"></path>').join('');
   const nodes=KARSEN_SETTLEMENTS.map(s=>{
-    const p=labels.placements[s.id], cy=MapSystem.transformY(layout,s.y), current=World.activeSettlementId===s.id;
-    return '<g class="map-node '+s.kind+(current?' current':'')+'" data-map-settlement="'+s.id+'" tabindex="0" role="button" aria-label="'+s.name+'"><circle class="map-node-hit" cx="'+s.x+'" cy="'+cy+'" r="5.2"></circle><circle class="map-node-dot" cx="'+s.x+'" cy="'+cy+'" r="'+nationalDotRadius(s)+'"></circle>'+(p?'<text x="'+p.x.toFixed(1)+'" y="'+p.y.toFixed(1)+'" text-anchor="'+p.anchor+'">'+s.name+'</text>':'')+'</g>';
+    const p=labels.placements[s.id],cy=MapSystem.transformY(layout,s.y);
+    const current=World.activeSettlementId===s.id,chosen=selected.id===s.id;
+    const indicator=mapCityIndicator(s),arc=43.98,progress=(arc*indicator.value).toFixed(1);
+    const halo='<circle class="atlas-status-ring atlas-'+indicator.cls+
+      '" cx="'+s.x+'" cy="'+cy+'" r="7" transform="rotate(-90 '+s.x+' '+cy+
+      ')" stroke-dasharray="'+progress+' '+arc.toFixed(1)+'"></circle>';
+    return '<g class="map-node '+s.kind+(current?' current':'')+(chosen?' selected':'')+
+      '" data-map-settlement="'+s.id+'" tabindex="0" role="button" aria-label="'+s.name+'">'+
+      '<circle class="map-node-hit" cx="'+s.x+'" cy="'+cy+'" r="5.5"></circle>'+
+      '<circle class="map-node-dot" cx="'+s.x+'" cy="'+cy+'" r="'+nationalDotRadius(s)+'"></circle>'+halo+
+      (mapDepthMode==='raised'?mapCityMarker(s,cy):'')+
+      (p?'<text x="'+p.x.toFixed(1)+'" y="'+p.y.toFixed(1)+'" text-anchor="'+p.anchor+'">'+s.name+'</text>':'')+'</g>';
   }).join('');
-  const here=currentSettlement(), direct=here&&selected?routeBetween(here.id,selected.id):null;
-  const regionLabels=MapSystem.regionLabelsMarkup(layout,tier);
-  const seaLabels=MapSystem.seaLabelsMarkup(layout);
-  const routes=KARSEN_ROUTES.map((r,i)=>{
-    const a=settlementById(r.from), b=settlementById(r.to);
-    const isDirect=direct&&((r.from===direct.from&&r.to===direct.to)||(r.from===direct.to&&r.to===direct.from));
-    let out='<path class="map-route '+r.mode+(isDirect?' route-selected':'')+'" d="'+MapSystem.routePath(a,b,i,layout)+'"></path>';
-    if(isDirect) out+='<path class="map-route-glow" d="'+MapSystem.routePath(a,b,i,layout)+'"></path>';
-    if(tier>=2){
-      const m=MapSystem.routeMidPoint(a,b,i,layout);
-      out+='<text class="map-route-distance" x="'+m.x.toFixed(1)+'" y="'+m.y.toFixed(1)+'">'+r.distance+'</text>';
-    }
+  const from=currentSettlement(),route=from&&selected?routePlan(from,selected,'economy'):null;
+  const chosenEdges=new Set(route?route.legs.map(l=>[l.from,l.to].sort().join('|')):[]);
+  const regions=MapSystem.regionLabelsMarkup(layout,tier),sea=MapSystem.seaLabelsMarkup(layout);
+  const routes=KARSEN_ROUTES.map((e,i)=>{
+    const a=settlementById(e.from),b=settlementById(e.to);
+    const chosen=chosenEdges.has([e.from,e.to].sort().join('|'));
+    const path=MapSystem.routePath(a,b,i,layout);
+    let out='<path class="map-route '+e.mode+(chosen?' route-selected':'')+'" d="'+path+'"></path>';
+    if(chosen)out+='<path class="map-route-glow" d="'+path+'"></path>';
+    if(tier>=2){const mid=MapSystem.routeMidPoint(a,b,i,layout);out+=
+      '<text class="map-route-distance" x="'+mid.x.toFixed(1)+'" y="'+mid.y.toFixed(1)+'">'+e.distance+'</text>';}
     return out;
   }).join('');
-  const cartouche='<div class="map-cartouche"><b>COMMONWEALTH OF KARSEN</b><span>OFFICIAL SURVEY · '+currentYear()+'</span></div>';
-  return '<div class="map-kicker"><span>COMMONWEALTH OF KARSEN</span><span>OFFICIAL SURVEY - '+currentYear()+'</span></div>'+
-    '<div class="map-toolbar"><button class="map-tool active" data-map-mode="national">NATIONAL</button><span>'+KARSEN_SETTLEMENTS.length+' SETTLEMENTS - '+World.map.visitedSettlementIds.length+' VISITED</span></div>'+
-    '<div class="map-canvas national-map-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 150 '+layout.height+'" preserveAspectRatio="xMidYMid meet" aria-label="National map of Karsen"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')">'+MapSystem.nationalGeographyMarkup(layout)+(layout.tall?seaLabels:'')+regionLabels+routes+labelLeaders+nodes+'</g></svg>'+cartouche+mapControlsMarkup()+MapSystem.scaleBarMarkup('national')+'<div class="map-compass" title="North">N</div></div>'+
+  const cartouche='<div class="map-cartouche"><b>KARSEN</b><span>LITHUANIA-BASED TOPOGRAPHY · '+currentYear()+'</span></div>';
+  return '<div class="map-kicker"><span>KARSEN · TERRAIN SURVEY</span><span>2.5D GEOGRAPHY · '+currentYear()+'</span></div>'+
+    '<div class="map-toolbar"><button class="map-tool active" data-map-mode="national">COUNTRY</button>'+
+      '<span>'+KARSEN_SETTLEMENTS.length+' SETTLEMENTS · '+World.map.visitedSettlementIds.length+' VISITED</span></div>'+mapLensControlsMarkup()+
+    '<div class="map-canvas national-map-canvas country-relief '+(mapDepthMode==='raised'?'depth-on':'depth-off')+
+      '" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 150 '+layout.height+'" preserveAspectRatio="xMidYMid meet" aria-label="Karsen on geographic Lithuania"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')">'+
+      MapSystem.nationalGeographyMarkup(layout)+(layout.tall?sea:'')+regions+routes+labelLeaders+nodes+
+      '</g></svg>'+cartouche+mapControlsMarkup()+MapSystem.scaleBarMarkup('national')+
+      '<div class="map-compass" title="North">N</div>'+
+      '<div class="geo-credit">GEOGRAPHY: NATURAL EARTH · KARSEN IS FICTIONAL</div></div>'+
     MapSystem.nationalLegendMarkup()+
-    '<div class="map-selection"><div class="map-selection-copy"><b>'+selected.name+'</b><span>'+mapSettlementBadge(selected)+' - '+selected.region+' - population '+selected.population+(direct?' - direct '+direct.mode+' route':'')+'</span><em>'+selected.description+'</em></div><button class="btn small" data-map-open="'+selected.id+'">Open Settlement Map &gt;</button></div>';
+    '<div class="map-selection map-strategy-selection"><div class="map-selection-copy"><small>'+mapSettlementBadge(selected)+
+      ' · '+selected.region+'</small><b>'+selected.name+'</b><span>'+mapResidentCount(selected)+' RESIDENTS</span>'+
+      '<details class="map-description"><summary>CITY RECORD ▾</summary><p>'+selected.description+'</p></details></div>'+
+      mapTownEconomicSummary(selected)+
+      '<div class="map-atlas-selected"><b>'+mapCityIndicator(selected).text+'</b><span>'+Math.round(mapCityIndicator(selected).value*100)+'/100</span></div>'+
+      (from.id!==selected.id?mapRouteSummary(route,from,selected):'<div class="map-here-tag">● YOUR LOCATION</div>')+
+      '<button class="btn small map-open-button" data-map-open="'+selected.id+'">ENTER '+selected.name.toUpperCase()+' ▸</button></div>';
 }
+
 let mapScene=null, mapAnnoLast=null;
+
 function renderSettlementMap(){
   const s=settlementById(World.map.selectedSettlementId)||currentSettlement();
-  if(!s) return '';
+  if(!s)return '';
   mapScene={id:s.id,scene:MapSystem.settlementScene(s.id),zoomCfg:MapSystem.settlementZoomConfig(s.id)};
-  const scene=mapScene.scene, vp=MapSystem.SETTLEMENT_VIEWPORT;
-  const same=World.activeSettlementId===s.id;
-  const selectedId=World.map.selectedBuildingId||s.buildings[0].id;
-  const currentB=same?World.activeBuildingId:null;
-  const names={};
-  s.buildings.forEach(b=>{names[b.id]=b.name;});
-  const base=MapSystem.settlementBaseMarkup(scene);
-  const canonicalEls=Object.keys(scene.canonical).map(cid=>{
-    const v=scene.canonical[cid];
-    const sel=cid===selectedId?' selected':'', cur=cid===currentB?' current':'';
-    /* invisible generous hit area first, then the visible footprint */
-    return '<path class="map-building-hit" data-map-building="'+cid+'" d="'+MapSystem.polyPath(v.hitPoly)+'"></path>'
-      +'<path class="map-building '+v.kind+sel+cur+'" data-map-building="'+cid+'" tabindex="0" role="button" aria-label="'+(names[cid]||'')+'" d="'+MapSystem.polyPath(v.poly)+'"></path>';
+  const sc=mapScene.scene,vp=MapSystem.SETTLEMENT_VIEWPORT;
+  const local=World.activeSettlementId===s.id;
+  const selId=World.map.selectedBuildingId||s.buildings[0].id;
+  const atId=local?World.activeBuildingId:null;
+  const names={};s.buildings.forEach(b=>{names[b.id]=b.name;});
+  const raised=mapDepthMode==='raised';
+  const base=MapSystem.settlementBaseMarkup(sc);
+  const residential=raised?MapSystem.settlementExtrusionsMarkup(sc,{maxBuildings:1200}):'';
+  const canon=Object.keys(sc.canonical).map(cid=>{
+    const v=sc.canonical[cid],sel=cid===selId?' selected':'',cur=cid===atId?' current':'';
+    return (raised?MapSystem.extrudedBuildingMarkup(v):'')+
+      '<path class="map-building-hit" data-map-building="'+cid+'" d="'+MapSystem.polyPath(v.hitPoly)+'"></path>'+
+      '<path class="map-building '+v.kind+sel+cur+'" data-map-building="'+cid+
+      '" tabindex="0" role="button" aria-label="'+(names[cid]||'')+'" d="'+MapSystem.polyPath(v.poly)+'"></path>';
   }).join('');
-  const selected=buildingById(s.id,selectedId)||s.buildings[0];
-  const route=routeBetween(currentSettlement().id,s.id), cost=same?0:travelCost(currentSettlement(),s);
-  const travelNote=S.traveling?'already travelling to '+settlementById(S.traveling.to).name:S.age<16?'independent travel begins at age 16':same?'already here':S.assets<cost?'needs '+money(cost):'fare '+money(cost)+' · arrives next year';
-  const travelButton=!same?'<button class="btn small map-travel-btn" data-map-travel="'+s.id+'" '+(S.traveling||S.age<16||S.assets<cost?'disabled':'')+'>Travel Here ▸</button>':'';
-  const cartouche='<div class="map-cartouche"><b>'+s.name.toUpperCase()+'</b><span>MUNICIPAL SURVEY · '+s.region.toUpperCase()+'</span></div>';
-  return '<div class="map-kicker"><button class="map-back" data-map-mode="national">← NATIONAL MAP</button><span>'+s.name.toUpperCase()+' · '+mapSettlementBadge(s)+'</span></div>'+
-    '<div class="map-toolbar"><button class="map-tool active" data-map-mode="settlement">SETTLEMENT</button><span>'+s.region+' · '+s.population+' residents</span></div>'+
-    '<div class="map-canvas settlement-canvas" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 '+vp.width+' '+vp.height+'" preserveAspectRatio="xMidYMid meet" aria-label="Map of '+s.name+'"><g id="mapPlane" transform="translate('+mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')">'+base+'<g class="plan-canonical">'+canonicalEls+'</g></g><g id="mapScreenAnnotations"></g></svg>'+cartouche+mapControlsMarkup()+MapSystem.scaleBarMarkup('settlement')+'<div class="map-compass" title="North">N</div></div>'+
+  const chosen=buildingById(s.id,selId)||s.buildings[0],from=currentSettlement();
+  const routePlans=local?[]:Object.keys(TRAVEL_STYLES).map(id=>{
+    const plan=routePlan(from,s,id);
+    return plan?{id,plan,cost:travelCost(from,s,id)}:null;
+  }).filter(Boolean);
+  const travelling=S.traveling,student=S.eduStage||(S.education&&S.education.stageId);
+  const choices=routePlans.map(entry=>{
+    const p=entry.plan,name=TRAVEL_STYLES[entry.id].name;
+    const locked=travelling||S.age<16||student||S.assets<entry.cost;
+    const symbol=entry.id==='express'?'🚆':entry.id==='discreet'?'◈':'🪙';
+    return '<button type="button" class="map-travel-choice travel-'+entry.id+
+      '" data-map-travel="'+s.id+'" data-map-travel-style="'+entry.id+'" '+(locked?'disabled':'')+'>'+
+      '<span class="map-choice-icon">'+symbol+'</span><span class="map-choice-name">'+name+'</span>'+
+      '<b>'+money(entry.cost)+'</b>'+
+      '<small>DELAY '+Math.round(p.checkpointProbability*100)+'% · '+p.legs.length+' '+(p.legs.length===1?'LEG':'LEGS')+'</small></button>';
+  }).join('');
+  const minFare=routePlans.length?Math.min(...routePlans.map(q=>q.cost)):0;
+  const note=travelling?'TRAVEL ALREADY FILED → '+settlementById(travelling.to).name:
+    S.age<16?'TRAVEL UNLOCKS AT AGE 16':student?'FINISH OR TRANSFER STUDIES FIRST':
+    local?'YOU ARE HERE':S.assets<minFare?'NEED '+money(minFare):
+    'fare '+money(minFare)+' · arrival next year';
+  const cartouche='<div class="map-cartouche"><b>'+s.name.toUpperCase()+'</b><span>'+
+    s.region.toUpperCase()+' · 2.5D MUNICIPAL MODEL</span></div>';
+  return '<div class="map-kicker"><button class="map-back" data-map-mode="national">← COUNTRY</button>'+
+    '<span>'+s.name.toUpperCase()+' · '+mapSettlementBadge(s)+'</span></div>'+
+    '<div class="map-toolbar"><button class="map-tool active" data-map-mode="settlement">CITY MODEL</button>'+
+    '<span>'+mapResidentCount(s)+' RESIDENTS · '+s.region+'</span></div>'+
+    '<div class="map-canvas settlement-canvas '+(raised?'depth-on':'depth-off')+
+      '" id="mapCanvas"><svg id="mapSvg" viewBox="0 0 '+vp.width+' '+vp.height+
+      '" preserveAspectRatio="xMidYMid meet" aria-label="Raised 2.5D map of '+s.name+'"><g id="mapPlane" transform="translate('+
+      mapViewport.x+' '+mapViewport.y+') scale('+mapViewport.scale+')">'+base+
+      residential+'<g class="plan-canonical">'+canon+'</g></g><g id="mapScreenAnnotations"></g></svg>'+
+      cartouche+mapControlsMarkup()+MapSystem.scaleBarMarkup('settlement')+
+      '<div class="map-compass" title="North">N</div></div>'+
     MapSystem.settlementLegendMarkup()+
-    '<div class="map-selection building-selection"><div class="map-selection-copy"><small>'+(same?'CURRENT SETTLEMENT':'OFFICIAL LOCATION FILE')+'</small><b>'+selected.name+'</b><span>'+selected.type.toUpperCase()+' · '+selected.district+'</span><em>'+selected.description+'</em></div><div class="map-actions">'+travelButton+'<span class="map-travel-note">'+travelNote+'</span></div></div>';
+    '<div class="map-selection building-selection map-strategy-selection"><div class="map-selection-copy">'+
+      '<small>'+(local?'CURRENT CITY':'CITY RECORD')+' · '+chosen.district+'</small>'+
+      '<b>'+chosen.name+'</b><span>'+chosen.type.toUpperCase()+'</span>'+
+      '<details class="map-description"><summary>BUILDING RECORD ▾</summary><p>'+chosen.description+'</p></details></div>'+
+      mapTownEconomicSummary(s)+
+      '<div class="map-actions"><span class="map-travel-note">'+note+'</span>'+(!local?mapRelocationWarning(s.id):'')+
+        (local?'<div class="map-here-tag">● HOME CITY</div>':
+          '<div class="map-travel-choices">'+choices+'</div>'+
+          (routePlans.length?mapRouteSummary(routePlans[0].plan,from,s):''))+
+      '</div></div>';
 }
+
 /* Annotations live in a SCREEN-SPACE layer outside the camera plane.
    Sizes are fixed viewport/CSS units; positions are projections of world
    anchors (sx = wx*scale + tx) and are re-projected every frame so labels
@@ -1617,6 +1767,11 @@ $('#mapWrap').addEventListener('click',e=>{
   if(zbtn){ mapZoomStep(zbtn.dataset.mapZoom==='in'?1.45:1/1.45); return; }
   if(e.target.closest('[data-map-fit]')){ mapFitView(); return; }
   if(e.target.closest('[data-map-here]')){ mapGoHere(); return; }
+  if(e.target.closest('[data-map-depth]')){mapDepthMode=mapDepthMode==='raised'?'flat':'raised';renderMap();return;}
+  const lens=e.target.closest('[data-map-lens]');
+  if(lens&&MAP_ATLAS_MODES[lens.dataset.mapLens]){
+    mapStrategicMode=lens.dataset.mapLens;renderMap();return;
+  }
   const mode=e.target.closest('[data-map-mode]'); if(mode){ World.map.mode=mode.dataset.mapMode; mapViewport=MapSystem.createCamera(); mapLastMode=null; mapScene=null; mapAnnoLast=null; renderMap(); return; }
   /* Node/building selection is owned by the tap pipeline for pointer input;
      detail===0 marks keyboard-synthesized clicks. */
@@ -1625,7 +1780,7 @@ $('#mapWrap').addEventListener('click',e=>{
   const building=e.target.closest('[data-map-building]');
   if(building){ if(!e.detail) activateMapTarget(building); return; }
   const open=e.target.closest('[data-map-open]'); if(open){ World.map.selectedSettlementId=open.dataset.mapOpen; World.map.mode='settlement'; const s=settlementById(open.dataset.mapOpen); World.map.selectedBuildingId=s.buildings[0].id; mapViewport=MapSystem.createCamera(); mapLastMode=null; mapScene=null; mapAnnoLast=null; renderMap(); return; }
-  const travel=e.target.closest('[data-map-travel]'); if(travel){ const result=scheduleTravel(travel.dataset.mapTravel); if(!result.ok) openNotice({title:'Travel Denied',body:result.reason+'. The map remains open; the route does not.'}); else renderMap(); return; }
+  const travel=e.target.closest('[data-map-travel]'); if(travel){ const result=scheduleTravel(travel.dataset.mapTravel,travel.dataset.mapTravelStyle||'economy'); if(!result.ok) openNotice({title:'Travel Denied',body:result.reason+'. The map remains open; the route does not.'}); else renderMap(); return; }
 });
 $('#mapWrap').addEventListener('keydown',e=>{
   if(e.key!=='Enter'&&e.key!==' ') return;
