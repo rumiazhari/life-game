@@ -6,7 +6,7 @@ This revision takes priority over RPG-GAMEPLAY-DESIGN.md where that earlier prop
 
 ## Scope and evidence
 
-Repository-wide source inventory covered the core, state, data, education, map, medical adapters, UI, all 26 systems modules and the employment UI. Inspected mechanic definitions, exported APIs, mutation/annual integration paths, action resolution and representative tests. Art/map rendering is presentation, not an independent mechanic. This is a static mechanics audit, not an assertion that every branch was played or every source line formally reviewed.
+Repository-wide source inventory covered the core, state, data, education, map, medical adapters, UI, all 25 systems modules and the employment UI. Inspected mechanic definitions, exported APIs, mutation/annual integration paths, action resolution and representative tests. Art/map rendering is presentation, not an independent mechanic. This is a static mechanics audit, not an assertion that every branch was played or every source line formally reviewed.
 
 Runtime catalogue extraction through the existing VM loader counted:
 - 24 pursuits and 34 decisions: 58 base action definitions.
