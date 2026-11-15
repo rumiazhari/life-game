@@ -634,6 +634,70 @@ function typeNext(){
   if(i)logEl.scrollTop=logEl.scrollHeight;
 }
 
+
+/* The dossier overview has no independent game state: each field reads the
+   authoritative simulation and the player record at render time. */
+function renderWorldBrief(){
+  const el=$('#worldBrief');
+  if(!el||!S||!World)return;
+  const sid=World.activeSettlementId;
+  const settlement=typeof WorldSimulation==='object'&&WorldSimulation&&WorldSimulation.getSettlementState?
+    WorldSimulation.getSettlementState(World,sid):null;
+  const market=typeof WorldSimulation==='object'&&WorldSimulation&&WorldSimulation.laborMarketFor?
+    WorldSimulation.laborMarketFor(World,sid,World.year):null;
+  const economy=settlement&&settlement.economy||{},security=settlement&&settlement.security||{};
+  const work=typeof EmploymentSystem==='object'&&EmploymentSystem&&EmploymentSystem.activeForPerson?
+    EmploymentSystem.activeForPerson(World,'subject')[0]:null;
+  const business=work&&typeof BusinessSystem==='object'&&BusinessSystem&&BusinessSystem.get?
+    BusinessSystem.get(World,work.businessId):null;
+  const settlementName=World.place||sid||'Karsen';
+  const unrest=Number(security.unrest)||0;
+  const employment=Number(economy.employmentIndex)||0;
+  const issue=S.health<38?{
+    title:'Your health needs attention',note:'Low health restricts the time available for decisions. Treatment competes with work, money, and family.'}:
+    S.assets<0?{title:'Your household is in deficit',note:'Debts and living costs threaten future choices. Money earned now may come at the cost of health or relationships.'}:
+    business&&business.status==='struggling'?{
+      title:'Your employer is under strain',note:'A struggling company can cut positions. Higher wages increase payroll, while workplace loyalty affects future relations.'}:
+    S.age>=16&&!work?{title:'Finding a livelihood',note:'Open positions and competing applicants depend on the local labor market and available qualifications.'}:
+    unrest>.58?{title:'Political tension is rising',note:'Surveillance and unrest create risks around work, public activity, and travel.'}:
+    work?{title:'Your next move matters',note:'Your employer, coworkers, and the Bureau react to choices beyond their immediate statistical effects.'}:
+    {title:'A life is taking shape',note:'Family, education, and the world around you will shape your later options.'};
+  const distressed=market&&market.businesses?Math.round(market.distressRate*market.businesses):0;
+  const metrics=[
+    {label:'PERSONAL ASSETS',value:money(Number(S.assets)||0),note:S.assets<0?'Deficit on file':'Available balance',tone:S.assets<0?'danger':''},
+    {label:'LABOR MARKET',value:settlement?Math.round(employment*100)+'/100':'—',note:'Employment index',tone:employment<.35?'danger':employment<.50?'warning':''},
+    {label:'PUBLIC UNREST',value:settlement?Math.round(unrest*100)+'/100':'—',note:'Unrest index',tone:unrest>.58?'danger':unrest>.34?'warning':''},
+    {label:'EMPLOYERS UNDER STRAIN',value:market&&market.businesses?distressed+' / '+market.businesses:'—',note:'Known local businesses',tone:market&&market.businesses&&market.distressRate>.45?'warning':''}
+  ];
+  const canChoose=typeof planHours==='function'&&planHours()>0&&S.alive&&S.jailUntil<=S.age;
+  el.innerHTML='<div class="wb-top"><div><span class="wb-overline">SECTION D · CURRENT SITUATION</span>'+
+    '<span class="wb-place">'+escapePlanText(settlementName)+' · '+escapePlanText(World.year)+'</span></div>'+
+    '<span class="wb-file">LIVE WORLD RECORD</span></div>'+
+    '<div class="wb-main"><div class="wb-lead"><span class="wb-section">PRIMARY CONSIDERATION</span>'+
+      '<h3>'+escapePlanText(issue.title)+'</h3><p>'+escapePlanText(issue.note)+'</p></div>'+
+      '<div class="wb-metrics">'+metrics.map(m=>'<div class="wb-metric'+(m.tone?' '+m.tone:'')+'"><span>'+
+        m.label+'</span><strong>'+escapePlanText(m.value)+'</strong><small>'+m.note+'</small></div>').join('')+'</div></div>'+
+    '<div class="wb-bottom"><span>'+(work&&business?'EMPLOYED AT '+escapePlanText(business.name)+
+      ' · '+escapePlanText(work.occupationName):'YOUR FILE · '+escapePlanText(S.age)+' YEARS OLD')+
+    '</span><button type="button" data-open-priorities '+(canChoose?'':'disabled')+
+      '>REVIEW YOUR CHOICES <span aria-hidden="true">▸</span></button></div>';
+}
+function renderActionReceipt(type,id,result,chips){
+  const el=$('#actionReceipt');if(!el)return;
+  const def=(type==='p'?PUR_MAP:DEC_MAP)[id];
+  const label=def?fillLabel(type==='p'?pursuitLabel(def):decisionLabel(def)):id;
+  const text=result&&result.text?fill(result.text):'The action was filed.';
+  const deltas=(chips||[]).map(c=>'<span class="ar-delta '+(c.plus?'up':'down')+'">'+escapePlanText(c.txt)+'</span>').join('');
+  el.innerHTML='<div class="ar-copy"><span class="ar-eyebrow">ACTION ENTERED · YEAR '+escapePlanText(S.age)+'</span>'+
+    '<strong>'+escapePlanText(label)+'</strong><p>'+escapePlanText(text)+'</p></div>'+
+    '<div class="ar-actions">'+(deltas?'<div class="ar-deltas">'+deltas+'</div>':'')+
+    '<button type="button" data-receipt-log>FULL CASE LOG ▸</button><button type="button" data-receipt-close aria-label="Dismiss action receipt">✕</button></div>';
+  el.classList.remove('hidden');
+}
+function clearActionReceipt(){
+  const el=$('#actionReceipt');if(el){el.classList.add('hidden');el.innerHTML='';}
+}
+
 /* ================= RENDER ================= */
 function syncHoldTab(){ const b=$('#btn-hold'); if(b) b.classList.toggle('hidden',!S.holdMember); }
 let __photoBand=''; let __photoSwapTimer=null;
@@ -754,6 +818,7 @@ function renderStats(changed){
   renderSparks();
   renderCoach();
   syncHoldTab();
+  renderWorldBrief();
 }
   /* Employer + ownership panels for the personal standing view. Guards mirror
    * the other EmploymentSystem call sites so older saves/partial loads render
@@ -1766,6 +1831,7 @@ function performActionNow(type,id,extra){
   if(r&&r.follow) pushFollow(r.follow);
   logChips(r&&r.text?fill(r.text):'It was done.',chips,type==='p'?'plan':'decision',(type==='p'?'PURSUIT':'DECISION')+' · NOW');
   markActionDone(id);
+  renderActionReceipt(type,id,r,chips);
   renderStats(window.C); updateBar(); renderPlanIfOpen();
 }
 const CONTACT_TARGET_ROLES={flirt:null,flirtsecret:'affair',tendcontact:'friend',cutcontact:null};
@@ -4008,6 +4074,7 @@ function syncPlayerVacancyPortal(){
 }
 function advanceYear(suppressBurst,quiet){
   if(!S||!S.alive||slipOpen) return;
+  clearActionReceipt();
   captureYearSnapshot();
   rpgTierBefore=S.jobTier||0;
   // New year: prune old done-action years. The "acted this year" flag is
