@@ -308,6 +308,197 @@
     return Object.assign({year,applied:true},counts);
   }
 
+
+  // Derive the player's workplace situation from live, single-owner records.
+  function laborSituation(world){
+    const es=root.EmploymentSystem;
+    if(!world||!es||typeof es.activeForPerson!=='function')return {available:false};
+    const contract=es.activeForPerson(world,'subject')[0];
+    if(!contract||contract.status!=='active'||(contract.history||[]).some(h=>h.type==='labor_dispute'&&h.year===world.year))return {available:false};
+    const business=getBusiness(world,contract.businessId);
+    if(!business||business.status==='closed')return {available:false};
+    const peers=rosterFor(world,contract.id).coworkerContracts.filter(p=>p&&p.status==='active'&&p.personId!=='subject');
+    const finance=business.finances||{};
+    const margin=clamp((Number(finance.profit)||0)/Math.max(1,Number(finance.revenue)||0),-.5,.5);
+    const surveillance=clampUnit(world.government&&world.government.surveillancePosture,.4);
+    const trust=root.RelationshipMemory&&peers.length?peers.reduce((n,p)=>n+root.RelationshipMemory.modifier(world,'subject',p.personId,world.year).trust,0)/peers.length:0;
+    const individual=round4(clamp(.25+clampUnit(contract.performance,.5)*.43+margin*.35-(business.status==='struggling'?.1:0),.08,.86));
+    const collective=round4(clamp(.16+Math.min(5,peers.length)*.1+trust/110+margin*.22-surveillance*.12,.08,.85));
+    return {available:true,contractId:contract.id,businessId:business.id,businessName:businessName(business),
+      salary:contract.annualSalary,profit:Number(finance.profit)||0,peers:peers.length,surveillance,
+      choices:[{id:'petition',label:'Request a raise',odds:individual,note:'Individual wage negotiation'},
+        ...(peers.length?[{id:'organize',label:'Organize coworkers',odds:collective,note:'Collective bargaining; public scrutiny if refused'}]:[]),
+        {id:'cooperate',label:'Cooperate with management',odds:1,note:'Reduce stress without a raise'}]};
+  }
+  function resolveLaborAction(world,options){
+    const opts=options||{},ctx=laborSituation(world),strategy=String(opts.strategy||'');
+    if(!ctx.available)return {ok:false,reason:'unavailable'};
+    const choice=ctx.choices.find(c=>c.id===strategy);
+    if(!choice||opts.year!=null&&opts.year!==world.year)return {ok:false,reason:'invalid_choice'};
+    const es=root.EmploymentSystem,c=es.get(world,ctx.contractId),b=getBusiness(world,ctx.businessId),year=world.year;
+    const peers=rosterFor(world,c.id).coworkerContracts.filter(p=>p.status==='active'&&p.personId!=='subject').slice(0,5);
+    const success=strategy==='cooperate'||root.WorldSimulation.streamFor(world,year,c.id,'labor-action-'+strategy).next()<choice.odds;
+    const before=c.annualSalary;let peersRaised=0,attention=0,unrest=0;
+    const grant=(contract,rate,min)=>{const old=contract.annualSalary;es.adjustSalary(world,contract.id,Math.min(5000000,old+Math.max(min,Math.round(old*rate))),'labor_'+strategy,year);return contract.annualSalary>old;};
+    if(strategy==='petition'){
+      if(success){grant(c,.075,60);c.workplace.stress=round4(clamp(c.workplace.stress-.045,0,1));}
+      else c.workplace.stress=round4(clamp(c.workplace.stress+.055,0,1));
+    }else if(strategy==='organize'){
+      if(success){grant(c,.05,45);peers.forEach(p=>{if(grant(p,.05,45))peersRaised++;});c.workplace.stress=round4(clamp(c.workplace.stress-.065,0,1));unrest=-.025;}
+      else{c.workplace.stress=round4(clamp(c.workplace.stress+.10,0,1));unrest=.07;attention=8;}
+    }else c.workplace.stress=round4(clamp(c.workplace.stress-.12,0,1));
+    if(unrest&&root.WorldSimulation.applyUnrestShock)root.WorldSimulation.applyUnrestShock(world,b.settlementId,unrest);
+    if(attention&&opts.subject)opts.subject.scrutiny=clamp((Number(opts.subject.scrutiny)||0)+attention,0,100);
+    const other=strategy==='organize'?(peers[0]&&peers[0].personId):(b.ownerNpcId&&b.ownerNpcId!=='subject'?b.ownerNpcId:(peers[0]&&peers[0].personId));
+    if(other&&root.RelationshipMemory)root.RelationshipMemory.add(world,{year,type:'labor_bargaining',participants:['subject',other],
+      intensity:.7,valence:strategy==='cooperate'?.3:success?.6:-.6,decay:.025,summary:'Labor negotiations at '+businessName(b)+': '+strategy, tags:['workplace','labor']});
+    c.history.push({type:'labor_dispute',year,strategy,success,salaryBefore:before,salaryAfter:c.annualSalary,peersRaised});c.history=c.history.slice(-64);
+    const text=strategy==='cooperate'?'Cooperated with management: workplace stress fell, salary unchanged.'
+      :success?'Wage negotiation accepted at '+businessName(b)+'. Your annual pay: 
+    ensure(world);
+    const result={active:0,onLeave:0,averageStress:0,totalIncidents:0,totalStrikes:0,onLeaveBurnout:0,onLeaveMedical:0};
+    if(!root.EmploymentSystem||typeof root.EmploymentSystem.activeForPerson!=='function') return result;
+    let stressSum=0,stressN=0;
+    root.EmploymentSystem.all(world).forEach(contract=>{
+      if(!ACTIVE_STATUSES.has(contract.status)) return;
+      const wp=contract.workplace&&typeof contract.workplace==='object'?contract.workplace:{};
+      if(contract.status==='on_leave'){
+        result.onLeave++;
+        if(wp.leaveKind==='burnout') result.onLeaveBurnout++;
+        else if(wp.leaveKind==='medical') result.onLeaveMedical++;
+      } else {
+        result.active++;
+      }
+      stressSum+=clampUnit(wp.stress,.25); stressN++;
+      result.totalIncidents+=Array.isArray(wp.incidents)?wp.incidents.length:0;
+      result.totalStrikes+=wp.strikes||0;
+    });
+    result.averageStress=stressN?round4(stressSum/stressN):0;
+    return result;
+  }
+
+  function checkInvariants(world){
+    const issues=[];
+    if(!world||typeof world!=='object') return ['world must be an object'];
+    if(typeof world.workplaceSchemaVersion!=='number'||world.workplaceSchemaVersion!==SCHEMA_VERSION) issues.push('workplaceSchemaVersion must be '+SCHEMA_VERSION);
+    const tickYear=world.workplaceLastTickYear;
+    if(tickYear!=null&&(typeof tickYear!=='number'||!Number.isFinite(tickYear)||!Number.isInteger(tickYear)||tickYear<MIN_YEAR||tickYear>MAX_YEAR)){
+      issues.push('workplaceLastTickYear must be null or a bounded integer');
+    }
+    if(root.EmploymentSystem&&typeof root.EmploymentSystem.normalizeWorkplace==='function'&&typeof root.EmploymentSystem.all==='function'){
+      root.EmploymentSystem.all(world).forEach(contract=>{
+        const wp=contract.workplace;
+        if(!wp||typeof wp!=='object'||Array.isArray(wp)){
+          issues.push('employment contract '+contract.id+' is missing its workplace object');
+          return;
+        }
+        const expected=root.EmploymentSystem.normalizeWorkplace(wp);
+        if(JSON.stringify(expected)!==JSON.stringify(wp)){
+          issues.push('employment contract '+contract.id+' workplace object is not in normalized form');
+        }
+        if(ACTIVE_STATUSES.has(contract.status)&&wp.lastTickYear!=null&&world.workplaceLastTickYear!=null&&wp.lastTickYear>world.workplaceLastTickYear){
+          issues.push('employment contract '+contract.id+' workplace lastTickYear is ahead of the world tick year');
+        }
+      });
+    }
+    return issues;
+  }
+
+  root.WorkplaceSystem={
+    SCHEMA_VERSION,
+    SUBSYSTEM,
+    STRESS_HIGH_THRESHOLD,
+    LEAVE_ENTER_STRESS,
+    LEAVE_EXIT_STRESS,
+    HIGH_STRESS_YEARS_REQUIRED,
+    MEDICAL_LEAVE_MAX_YEARS,
+    SECTOR_SAFETY_RISK,
+    INCIDENT_KINDS,
+    MAX_ROSTER_PEERS,
+    ensure,
+    migrate,
+    rosterFor,
+    tickWorld,
+    summary,
+    laborSituation,resolveLaborAction,
+    checkInvariants
+  };
+})(typeof globalThis!=='undefined'?globalThis:this);
++before+' → 
+    ensure(world);
+    const result={active:0,onLeave:0,averageStress:0,totalIncidents:0,totalStrikes:0,onLeaveBurnout:0,onLeaveMedical:0};
+    if(!root.EmploymentSystem||typeof root.EmploymentSystem.activeForPerson!=='function') return result;
+    let stressSum=0,stressN=0;
+    root.EmploymentSystem.all(world).forEach(contract=>{
+      if(!ACTIVE_STATUSES.has(contract.status)) return;
+      const wp=contract.workplace&&typeof contract.workplace==='object'?contract.workplace:{};
+      if(contract.status==='on_leave'){
+        result.onLeave++;
+        if(wp.leaveKind==='burnout') result.onLeaveBurnout++;
+        else if(wp.leaveKind==='medical') result.onLeaveMedical++;
+      } else {
+        result.active++;
+      }
+      stressSum+=clampUnit(wp.stress,.25); stressN++;
+      result.totalIncidents+=Array.isArray(wp.incidents)?wp.incidents.length:0;
+      result.totalStrikes+=wp.strikes||0;
+    });
+    result.averageStress=stressN?round4(stressSum/stressN):0;
+    return result;
+  }
+
+  function checkInvariants(world){
+    const issues=[];
+    if(!world||typeof world!=='object') return ['world must be an object'];
+    if(typeof world.workplaceSchemaVersion!=='number'||world.workplaceSchemaVersion!==SCHEMA_VERSION) issues.push('workplaceSchemaVersion must be '+SCHEMA_VERSION);
+    const tickYear=world.workplaceLastTickYear;
+    if(tickYear!=null&&(typeof tickYear!=='number'||!Number.isFinite(tickYear)||!Number.isInteger(tickYear)||tickYear<MIN_YEAR||tickYear>MAX_YEAR)){
+      issues.push('workplaceLastTickYear must be null or a bounded integer');
+    }
+    if(root.EmploymentSystem&&typeof root.EmploymentSystem.normalizeWorkplace==='function'&&typeof root.EmploymentSystem.all==='function'){
+      root.EmploymentSystem.all(world).forEach(contract=>{
+        const wp=contract.workplace;
+        if(!wp||typeof wp!=='object'||Array.isArray(wp)){
+          issues.push('employment contract '+contract.id+' is missing its workplace object');
+          return;
+        }
+        const expected=root.EmploymentSystem.normalizeWorkplace(wp);
+        if(JSON.stringify(expected)!==JSON.stringify(wp)){
+          issues.push('employment contract '+contract.id+' workplace object is not in normalized form');
+        }
+        if(ACTIVE_STATUSES.has(contract.status)&&wp.lastTickYear!=null&&world.workplaceLastTickYear!=null&&wp.lastTickYear>world.workplaceLastTickYear){
+          issues.push('employment contract '+contract.id+' workplace lastTickYear is ahead of the world tick year');
+        }
+      });
+    }
+    return issues;
+  }
+
+  root.WorkplaceSystem={
+    SCHEMA_VERSION,
+    SUBSYSTEM,
+    STRESS_HIGH_THRESHOLD,
+    LEAVE_ENTER_STRESS,
+    LEAVE_EXIT_STRESS,
+    HIGH_STRESS_YEARS_REQUIRED,
+    MEDICAL_LEAVE_MAX_YEARS,
+    SECTOR_SAFETY_RISK,
+    INCIDENT_KINDS,
+    MAX_ROSTER_PEERS,
+    ensure,
+    migrate,
+    rosterFor,
+    tickWorld,
+    summary,
+    checkInvariants
+  };
+})(typeof globalThis!=='undefined'?globalThis:this);
++c.annualSalary+
+        (strategy==='organize'?'; '+peersRaised+' coworkers received raises.':'')+' Employer payroll will reflect the change next year.'
+      :strategy==='organize'?'Collective demand rejected. Stress, public unrest, and Bureau scrutiny rose.':'Individual raise refused. Workplace stress rose.';
+    return {ok:true,strategy,success,peersRaised,attention,unrest,salaryBefore:before,salaryAfter:c.annualSalary,text,fx:{happiness:strategy==='cooperate'?2:success?4:-4}};
+  }
+
   function summary(world,options){
     ensure(world);
     const result={active:0,onLeave:0,averageStress:0,totalIncidents:0,totalStrikes:0,onLeaveBurnout:0,onLeaveMedical:0};
