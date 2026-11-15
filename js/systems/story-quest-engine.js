@@ -113,6 +113,14 @@
   }
   return out;
  };
+ const nativeTick=story.tickWorld;
+ story.tickWorld=function(world,options){
+  const opts=options||{};
+  // A player-committed quest must not be silently auto-played by fast-forward.
+  const run=story.liveRun(world);
+  if(run&&run.quest&&opts.autoResolve)return nativeTick(world,Object.assign({},opts,{autoResolve:false}));
+  return nativeTick(world,opts);
+ };
  const nativeInvariants=story.checkInvariants;
  story.checkInvariants=function(world){
   const out=nativeInvariants(world);

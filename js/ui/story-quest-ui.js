@@ -18,7 +18,7 @@
   const kit=Object.values(root.World.storyItems||{}).slice(0,15);
   const rpg=root.RPG&&root.RPG.recordFor?root.RPG.recordFor(root.World,'subject'):null;
   let html='<div class="qs-head"><div><small>KARSEN · PERSONAL CHRONICLE</small><h2>YOUR STORIES <span>🎲</span></h2></div><button type="button" class="qs-x" data-qs-close aria-label="Close stories">×</button></div>';
-  html+='<div class="qs-stats"><span>⚔️ GRADE <b>'+ (rpg?rpg.grade:'I')+'</b></span><span>✦ MERIT <b>'+(rpg?rpg.merit:0)+'</b></span><span>📜 STORIES <b>'+archive.length+'</b></span></div>';
+  html+='<div class="qs-stats"><span>⚔️ GRADE <b>'+ (rpg&&root.RPG.roman?root.RPG.roman(rpg.grade):'I')+'</b></span><span>✦ MERIT <b>'+(rpg?rpg.merit:0)+'</b></span><span>📜 STORIES <b>'+archive.length+'</b></span></div>';
   if(live){
     html+='<button class="qs-current" data-qs-resume type="button"><span class="qs-live-glyph">🎭</span><span><small>IN PROGRESS</small><strong>'+esc(live.title)+'</strong></span><b>CONTINUE ▸</b></button>';
   }
