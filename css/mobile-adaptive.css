@@ -1,0 +1,259 @@
+/* Life File: adaptive frontend across Android phones, foldables and desktop.
+ * This stylesheet is loaded AFTER style.css because its later desktop rules
+ * previously overrode the mobile breakpoint for the dossier/world briefing.
+ * No global clipping workaround: each component gets a real fluid layout. */
+
+html,body{max-inline-size:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+.desk,.coverwrap,.dossier,.spread,.page,.page-left,.page-right,
+.dhead,.dtop,.world-brief,#inventory,.lv-ledger,.idgrid,.idfields,
+.kinsplit,.kincol,.barinner,.advrow,.plansheet,.map-sheet,.story-sheet{
+  min-inline-size:0;
+}
+.desk,.coverwrap,.dossier,.spread,.page,.world-brief,.barinner{max-inline-size:100%}
+.dossier,.spread,.page,.world-brief,.wb-main,.wb-metrics,
+.lv-finance-grid,.lv-world-grid,.focus-signal-grid,.focus-choice-grid,
+.map-strategy-selection,.map-city-stats,.map-route-metrics,
+.strategy-grid,.subject-grid,.kinsplit,.idgrid,.idfields{
+  min-inline-size:0;
+}
+.dossier :is(.fval,.kinrow .kr-n,.dintent b,.qitem,.yr-entry,.story-sheet p,
+ .wb-place,.lv-home-meta,.map-selection-copy,.map-route-stops,
+ .map-route-intel,.focus-work,.strategy-option,.plan-completed,.frow){
+  overflow-wrap:anywhere;
+}
+.dossier .fval,.dossier .idfields,.dossier .kincol{min-width:0}
+.plansheet,.slipcard,.intentslip,.story-sheet,.map-sheet{
+  max-inline-size:100%;
+  overflow-wrap:anywhere;
+}
+.plansheet :is(.ps-head,.strategy-heading,.story-title,.is-head,.ps-sub){
+  min-width:0;
+}
+.plansheet :is(.ps-head,.strategy-heading,.ps-sub){flex-wrap:wrap}
+svg,canvas,img{max-inline-size:100%}
+
+/* A brief inside a narrow dossier column should not inherit desktop tracks. */
+.world-brief{container-type:inline-size}
+.lv-ledger{container-type:inline-size}
+@container (max-width:640px){
+  .wb-main{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+  .wb-lead{border-right:0;border-bottom:1px solid rgba(78,62,32,.28);
+    padding:1px 0 10px;min-width:0}
+  .wb-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .wb-metric{min-width:0}
+}
+@container (max-width:360px){
+  .wb-metric strong{font-size:clamp(16px,5cqw,22px);line-height:1.2;
+    overflow-wrap:normal;word-break:normal;letter-spacing:0}
+  .wb-metric>span{font-size:9px;letter-spacing:.025em;line-height:1.3}
+  .wb-metric>span .lv-icon{flex-shrink:0}
+  .wb-metric small{font-size:10px}
+  .wb-top{flex-wrap:wrap}
+  .wb-place{white-space:normal}
+}
+@container (max-width:335px){
+  .lv-home-grid,.lv-home-grid:has(.lv-home-card:nth-child(3)){grid-template-columns:minmax(0,1fr)}
+  .lv-finance-grid{grid-template-columns:minmax(0,1fr)}
+  .lv-world-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .lv-gauges{gap:4px}
+  .lv-gauge{min-width:0}
+  .lv-budget-labels{gap:5px 9px}
+}
+
+/* At 900-1050px a split dossier leaves each page too narrow for its forms.
+   A single legible column is preferable, including landscape phones/tablets. */
+@media (min-width:721px) and (max-width:1099px){
+  .spread{grid-template-columns:minmax(0,1fr)!important}
+  .page{padding-inline:38px 24px}
+  .wb-main{grid-template-columns:minmax(180px,.85fr) minmax(0,2fr)}
+}
+
+/* Compact Android/tablet portrait: navigation and the decision bar reflow
+   instead of keeping intrinsic desktop widths and clipping the last tabs. */
+@media (max-width:720px){
+  .desk{width:100%;padding:16px 8px calc(36px + env(safe-area-inset-bottom))}
+  .dossier{width:100%;padding:8px 9px calc(156px + env(safe-area-inset-bottom))}
+  .tabstrip{
+    position:relative;top:auto;left:auto;right:auto;
+    display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+    align-items:stretch;gap:4px;overflow:visible;
+    width:100%;max-width:100%;margin:-14px 0 13px;padding:0;
+    cursor:default;touch-action:auto;
+  }
+  .tabstrip .dtab{
+    min-width:0;min-height:41px;padding:6px 3px 5px;
+    display:flex;align-items:center;justify-content:center;
+    font-size:10px;line-height:1.2;letter-spacing:0;
+    white-space:normal;text-align:center;overflow-wrap:anywhere;
+  }
+  .tabstrip .dtab-file{
+    grid-column:span 2;justify-content:flex-start;padding-inline:10px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    display:block;line-height:29px;font-size:10px;letter-spacing:.04em;
+  }
+  .dhead{padding:0 0 12px;min-width:0}
+  .dtop{position:relative;display:block;padding:22px 0 0}
+  .dtop>div:first-child{width:100%;min-width:0}
+  .dtop .mini{
+    position:absolute;right:2px;top:0;margin:0;padding:1px 6px;
+    font-size:9px;line-height:1.25;transform:rotate(-3deg)
+  }
+  .dtop .kicker{font-size:10px;letter-spacing:.16em;line-height:1.35}
+  .dtop .dtitle{font-size:clamp(24px,7vw,32px);margin:6px 0}
+  .dintent{
+    display:grid;grid-template-columns:minmax(74px,88px) minmax(0,1fr);
+    align-items:start;column-gap:6px;margin:6px 0 0;
+    font-size:12px;line-height:1.38;letter-spacing:0;
+  }
+  .dintent b{min-width:0;line-height:1.38;overflow-wrap:break-word;word-break:normal}
+  .intent-live{white-space:normal;overflow-wrap:normal;font-size:10px}
+  .spread{grid-template-columns:minmax(0,1fr)!important;gap:13px}
+  .page{min-width:0;padding:14px 12px 14px 26px}
+  .page .hole{left:7px}
+  .sec-h{display:flex;align-items:baseline;justify-content:space-between;
+    flex-wrap:wrap;gap:5px;font-size:10px;line-height:1.4}
+  .sec-h span{white-space:normal;letter-spacing:.03em}
+  .idfields{min-width:0;flex:1}
+  .frow{min-width:0;gap:5px}
+  .fval{min-width:0;max-width:100%;text-align:right;overflow-wrap:anywhere}
+  .kinsplit{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+  .wb-main{grid-template-columns:minmax(0,1fr)!important}
+  .wb-lead{border-right:0;border-bottom:1px solid rgba(78,62,32,.28);
+    padding:0 0 10px!important}
+  .wb-metrics{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .wb-metric{min-width:0}
+  .wb-metric strong{overflow-wrap:normal;word-break:normal}
+  .wb-bottom button{min-height:44px}
+  .lv-finance-grid{grid-template-columns:minmax(0,1fr)}
+  .lv-world-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .overlay{max-width:100%;overscroll-behavior:contain}
+  .overlay .plansheet{
+    width:100%;max-width:100%;min-width:0;
+    max-height:100dvh;overflow-y:auto;overflow-x:hidden;
+    overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
+    padding-inline:clamp(10px,3vw,17px);
+  }
+  #planWrap .plansheet{width:100%;max-width:100%;max-height:100dvh}
+  #planWrap .plan-tabs{overflow-x:auto;overscroll-behavior-x:contain;
+    -webkit-overflow-scrolling:touch;scrollbar-width:thin}
+  #planWrap .ptab{flex:0 0 auto;min-height:44px}
+  #planWrap .focus-choice-grid{grid-template-columns:minmax(0,1fr)}
+  #planWrap .focus-signal-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #planWrap .focus-signal:last-child{grid-column:1/-1}
+  #planWrap .focus-signal strong{overflow-wrap:normal;word-break:normal}
+  .strategy-option,.slipbtn,.chipbtn,.lifebtn{min-width:0;max-width:100%}
+  .sliplist,.strategy-grid{grid-template-columns:minmax(0,1fr)}
+  .map-strategy-selection,.map-selection{min-width:0;max-width:100%}
+  /* A city card can be longer than a small phone's height. Keep the map at
+     a usable height and let the map sheet scroll, not the entire viewport. */
+  #mapWrap .map-sheet{
+    width:100%;height:100dvh;min-height:0;max-height:100dvh;
+    overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+  }
+  #mapWrap .map-canvas,#mapWrap .national-map-canvas{
+    flex:0 0 auto!important;height:clamp(205px,37dvh,360px)!important;
+    min-height:205px!important;max-width:100%;
+  }
+  #mapWrap .map-selection,#mapWrap .map-legend{flex:0 0 auto}
+  #mapWrap .map-kicker{flex-wrap:wrap;gap:5px}
+  #mapWrap .map-toolbar{min-width:0;flex-wrap:wrap;gap:6px}
+  #mapWrap .map-route-stops{min-width:0}
+  #mapWrap .map-route-stops span{max-width:100%;overflow-wrap:anywhere}
+  #mapWrap .map-travel-choices{grid-template-columns:repeat(3,minmax(0,1fr))}
+  /* Overlay content should not compete with the permanent bottom bar. */
+  body:has(.overlay:not(.hidden)) .actionbar,
+  body:has(.overlay:not(.hidden)) .recent-record,
+  body:has(.overlay:not(.hidden)) #coachBar,
+  body:has(#coachBar:not(.hidden)) .recent-record{visibility:hidden!important}
+}
+
+/* Small Android phones, including 320px devices. */
+@media (max-width:380px){
+  .desk{padding-inline:6px}
+  .dossier{padding-inline:8px}
+  .tabstrip .dtab{font-size:9px;padding-inline:2px}
+  .tabstrip .dtab-file{font-size:9px;padding-inline:7px}
+  .page{padding-left:22px;padding-right:9px}
+  .photo{width:68px;min-width:68px}
+  .idgrid{gap:7px}
+  .frow .flabel{font-size:8px;white-space:normal;letter-spacing:0}
+  .dintent{grid-template-columns:75px minmax(0,1fr)}
+  .wb-metric{padding:8px 7px}
+  .wb-metric strong{font-size:16px}
+  .lv-world-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .map-route-metrics{gap:3px}
+  #mapWrap .map-city-stats small{font-size:7px}
+}
+
+/* Compact footer, Android safe area and on-screen keyboard resizing. */
+@media (max-width:540px){
+  .actionbar{padding:5px 7px calc(5px + env(safe-area-inset-bottom))}
+  .actionbar .barinner{display:grid;grid-template-columns:minmax(0,1fr);gap:5px}
+  .actionbar .advrow{min-width:0;gap:6px}
+  .actionbar .datestamp{width:41px;height:41px;min-width:41px}
+  .actionbar .datestamp b{font-size:10px}
+  .actionbar .streakbadge{padding:2px 4px}
+  .actionbar .btn-plan{min-width:0;min-height:42px;padding:5px 7px;flex:1}
+  .actionbar .btn-plan b{font-size:clamp(10px,3.4vw,13px);min-width:0;
+    white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+  .actionbar .btn-plan .hpips{flex:0 0 auto}
+  .actionbar .btn-advance{min-width:0;min-height:44px;
+    font-size:clamp(12px,3.6vw,15px);padding:8px 6px;letter-spacing:0;line-height:1.2;
+    white-space:normal}
+  .actionbar #btn-fastforward{
+    flex:0 0 clamp(92px,30vw,124px)!important;
+    font-size:clamp(10px,2.7vw,12px)!important;
+    padding:7px 5px!important;letter-spacing:0!important;
+    white-space:normal;text-overflow:clip;
+  }
+  .actionbar .bar-micro{display:none}
+  body.playing .recent-record{bottom:calc(110px + env(safe-area-inset-bottom));
+    right:7px;width:calc(100vw - 14px);padding:6px 9px;max-height:64px;overflow:hidden}
+  .recent-record-head{font-size:8px}
+  .recent-record-body{font-size:10px;line-height:1.3;min-height:0;max-height:17px}
+  .coachbar{bottom:calc(115px + env(safe-area-inset-bottom));left:7px;right:7px;max-width:none}
+  .dossier{padding-bottom:calc(155px + env(safe-area-inset-bottom))}
+}
+
+/* Landscape Android: maintain scrollable controls with short vertical space. */
+@media (orientation:landscape) and (max-height:540px){
+  .desk{padding-top:14px}
+  .actionbar{padding-top:4px}
+  .actionbar .bar-micro{display:none}
+  .overlay .plansheet{max-height:100dvh}
+  #mapWrap .map-canvas,#mapWrap .national-map-canvas{
+    height:clamp(175px,52dvh,320px)!important;min-height:175px!important
+  }
+}
+
+/* Accessibility: user's OS motion preference applies without JS polling. */
+@media (prefers-reduced-motion:reduce){
+  .tabstrip .dtab,.wb-metric,.actionbar .btn-advance{transition:none}
+}
+/* The legacy sticky decision footer used negative horizontal margins.
+   In a narrow Android sheet this made scrollWidth 4–6 px wider than the
+   viewport even though the browser hid the overflow. */
+@media (max-width:720px){
+  #planWrap .ps-foot.sticky{
+    margin-inline:0!important;
+    max-inline-size:100%;
+    padding-inline:clamp(9px,3vw,16px);
+  }
+}
+
+/* Minimum comfortable touch targets on modern Android devices. */
+@media (max-width:720px){
+  .tabstrip .dtab{min-height:44px}
+  #mapWrap .map-controls .map-ctl{min-width:42px;min-height:44px}
+  .overlay .ps-close{min-width:42px;min-height:42px;display:inline-flex;
+    align-items:center;justify-content:center;flex:none}
+}
+
+/* Large dynasty fortunes and unusually long NPC names must wrap only when
+   they genuinely exceed the available card width. Ordinary values stay whole. */
+@media (max-width:720px){
+  .wb-metric strong,#planWrap .focus-signal strong,
+  .lv-budget-top strong,.map-city-stats b{overflow-wrap:anywhere!important;word-break:normal}
+  .tabstrip .dtab-file{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+}
