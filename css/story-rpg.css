@@ -150,3 +150,5 @@
 .qs-eval-save:hover,.qs-eval-save:focus-visible{outline:2px solid #ac8243;outline-offset:1px}
 
 .qs-eval-scale{margin:0 0 8px;font:800 9px Archivo,sans-serif;letter-spacing:.02em;color:#7a6449}
+
+.qs-kit .qs-gear-bonus{font:800 9px Archivo,sans-serif;border-radius:20px;padding:3px 6px;background:#385d56;color:#fff5d8;letter-spacing:.035em}
