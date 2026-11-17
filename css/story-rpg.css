@@ -106,3 +106,47 @@
  .arcade-tile{min-height:114px;padding:9px}}
 @media(max-width:360px){.arcade-name{font-size:11px}.arcade-odds{font-size:8px}}
 @media(prefers-reduced-motion:reduce){.arcade-tile{transition:none!important}}
+
+/* Phase 4 formative playtest: compact, voluntary, anonymous and touch-friendly. */
+.qs-pt-bar{display:flex;align-items:center;gap:10px;margin:-5px 0 12px}
+.qs-pt-bar button{font:800 10px Archivo,sans-serif;letter-spacing:.065em;padding:7px 13px;
+ border:1px solid #a88a53;border-radius:22px;color:#473720;background:#f6e4bd;cursor:pointer}
+.qs-pt-bar button:hover,.qs-pt-bar button:focus-visible{background:#eed2a0;outline-offset:2px}
+.qs-pt-bar small{font:700 9px Archivo,sans-serif;letter-spacing:.065em;color:#7c6b53}
+.qs-eval{max-width:100%;min-width:0;padding:13px;border:1px solid #c6ae7b;
+ border-radius:14px;background:#fff8e8;color:#3b2e24;margin:6px 0 15px}
+.qs-eval-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.qs-eval-metric{min-width:0;text-align:center;padding:9px 5px;border-radius:9px;
+ background:#f2e4c8;display:flex;flex-direction:column;gap:4px}
+.qs-eval-metric b{font:900 21px Archivo,sans-serif;color:#65451e}
+.qs-eval-metric small{font:700 9px Archivo,sans-serif;letter-spacing:.04em}
+.qs-eval-privacy,.qs-eval-warn{display:block;margin:9px 0;font:800 9px/1.35 Archivo,sans-serif;
+ letter-spacing:.035em;color:#7c6246}
+.qs-eval-row{display:flex;align-items:center;justify-content:space-between;gap:11px;
+ padding:8px 0;border-top:1px solid #e8d6b4}
+.qs-eval-row>div:first-child{min-width:0;display:flex;flex-direction:column;gap:3px}
+.qs-eval-row strong{font:800 11px Archivo,sans-serif;letter-spacing:.055em}
+.qs-eval-row small{font:11px/1.25 Archivo,sans-serif;color:#655746}
+.qs-eval-numbers{display:grid;grid-template-columns:repeat(5,minmax(32px,1fr));gap:5px;flex:none}
+.qs-eval-numbers button{width:34px;height:34px;display:grid;place-items:center;
+ border:1px solid #bca37b;border-radius:8px;background:#faf0d9;color:#5c4a2f;
+ font:900 13px Archivo,sans-serif;cursor:pointer}
+.qs-eval-numbers button[aria-pressed="true"]{background:#345b58;color:#fff2d9;border-color:#345b58;
+ box-shadow:inset 0 0 0 1px #e1d3b8}
+.qs-eval-numbers button:hover,.qs-eval-numbers button:focus-visible{outline:2px solid #ac8243;outline-offset:1px}
+.qs-eval-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:11px}
+.qs-eval-actions button{font:800 10px Archivo,sans-serif;padding:9px 13px;border-radius:9px;cursor:pointer}
+.qs-eval-copy{background:#374d49;color:#ffefcf;border:1px solid #374d49}
+.qs-eval-reset{background:transparent;color:#665037;border:1px solid #c1a77b}
+.qs-eval-copy-status{font:800 10px Archivo,sans-serif;color:#305b4d;min-height:13px;display:block;margin-top:7px}
+@media(max-width:440px){.qs-eval-row{align-items:flex-start;flex-direction:column;gap:6px}
+ .qs-eval-numbers{width:100%;grid-template-columns:repeat(5,minmax(0,1fr))}
+ .qs-eval-numbers button{width:100%;height:36px}}
+@media(prefers-reduced-motion:reduce){.qs-eval *,.qs-pt-bar *{animation:none!important;transition:none!important}}
+
+.qs-eval-save{display:inline-flex;align-items:center;justify-content:center;font:800 10px Archivo,sans-serif;
+ padding:9px 13px;border-radius:9px;background:#f2dfb6;color:#4e3a20;border:1px solid #bca074;
+ text-decoration:none;cursor:pointer}
+.qs-eval-save:hover,.qs-eval-save:focus-visible{outline:2px solid #ac8243;outline-offset:1px}
+
+.qs-eval-scale{margin:0 0 8px;font:800 9px Archivo,sans-serif;letter-spacing:.02em;color:#7a6449}

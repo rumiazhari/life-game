@@ -1,0 +1,197 @@
+{
+  "schema": "life-file-rpg-audit-v1",
+  "provenance": "deterministic_simulation_not_human_playtesting",
+  "authored": {
+    "questCount": 12,
+    "safeOpenings": 12,
+    "unsafeOpenings": [],
+    "brokenEdges": [],
+    "cycles": [],
+    "buildFailures": [],
+    "authoredChoices": 69,
+    "byQuest": [
+      {
+        "id": "quest_wage_file",
+        "arc": "WORK",
+        "firstChoices": 4,
+        "safeFirstChoices": 1,
+        "sceneCount": 10,
+        "authoredOptions": 14,
+        "reachableEndings": 4,
+        "minDecisions": 1,
+        "maxDecisions": 2,
+        "meanAuthoredDecisions": 1.95
+      },
+      {
+        "id": "quest_wage_aftermath",
+        "arc": "WORK",
+        "firstChoices": 3,
+        "safeFirstChoices": 1,
+        "sceneCount": 4,
+        "authoredOptions": 3,
+        "reachableEndings": 3,
+        "minDecisions": 1,
+        "maxDecisions": 1,
+        "meanAuthoredDecisions": 1
+      },
+      {
+        "id": "quest_kitchen_table",
+        "arc": "FAMILY",
+        "firstChoices": 4,
+        "safeFirstChoices": 1,
+        "sceneCount": 5,
+        "authoredOptions": 4,
+        "reachableEndings": 4,
+        "minDecisions": 1,
+        "maxDecisions": 1,
+        "meanAuthoredDecisions": 1
+      },
+      {
+        "id": "quest_kitchen_return",
+        "arc": "FAMILY",
+        "firstChoices": 3,
+        "safeFirstChoices": 1,
+        "sceneCount": 4,
+        "authoredOptions": 3,
+        "reachableEndings": 3,
+        "minDecisions": 1,
+        "maxDecisions": 1,
+        "meanAuthoredDecisions": 1
+      },
+      {
+        "id": "quest_ward_petition",
+        "arc": "BUREAU",
+        "firstChoices": 4,
+        "safeFirstChoices": 1,
+        "sceneCount": 7,
+        "authoredOptions": 8,
+        "reachableEndings": 4,
+        "minDecisions": 1,
+        "maxDecisions": 2,
+        "meanAuthoredDecisions": 1.55
+      },
+      {
+        "id": "quest_ward_return",
+        "arc": "BUREAU",
+        "firstChoices": 3,
+        "safeFirstChoices": 1,
+        "sceneCount": 5,
+        "authoredOptions": 3,
+        "reachableEndings": 4,
+        "minDecisions": 1,
+        "maxDecisions": 1,
+        "meanAuthoredDecisions": 1
+      },
+      {
+        "id": "quest_school_press",
+        "arc": "SCHOOL",
+        "firstChoices": 4,
+        "safeFirstChoices": 1,
+        "sceneCount": 7,
+        "authoredOptions": 6,
+        "reachableEndings": 5,
+        "minDecisions": 1,
+        "maxDecisions": 2,
+        "meanAuthoredDecisions": 1.55
+      },
+      {
+        "id": "quest_night_market",
+        "arc": "TRADE",
+        "firstChoices": 4,
+        "safeFirstChoices": 1,
+        "sceneCount": 8,
+        "authoredOptions": 7,
+        "reachableEndings": 6,
+        "minDecisions": 1,
+        "maxDecisions": 2,
+        "meanAuthoredDecisions": 1.5
+      },
+      {
+        "id": "quest_reference_file",
+        "arc": "CAREER",
+        "firstChoices": 3,
+        "safeFirstChoices": 1,
+        "sceneCount": 9,
+        "authoredOptions": 9,
+        "reachableEndings": 5,
+        "minDecisions": 1,
+        "maxDecisions": 3,
+        "meanAuthoredDecisions": 2.29
+      },
+      {
+        "id": "quest_reference_return",
+        "arc": "CAREER",
+        "firstChoices": 3,
+        "safeFirstChoices": 1,
+        "sceneCount": 5,
+        "authoredOptions": 3,
+        "reachableEndings": 4,
+        "minDecisions": 1,
+        "maxDecisions": 1,
+        "meanAuthoredDecisions": 1
+      },
+      {
+        "id": "quest_grey_manifest",
+        "arc": "UNDERWORLD",
+        "firstChoices": 4,
+        "safeFirstChoices": 1,
+        "sceneCount": 6,
+        "authoredOptions": 6,
+        "reachableEndings": 4,
+        "minDecisions": 1,
+        "maxDecisions": 2,
+        "meanAuthoredDecisions": 1.38
+      },
+      {
+        "id": "quest_grey_witness",
+        "arc": "UNDERWORLD",
+        "firstChoices": 3,
+        "safeFirstChoices": 1,
+        "sceneCount": 5,
+        "authoredOptions": 3,
+        "reachableEndings": 4,
+        "minDecisions": 1,
+        "maxDecisions": 1,
+        "meanAuthoredDecisions": 1
+      }
+    ]
+  },
+  "odds": [
+    {
+      "difficulty": "easy",
+      "tn": 7,
+      "percent": 91,
+      "successes": 196,
+      "outcomes": 216,
+      "empiricalPercent": 91,
+      "samples": 1200
+    },
+    {
+      "difficulty": "standard",
+      "tn": 9,
+      "percent": 74,
+      "successes": 160,
+      "outcomes": 216,
+      "empiricalPercent": 73,
+      "samples": 1200
+    },
+    {
+      "difficulty": "hard",
+      "tn": 11,
+      "percent": 50,
+      "successes": 108,
+      "outcomes": 216,
+      "empiricalPercent": 49,
+      "samples": 1200
+    },
+    {
+      "difficulty": "severe",
+      "tn": 13,
+      "percent": 26,
+      "successes": 56,
+      "outcomes": 216,
+      "empiricalPercent": 23,
+      "samples": 1200
+    }
+  ]
+}
