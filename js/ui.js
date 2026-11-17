@@ -3356,6 +3356,10 @@ function openStorySlip(force){
   const echo=(typeof StorySystem.echoLineFor==='function')?StorySystem.echoLineFor(World):null;
   let html='<div class="sl-head story"><span>KARSEN FILES</span><span class="sl-req">'+String(view.domain||'life').toUpperCase()+(view.sceneNo?' · SCENE '+view.sceneNo:'')+' · YEAR '+S.age+'</span></div>';
   html+='<div class="vn-titlebar">'+fill(view.title||'AN EPISODE')+'</div>';
+  if(typeof LifeFileSave==='object'&&LifeFileSave){
+   html+='<div class="vn-savebar"><button type="button" data-vn="backup" class="vn-save-btn"'+
+    ' aria-label="Export current life file without leaving story">⇩ SAVE FILE</button></div>';
+  }
    if(typeof RPGVisual==='object'&&RPGVisual)html+=RPGVisual.beatMarker(StorySystem.liveRun(World),view);
   if(view.type==='ending'){
     const e=view.ending;
@@ -3405,7 +3409,8 @@ function openStorySlip(force){
   card.onclick=e=>{
     const nx=e.target.closest('[data-vn]');
     if(nx){
-      if(nx.dataset.vn==='file'){ closeStorySlip(); return; }
+      if(nx.dataset.vn==='backup'){if(typeof window.exportLifeFileBackup==='function')window.exportLifeFileBackup();return;}
+       if(nx.dataset.vn==='file'){ closeStorySlip(); return; }
       const v2=StorySystem.next(World,{year:World.year,subject:S,lineage:Lineage});
       snd(v2&&v2.type==='choice'?'paper':'tick');
       openStorySlip(true); updateBar(); return;

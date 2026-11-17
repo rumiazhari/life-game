@@ -7,7 +7,7 @@
  const gameWorld=()=>typeof World!=='undefined'?World:null;
  const lineage=()=>typeof Lineage!=='undefined'?Lineage:null;
  const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
- let playtestOpen=false,copyStatus='';
+ let playtestOpen=false,copyStatus='',saveStatus='';
  const artFor=arc=>({WORK:'factory_floor',FAMILY:'night_flat',BUREAU:'office',SCHOOL:'schoolyard',TRADE:'dock_night',CAREER:'factory_floor',UNDERWORLD:'dock_night'})[arc]||'street';
  function closeBoard(){const w=el('storyWrap');if(w)w.classList.add('hidden');}
  function playtestOptions(leads){
@@ -60,6 +60,42 @@
    });
   }catch(_){copyStatus='COPY FAILED';renderBoard();}
  }
+ function exportSaveFile(){
+  if(!root.LifeFileSave)return;
+  const data=root.LifeFileSave.encode({world:gameWorld(),subject:player(),lineage:lineage(),
+   hold:typeof Hold!=='undefined'?Hold:null,
+   followups:typeof followups!=='undefined'?followups:[]});
+  if(!data.ok){saveStatus='EXPORT REJECTED · '+data.reason;renderBoard();return;}
+  if(typeof Blob==='undefined'||typeof URL==='undefined'||typeof URL.createObjectURL!=='function'){
+   saveStatus='BROWSER DOWNLOAD UNAVAILABLE';renderBoard();return;
+  }
+  let url=null;
+  try{
+   url=URL.createObjectURL(new Blob([data.text],{type:'application/json;charset=utf-8'}));
+   const link=document.createElement('a');
+   link.href=url;link.download='life-file-'+String(gameWorld().year)+'.json';
+   link.style.display='none';document.body.appendChild(link);link.click();link.remove();
+   saveStatus='SAVE FILE PREPARED · '+Math.ceil(data.bytes/1024)+' KB';
+  }catch(_){saveStatus='DOWNLOAD FAILED';}
+  if(url)setTimeout(()=>{try{URL.revokeObjectURL(url);}catch(_){}},2500);
+  renderBoard();
+ }
+ async function importSaveFile(file){
+  if(!file)return;
+  if(!root.LifeFileSave||typeof root.restoreLifeFileSnapshot!=='function'){
+   saveStatus='IMPORT UNAVAILABLE';renderBoard();return;
+  }
+  if(file.size>root.LifeFileSave.MAX_BYTES){
+   saveStatus='IMPORT REJECTED · TOO LARGE';renderBoard();return;
+  }
+  try{
+   const text=await file.text();
+   const outcome=root.restoreLifeFileSnapshot(text);
+   saveStatus=outcome&&outcome.ok?'FILE RESTORED · YEAR '+outcome.year:
+    'IMPORT REJECTED · '+String(outcome&&outcome.reason||'invalid_file');
+  }catch(_){saveStatus='IMPORT REJECTED · READ ERROR';}
+  renderBoard();
+ }
  function renderBoard(){
   const sheet=el('storySheet');if(!sheet)return;
   if(typeof root.StorySystem!=='object'||!gameWorld()||!player()){
@@ -76,6 +112,14 @@
   const rpg=root.RPG&&root.RPG.recordFor?root.RPG.recordFor(gameWorld(),'subject'):null;
   let html='<div class="qs-head"><div><small>KARSEN · PERSONAL CHRONICLE</small><h2>YOUR STORIES <span>🎲</span></h2></div><button type="button" class="qs-x" data-qs-close aria-label="Close stories">×</button></div>';
   html+='<div class="qs-stats"><span>⚔️ GRADE <b>'+ (rpg&&root.RPG.roman?root.RPG.roman(rpg.grade):'I')+'</b></span><span>✦ MERIT <b>'+(rpg?rpg.merit:0)+'</b></span><span>📜 STORIES <b>'+archive.length+'</b></span></div>';
+   if(root.LifeFileSave){
+    html+='<section class="qs-save-panel" aria-label="Manual local game backup">'+
+     '<div class="qs-save-heading"><strong>ACTIVE LIFE FILE</strong><small>LOCAL BACKUP · NOT ENCRYPTED</small></div>'+
+     '<div class="qs-save-actions"><button type="button" data-qs-save-export>⇩ EXPORT SAVE</button>'+
+     '<button type="button" data-qs-save-import>⇧ IMPORT SAVE</button>'+
+     '<input type="file" id="qs-save-import-input" data-qs-save-input accept="application/json,.json" hidden>'+
+     '</div><small class="qs-save-status" role="status">'+esc(saveStatus)+'</small></section>';
+   }
   if(root.RPGPlaytest){
     html+='<div class="qs-pt-bar"><button type="button" data-qs-pt-toggle aria-expanded="'+
      (playtestOpen?'true':'false')+'">◉ PLAYTEST</button>'+
@@ -133,6 +177,10 @@
  if(wrap)wrap.addEventListener('click',e=>{if(e.target===wrap)closeBoard();});
  if(sheet)sheet.addEventListener('click',e=>{
   if(e.target.closest('[data-qs-close]')){closeBoard();return;}
+   if(e.target.closest('[data-qs-save-export]')){exportSaveFile();return;}
+   if(e.target.closest('[data-qs-save-import]')){
+    const chosen=el('qs-save-import-input');if(chosen)chosen.click();return;
+   }
   if(e.target.closest('[data-qs-pt-toggle]')){
    playtestOpen=!playtestOpen;copyStatus='';renderBoard();return;
   }
@@ -160,6 +208,13 @@
   closeBoard();
   if(typeof root.openStorySlip==='function')root.openStorySlip(true);
  });
+  if(sheet)sheet.addEventListener('change',e=>{
+   const input=e.target&&e.target.closest&&e.target.closest('[data-qs-save-input]');
+   if(!input||!input.files||!input.files.length)return;
+   const file=input.files[0];input.value='';
+   void importSaveFile(file);
+  });
+ root.exportLifeFileBackup=exportSaveFile;
  root.openStoryBoard=openBoard;
  root.renderStoryBoard=renderBoard;
 })(typeof globalThis!=='undefined'?globalThis:this);
