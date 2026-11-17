@@ -134,3 +134,92 @@ test('playtest helper is loaded after StorySystem and before the Stories UI with
  assert.ok(html.indexOf(engine)<html.indexOf(helper));
  assert.ok(html.indexOf(helper)<html.indexOf(ui));
 });
+
+function browserBoard(seed='phase4-board'){
+ const ctx=createWorldContext(),nodes={};
+ const elem=()=>({
+  classList:{add(){},remove(){},toggle(){},contains(){return false;}},
+  style:{},dataset:{},innerHTML:'',textContent:'',disabled:false,handlers:{},
+  addEventListener(t,cb){this.handlers[t]=cb;},removeEventListener(){},
+  appendChild(){},remove(){},focus(){},setAttribute(){},
+  querySelector(){return null;},querySelectorAll(){return [];},closest(){return null;}
+ });
+ ctx.document={
+  querySelector(k){return nodes[k]||(nodes[k]=elem());},
+  querySelectorAll(){return [];},
+  getElementById(k){return nodes['#'+k]||(nodes['#'+k]=elem());},
+  createElement(){return elem();},
+  addEventListener(){},body:elem(),documentElement:elem()
+ };
+ ctx.addEventListener=()=>{};ctx.setTimeout=()=>0;ctx.clearTimeout=()=>{};
+ ctx.setInterval=()=>0;ctx.clearInterval=()=>{};
+ loadGameFiles(ctx,['js/systems/story-quests.js','js/systems/story-consequence-arcs.js',
+  'js/systems/story-rpg-checks.js','js/systems/story-quest-engine.js',modulePath,
+  'js/systems/world-gameplay.js','js/medical.js','js/ui.js','js/ui/story-quest-ui.js']);
+ expose(ctx,"Random.setSeed("+JSON.stringify(seed)+");newWorld();newLineage();newHold();newSubject();"+
+  "S.age=28;S.alive=true;S.mother.alive=true;S.health=80;S.assets=700;S.jailUntil=0;"+
+  "World.year=S.dob+S.age;StorySystem.ensure(World);RPG.recordFor(World,'subject');");
+ return {ctx,nodes};
+}
+function sendSheetClick(ctx,attribute,dataset){
+ const key=JSON.stringify(attribute);
+ return expose(ctx,"document.getElementById('storySheet').handlers.click({target:{closest:function(sel){"+
+  "return sel==="+key+"?{disabled:false,dataset:"+JSON.stringify(dataset)+"}:null;}}});");
+}
+test('optional Stories playtest panel is collapsed by default and shows three brief, unvalidated questions',()=>{
+ const {ctx}=browserBoard();
+ const out=run(ctx,"const before=JSON.stringify(World);renderStoryBoard();"+
+  "const collapsed=document.getElementById('storySheet').innerHTML;"+
+  "return {collapsed,changed:JSON.stringify(World)!==before};");
+ assert.equal(out.changed,false);
+ assert.match(out.collapsed,/data-qs-pt-toggle/);
+ assert.doesNotMatch(out.collapsed,/data-qs-rate=/);
+ sendSheetClick(ctx,'[data-qs-pt-toggle]',{});
+ const html=expose(ctx,"document.getElementById('storySheet').innerHTML");
+ assert.match(html,/PLAYTEST/);
+ assert.match(html,/UNVALIDATED|FORMATIVE/);
+ assert.match(html,/PAGE MEMORY ONLY/);
+ assert.equal((html.match(/data-qs-rate=/g)||[]).length,15);
+ assert.match(html,/data-qs-pt-copy/);
+});
+test('one-tap playtest rating is reversible and never changes world or the saved player',()=>{
+ const {ctx}=browserBoard('phase4-rating-ui');
+ expose(ctx,'renderStoryBoard()');
+ sendSheetClick(ctx,'[data-qs-pt-toggle]',{});
+ const first=run(ctx,"const before=JSON.stringify(World);"+
+  "document.getElementById('storySheet').handlers.click({target:{closest(sel){"+
+  "return sel==='[data-qs-rate]'?{dataset:{qsRate:'agency',qsValue:'4'}}:null;}}});"+
+  "return {ratings:RPGPlaytest.ratings(),changed:JSON.stringify(World)!==before,"+
+  "html:document.getElementById('storySheet').innerHTML};");
+ assert.equal(first.changed,false);
+ assert.equal(first.ratings.agency,4);
+ assert.match(first.html,/data-qs-rate="agency" data-qs-value="4" aria-pressed="true"/);
+ sendSheetClick(ctx,'[data-qs-pt-reset]',{});
+ assert.deepEqual(run(ctx,"return RPGPlaytest.ratings()"),{enjoyment:null,agency:null,clarity:null});
+});
+test('user-directed Copy report exports sanitized JSON and never claims success before clipboard resolves',async()=>{
+ const {ctx}=browserBoard('phase4-clipboard');
+ let copied='',resolve;
+ ctx.navigator.clipboard={writeText(str){copied=str;return new Promise(r=>{resolve=r;});}};
+ expose(ctx,"S.name='DONT_EXPORT_NAME';S.partner='DONT_EXPORT_SPOUSE';World.seed='DONT_EXPORT_SEED';renderStoryBoard()");
+ sendSheetClick(ctx,'[data-qs-pt-toggle]',{});
+ sendSheetClick(ctx,'[data-qs-rate]',{qsRate:'clarity',qsValue:'5'});
+ sendSheetClick(ctx,'[data-qs-pt-copy]',{});
+ assert.match(copied,/"clarity": 5/);
+ assert.doesNotMatch(copied,/DONT_EXPORT/);
+ assert.doesNotMatch(expose(ctx,"document.getElementById('storySheet').innerHTML"),/REPORT COPIED/);
+ resolve();
+ await new Promise(setImmediate);
+ assert.match(expose(ctx,"document.getElementById('storySheet').innerHTML"),/REPORT COPIED/);
+});
+test('clipboard refusal shows COPY FAILED instead of a false success status',async()=>{
+ const {ctx}=browserBoard('phase4-copy-error');
+ ctx.navigator.clipboard={writeText(){return Promise.reject(new Error('denied'));}};
+ expose(ctx,'renderStoryBoard()');
+ sendSheetClick(ctx,'[data-qs-pt-toggle]',{});
+ sendSheetClick(ctx,'[data-qs-pt-copy]',{});
+ await new Promise(setImmediate);
+ const html=expose(ctx,"document.getElementById('storySheet').innerHTML");
+ assert.match(html,/COPY FAILED/);
+ assert.doesNotMatch(html,/REPORT COPIED/);
+});
