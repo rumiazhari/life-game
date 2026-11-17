@@ -140,7 +140,7 @@
               if(!op.requireBusinessId||c.annualSalary>before)
                 chips.push({txt:'+'+(op.amount||220).toLocaleString('en-US')+'/YR WAGE',plus:true});
             } else if(!op.requireBusinessId){ clampMoneyDirect(S,op.amount||220,chips); }
-          }catch(e){ clampMoneyDirect(S,op.amount||220,chips); }
+          }catch(e){ if(!op.requireBusinessId&&!op.requireContractId) clampMoneyDirect(S,op.amount||220,chips); }
           break;
         }
         case 'jobEnd': {

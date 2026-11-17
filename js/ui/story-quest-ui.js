@@ -7,7 +7,7 @@
  const gameWorld=()=>typeof World!=='undefined'?World:null;
  const lineage=()=>typeof Lineage!=='undefined'?Lineage:null;
  const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
- const artFor=arc=>({WORK:'factory_floor',FAMILY:'night_flat',BUREAU:'office',SCHOOL:'schoolyard',TRADE:'dock_night'})[arc]||'street';
+ const artFor=arc=>({WORK:'factory_floor',FAMILY:'night_flat',BUREAU:'office',SCHOOL:'schoolyard',TRADE:'dock_night',CAREER:'factory_floor',UNDERWORLD:'dock_night'})[arc]||'street';
  function closeBoard(){const w=el('storyWrap');if(w)w.classList.add('hidden');}
  function renderBoard(){
   const sheet=el('storySheet');if(!sheet)return;
@@ -79,7 +79,7 @@
   const left=typeof planHours==='function'&&typeof energyUsed==='function'?Math.max(0,planHours()-energyUsed()):Infinity;
   const result=root.StorySystem.startQuest(gameWorld(),start.dataset.qsStart,{subject:player(),lineage:lineage(),year:gameWorld().year,remainingEnergy:left});
   if(!result.ok){renderBoard();return;}
-  const cost=start.dataset.qsStart==='quest_wage_file'||start.dataset.qsStart==='quest_wage_aftermath'?1:0;
+  const cost=Math.min(1,Math.max(0,Number(result.energyCost)||0));
   if(cost&&typeof markActionDone==='function')markActionDone('story-chapter:'+result.runId);
   closeBoard();
   if(typeof root.openStorySlip==='function')root.openStorySlip(true);
