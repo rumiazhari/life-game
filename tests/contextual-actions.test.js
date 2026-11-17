@@ -195,4 +195,3 @@ test('one tap on Learn tile calls existing action executor, consumes one energy 
  assert.ok(out.after.smarts>out.before.smarts);
  assert.match(out.receipt,/ar-dice/);
 });
-

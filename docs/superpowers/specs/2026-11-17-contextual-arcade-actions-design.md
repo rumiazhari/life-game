@@ -42,4 +42,3 @@ A5: Betting's 50/50 remains the underlying bet; displayed 3d6 percent explicitly
 A6: UI receipt exposes dice, result, modifiers and consequences without an additional modal.
 A7: No changes to protected `js/map.js`, `js/state.js`, `js/systems/world-gameplay.js`, `assets/maps/**` or existing map branches.
 A8: `npm test`, `npm run diagnostic:world`, `npm run diagnostic:npcs` and live browser width checks pass; no guarantee about subjective fun until human playtesting.
-

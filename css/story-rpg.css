@@ -106,4 +106,3 @@
  .arcade-tile{min-height:114px;padding:9px}}
 @media(max-width:360px){.arcade-name{font-size:11px}.arcade-odds{font-size:8px}}
 @media(prefers-reduced-motion:reduce){.arcade-tile{transition:none!important}}
-

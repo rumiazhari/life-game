@@ -71,4 +71,3 @@
 - [ ] Run actual headless Chrome interaction plus widths 320, 390, 768, 1440 px; evaluate document/sheet/action-card horizontal overflow, visible check odds and single-click behavior.
 - [ ] Inspect `git diff --check` and `git diff --name-only f4f6196...HEAD`; assert protected map file changes = 0.
 - [ ] Commit evidence; publish only isolated feature branch. No automatic PR merge. Report limitations including no human playtest data.
-
