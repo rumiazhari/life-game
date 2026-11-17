@@ -9,6 +9,7 @@
     "diagnostic:npcs": "node tools/npc-diagnostic.js",
     "audit:rpg": "node tools/rpg-playtest-audit.js --json",
     "simulate:rpg": "node tools/rpg-scenario-playtest.js --json",
-    "aggregate:rpg": "node tools/rpg-playtest-aggregate.js --file"
+    "aggregate:rpg": "node tools/rpg-playtest-aggregate.js --file",
+    "report:rpg": "node tools/rpg-integrity-report.js --write"
   }
 }
