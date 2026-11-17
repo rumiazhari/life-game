@@ -155,3 +155,62 @@ test('changing employer mid-case never raises the new contract or awards imagina
   assert.equal(out.cash,out.assets,'wage raise is not direct cash/arrears');
 });
 
+
+test('completed wage chapter awards sixty merit once and unlocks an existing grade-II perk',()=>{
+  const {ctx}=session('arcade-wage-reward');
+  const r=JSON.parse(expose(ctx,"JSON.stringify((function(){"+
+    "const b=BusinessSystem.create(World,{settlementId:World.activeSettlementId,sector:'retail',name:'Wage Works'});"+
+    "EmploymentSystem.hire(World,{personId:'subject',businessId:b.id,annualSalary:1300,occupationName:'Worker',jobTier:1});"+
+    "const begin=StorySystem.startQuest(World,'quest_wage_file',{subject:S,lineage:Lineage,year:World.year});"+
+    "StorySystem.next(World,{subject:S,lineage:Lineage,year:World.year});"+
+    "WorldSimulation.streamFor=()=>({next:()=>.999});"+
+    "StorySystem.choose(World,1,{subject:S,lineage:Lineage,year:World.year});"+
+    "StorySystem.next(World,{subject:S,lineage:Lineage,year:World.year});"+
+    "StorySystem.choose(World,0,{subject:S,lineage:Lineage,year:World.year});"+
+    "const before=RPG.meritOf(World,'subject');"+
+    "const first=StorySystem.fileAway(World,begin.runId,{year:World.year});"+
+    "const second=StorySystem.fileAway(World,begin.runId,{year:World.year});"+
+    "const now=StorySystem.availableQuests(World,{subject:S,lineage:Lineage}).some(q=>q.id==='quest_wage_aftermath');"+
+    "const perk=RPG.unlockPerk(World,'subject','silvertongue');"+
+    "World.year++;"+
+    "const later=StorySystem.availableQuests(World,{subject:S,lineage:Lineage}).some(q=>q.id==='quest_wage_aftermath');"+
+    "return {before,first:first.applied,second:second.applied,merit:RPG.meritOf(World,'subject'),grade:RPG.gradeOf(World,'subject'),perk,now,later};})())"));
+  assert.equal(r.first,true);
+  assert.equal(r.second,false);
+  assert.equal(r.merit-r.before,60);
+  assert.equal(r.grade,2);
+  assert.equal(r.perk.ok,true);
+  assert.equal(r.now,false);
+  assert.equal(r.later,true);
+});
+test('unfinished wage story cannot be filed early for an unearned RPG reward',()=>{
+  const {ctx}=session('arcade-no-early-file');
+  const r=JSON.parse(expose(ctx,"JSON.stringify((function(){"+
+    "const b=BusinessSystem.create(World,{settlementId:World.activeSettlementId,sector:'retail',name:'Workshop'});"+
+    "EmploymentSystem.hire(World,{personId:'subject',businessId:b.id,annualSalary:1300,occupationName:'Worker',jobTier:1});"+
+    "const start=StorySystem.startQuest(World,'quest_wage_file',{subject:S,lineage:Lineage,year:World.year});"+
+    "const out=StorySystem.fileAway(World,start.runId,{year:World.year});"+
+    "return {out,merit:RPG.meritOf(World,'subject'),status:World.storyRuns[start.runId].status};})())"));
+  assert.equal(r.out.applied,false);
+  assert.equal(r.merit,0);
+  assert.equal(r.status,'playing');
+});
+test('failed wage route still gives the same chapter reward and a later playable callback',()=>{
+  const {ctx}=session('arcade-failed-route');
+  const r=JSON.parse(expose(ctx,"JSON.stringify((function(){"+
+    "const b=BusinessSystem.create(World,{settlementId:World.activeSettlementId,sector:'retail',name:'Workshop'});"+
+    "EmploymentSystem.hire(World,{personId:'subject',businessId:b.id,annualSalary:1400,occupationName:'Worker',jobTier:1});"+
+    "const start=StorySystem.startQuest(World,'quest_wage_file',{subject:S,lineage:Lineage,year:World.year});"+
+    "StorySystem.next(World,{subject:S,lineage:Lineage,year:World.year});"+
+    "WorldSimulation.streamFor=()=>({next:()=>0});"+
+    "StorySystem.choose(World,0,{subject:S,lineage:Lineage,year:World.year});"+
+    "StorySystem.next(World,{subject:S,lineage:Lineage,year:World.year});"+
+    "StorySystem.choose(World,1,{subject:S,lineage:Lineage,year:World.year});"+
+    "const ending=StorySystem.currentView(World).ending.id;"+
+    "StorySystem.fileAway(World,start.runId,{year:World.year});World.year++;"+
+    "return {ending,merit:RPG.meritOf(World,'subject'),followup:StorySystem.availableQuests(World,{subject:S,lineage:Lineage}).some(q=>q.id==='quest_wage_aftermath')};})())"));
+  assert.equal(r.ending,'wages_quiet');
+  assert.equal(r.merit,60);
+  assert.equal(r.followup,true);
+});
+

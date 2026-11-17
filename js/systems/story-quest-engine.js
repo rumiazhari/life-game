@@ -108,11 +108,14 @@
  };
  story.fileAway=function(world,runId,options){
   const run=world&&world.storyRuns&&world.storyRuns[runId];
+  if(run&&run.quest&&run.episodeId==='quest_wage_file'&&run.status!=='ended')
+    return {applied:false,reason:'not_complete'};
   const out=nativeFile(world,runId,options);
   if(out&&out.applied&&run&&run.quest){
    const archive=Object.values(world.storyArchive||{}).find(a=>a&&a.episodeId===run.episodeId&&a.startedYear===run.startedYear);
    if(archive){archive.quest=true;archive.checkCount=run.history.filter(h=>h.check).length;}
-   RPG.addMerit(world,'subject',20,'quest:'+run.id,options&&options.year!=null?options.year:world.year);
+   RPG.addMerit(world,'subject',run.episodeId==='quest_wage_file'?60:20,'quest:'+run.id,
+     options&&options.year!=null?options.year:world.year);
   }
   return out;
  };

@@ -68,9 +68,9 @@
         {t:'Appeal to the Bureau',tone:'prudent',goto:'restored',check:{domain:'bureau',difficulty:'severe',failGoto:'reprisal'}},
         {t:'Leave the dispute alone',tone:'cold',goto:'quiet'}
        ]}},
-      restored:ending('wages_restored','THE LEDGER HOLDS','The payroll correction is recorded. Management cannot easily forget your name.',
+      restored:ending('wages_restored','THE LEDGER HOLDS','Management signs a future salary increase. The old missing wages remain disputed.',
         [{kind:'jobRaise',amount:260,requireBusinessId:bind.employer.bind},S('happiness',5),mem('wage_restored','The wage dispute was resolved through a recorded agreement.',.7,peerIds)],'kind'),
-      compromise:ending('wages_compromise','A SMALLER VICTORY','The immediate dispute ends. The books remain incomplete.',
+      compromise:ending('wages_compromise','A SMALLER VICTORY','A smaller future raise is agreed. The old pay packet remains unresolved.',
         [{kind:'jobRaise',amount:110,requireBusinessId:bind.employer.bind},S('happiness',2),mem('wage_compromise','A limited agreement settled the wage dispute.',.3,peerIds)]),
       reprisal:ending('wages_reprisals','THE WATCH LIST','The complaint fails. The employer keeps the ledger; the Bureau keeps your name.',
         [R(12),S('happiness',-7),mem('wage_reprisals','A disputed wage claim drew unwanted scrutiny.',-.7,peerIds)],'cold'),
