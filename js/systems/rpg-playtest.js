@@ -9,7 +9,11 @@
     Object.freeze({id:'clarity',title:'OUTCOME CLARITY',prompt:'I understood the odds and results'})
   ]);
   const ALLOWED_ARCS=new Set(['WORK','FAMILY','BUREAU','SCHOOL','TRADE','CAREER','UNDERWORLD']);
-  let answered={};
+  let answered={},currentWorld=null;
+  function bindWorld(world){
+    if(world!==currentWorld){currentWorld=world;answered={};return true;}
+    return false;
+  }
   function ratingValue(value){
     if(typeof value==='string'&&!/^[1-5]$/.test(value))return null;
     if(typeof value!=='number'&&typeof value!=='string')return null;
@@ -66,8 +70,8 @@
   }
   function report(world,subject,options){
     return {schema:'life-file-playtest-v1',form:'unvalidated_formative_3_item',
-      transfer:'user_initiated_copy_only',ratings:ratings(),snapshot:snapshot(world,subject,options)};
+      transfer:'user_initiated_export_only',ratings:ratings(),snapshot:snapshot(world,subject,options)};
   }
   function exportJSON(world,subject,options){return JSON.stringify(report(world,subject,options),null,2);}
-  root.RPGPlaytest=Object.freeze({QUESTIONS,rate,ratings,reset,snapshot,report,exportJSON});
+  root.RPGPlaytest=Object.freeze({QUESTIONS,bindWorld,rate,ratings,reset,snapshot,report,exportJSON});
 })(typeof globalThis!=='undefined'?globalThis:this);

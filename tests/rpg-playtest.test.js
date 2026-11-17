@@ -223,3 +223,75 @@ test('clipboard refusal shows COPY FAILED instead of a false success status',asy
  assert.match(html,/COPY FAILED/);
  assert.doesNotMatch(html,/REPORT COPIED/);
 });
+
+test('reproducible RPG audit covers all twelve authored quests with safe opt-outs and valid graph edges',()=>{
+ const {spawnSync}=require('node:child_process');
+ const script=path.join(__dirname,'../tools/rpg-playtest-audit.js');
+ const first=spawnSync(process.execPath,[script,'--json'],{encoding:'utf8',timeout:60000});
+ assert.equal(first.status,0,first.stderr||first.stdout);
+ const audit=JSON.parse(first.stdout);
+ assert.equal(audit.schema,'life-file-rpg-audit-v1');
+ assert.equal(audit.authored.questCount,12);
+ assert.equal(audit.authored.safeOpenings,12);
+ assert.deepEqual(audit.authored.unsafeOpenings,[]);
+ assert.deepEqual(audit.authored.brokenEdges,[]);
+ assert.equal(audit.authored.byQuest.length,12);
+ assert.ok(audit.authored.byQuest.every(x=>x.reachableEndings>=2&&x.maxDecisions>=1));
+ assert.ok(audit.authored.byQuest.every(x=>x.firstChoices>=3));
+ assert.equal(audit.odds.length,4);
+ assert.deepEqual(audit.odds.map(x=>x.percent),[91,74,50,26]);
+ assert.ok(audit.odds.every(x=>x.outcomes===216&&Math.abs(x.empiricalPercent-x.percent)<=5));
+});
+test('RPG audit is byte-for-byte deterministic and exposed through npm command',()=>{
+ const {spawnSync}=require('node:child_process');
+ const script=path.join(__dirname,'../tools/rpg-playtest-audit.js');
+ const runAudit=()=>spawnSync(process.execPath,[script,'--json'],{encoding:'utf8',timeout:60000});
+ const first=runAudit(),second=runAudit();
+ assert.equal(first.status,0,first.stderr);
+ assert.equal(second.status,0,second.stderr);
+ assert.equal(first.stdout,second.stdout);
+ const pkg=JSON.parse(fs.readFileSync(path.join(__dirname,'../package.json'),'utf8'));
+ assert.equal(pkg.scripts['audit:rpg'],'node tools/rpg-playtest-audit.js --json');
+});
+
+test('opt-in playtest export also offers a local JSON save link when clipboard is blocked',()=>{
+ const {ctx}=browserBoard('phase4-save-link');
+ expose(ctx,"S.name='PRIVATE_SAVE_NAME';World.seed='PRIVATE_SAVE_SEED';renderStoryBoard()");
+ sendSheetClick(ctx,'[data-qs-pt-toggle]',{});
+ sendSheetClick(ctx,'[data-qs-rate]',{qsRate:'enjoyment',qsValue:'5'});
+ const html=expose(ctx,"document.getElementById('storySheet').innerHTML");
+ const match=html.match(/download="life-file-playtest\.json" href="data:application\/json;charset=utf-8,([^"]+)"/);
+ assert.ok(match,'browser should offer a local download independent of clipboard');
+ const json=decodeURIComponent(match[1]);
+ assert.equal(JSON.parse(json).ratings.enjoyment,5);
+ assert.doesNotMatch(json,/PRIVATE_SAVE/);
+});
+
+test('playtest ratings visibly define both ends of their five-point response scale',()=>{
+ const {ctx}=browserBoard('phase4-labels');
+ expose(ctx,'renderStoryBoard()');
+ sendSheetClick(ctx,'[data-qs-pt-toggle]',{});
+ const html=expose(ctx,"document.getElementById('storySheet').innerHTML");
+ assert.match(html,/1 = STRONGLY DISAGREE/);
+ assert.match(html,/5 = STRONGLY AGREE/);
+});
+
+test('export provenance covers both copy and save without suggesting automatic upload',()=>{
+ const ctx=scenario('export-provenance');
+ const r=run(ctx,"return RPGPlaytest.report(World,S,{})");
+ assert.equal(r.transfer,'user_initiated_export_only');
+});
+
+test('voluntary ratings reset when opening a different life in the same page',()=>{
+ const {ctx}=browserBoard('life-a');
+ expose(ctx,'renderStoryBoard()');
+ sendSheetClick(ctx,'[data-qs-pt-toggle]',{});
+ sendSheetClick(ctx,'[data-qs-rate]',{qsRate:'enjoyment',qsValue:'5'});
+ assert.equal(run(ctx,"return RPGPlaytest.ratings().enjoyment"),5);
+ const next=run(ctx,"const old=World;newWorld();newLineage();newHold();newSubject();"+
+  "S.age=25;S.alive=true;S.mother.alive=true;World.year=S.dob+S.age;"+
+  "StorySystem.ensure(World);renderStoryBoard();"+
+  "return {different:old!==World,ratings:RPGPlaytest.ratings()};");
+ assert.equal(next.different,true);
+ assert.deepEqual(next.ratings,{enjoyment:null,agency:null,clarity:null});
+});

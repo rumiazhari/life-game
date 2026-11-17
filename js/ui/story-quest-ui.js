@@ -28,6 +28,7 @@
      '<div class="qs-eval-metric"><b>'+esc(n==null?'—':n)+'</b><small>'+esc(key)+'</small></div>').join('')+'</div>'+
    (m.unknownCheckArchives?'<small class="qs-eval-warn">'+esc(m.unknownCheckArchives)+' past chapters have unrecorded roll counts</small>':'')+
    '<p class="qs-eval-privacy">FORMATIVE · UNVALIDATED · PAGE MEMORY ONLY · NO TRACKING</p>'+
+   '<p class="qs-eval-scale">1 = STRONGLY DISAGREE · 5 = STRONGLY AGREE</p>'+
    root.RPGPlaytest.QUESTIONS.map(q=>
     '<div class="qs-eval-row"><div><strong>'+esc(q.title)+'</strong><small>'+esc(q.prompt)+'</small></div>'+
     '<div class="qs-eval-numbers" role="group" aria-label="'+esc(q.title)+' rating 1 to 5">'+
@@ -36,6 +37,10 @@
     ).join('')+'</div></div>'
    ).join('')+
    '<div class="qs-eval-actions"><button type="button" class="qs-eval-copy" data-qs-pt-copy>COPY ANONYMOUS REPORT</button>'+
+   '<a class="qs-eval-save" download="life-file-playtest.json" href="'+
+    esc('data:application/json;charset=utf-8,'+
+      encodeURIComponent(root.RPGPlaytest.exportJSON(gameWorld(),player(),playtestOptions(leads))))+
+    '">SAVE JSON</a>'+
    '<button type="button" class="qs-eval-reset" data-qs-pt-reset>RESET</button></div>'+
    '<small class="qs-eval-copy-status" role="status">'+esc(copyStatus)+'</small></section>';
  }
@@ -60,6 +65,8 @@
   if(typeof root.StorySystem!=='object'||!gameWorld()||!player()){
    sheet.innerHTML='<p>No subject file open.</p>';return;
   }
+  if(root.RPGPlaytest&&typeof root.RPGPlaytest.bindWorld==='function')
+    root.RPGPlaytest.bindWorld(gameWorld());
   const live=root.StorySystem.currentView(gameWorld(),{year:gameWorld().year,subject:player()});
   const leads=root.StorySystem.availableQuests(gameWorld(),{subject:player(),lineage:lineage()});
   const archive=Object.values(gameWorld().storyArchive||{}).filter(a=>a&&a.quest)
