@@ -48,3 +48,25 @@ test('employer chapter requires a real contract and never pays salary or changes
  assert.equal(json(c,'return StorySystem.choose(World,0,{subject:S});').applied,false);
  assert.equal(json(c,'return StorySystem.choose(World,2,{subject:S});').applied,true);
 });
+test('callback follows the original entity rather than transferring to a new settlement',()=>{
+ const c=ready(),q=leads(c).find(q=>q.family==='civic'),r=play(c,q.id);
+ expose(c,`StorySystem.fileAway(World,${JSON.stringify(r.run.id)});World.year++;World.activeSettlementId=Object.keys(World.settlements).find(id=>id!==World.activeSettlementId);`);
+ assert.equal(leads(c).find(q=>q.family==='civic').followup,false);
+});
+test('moving subject out of bound household disables approaches',()=>{
+ const c=ready(),q=leads(c).find(q=>q.family==='household');
+ expose(c,`StorySystem.startQuest(World,${JSON.stringify(q.id)},{subject:S});StorySystem.next(World,{subject:S});const h=HouseholdSystem.create(World,{settlementId:World.activeSettlementId,memberIds:[]});HouseholdSystem.addMember(World,h.id,S.npcId);`);
+ assert.equal(json(c,'return StorySystem.choose(World,0,{subject:S});').applied,false);
+});
+test('stale-year choice and filing cannot mutate progression',()=>{
+ const c=ready(),q=leads(c)[0];
+ expose(c,`StorySystem.startQuest(World,${JSON.stringify(q.id)},{subject:S});StorySystem.next(World,{subject:S});World.year--;`);
+ assert.equal(json(c,'return StorySystem.choose(World,2,{subject:S});').applied,false);
+ expose(c,'World.year++;StorySystem.choose(World,2,{subject:S});World.year--;');
+ assert.equal(json(c,'return StorySystem.fileAway(World,StorySystem.liveRun(World).id);').applied,false);
+});
+test('canonical civic standing affects encounter difficulty without a duplicate reputation field',()=>{
+ const a=ready('standing'),b=ready('standing');expose(a,'S.relations=15;');expose(b,'S.relations=85;');
+ function preview(c){const q=leads(c).find(q=>q.family==='civic');expose(c,`StorySystem.startQuest(World,${JSON.stringify(q.id)},{subject:S});StorySystem.next(World,{subject:S});`);return json(c,'return StorySystem.currentView(World,{subject:S}).options[0].check;');}
+ assert.notEqual(preview(a).difficulty,preview(b).difficulty);
+});

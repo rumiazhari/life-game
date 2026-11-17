@@ -23,7 +23,7 @@
   if(contract&&w.businesses[contract.businessId]&&w.businesses[contract.businessId].status!=='closed')bases.push({family:'employer',businessId:contract.businessId,contractId:contract.id,settlementId:contract.settlementId||w.businesses[contract.businessId].settlementId});
   if(member)bases.push({family:'household',householdId:household.id,npcId:member,settlementId:household.settlementId});
   return bases.filter(b=>w.settlements[b.settlementId]&&!(w.storyContextYears[b.family]>=year(w))).map(b=>{
-   const previous=Object.values(w.storyArchive).filter(a=>a&&a.context&&a.context.family===b.family&&!a.context.followup&&a.resolvedYear<year(w)&&!a.callbackFiled)
+   const previous=Object.values(w.storyArchive).filter(a=>a&&a.context&&a.context.family===b.family&&['businessId','contractId','householdId','npcId','settlementId'].every(k=>a.context[k]===b[k])&&!a.context.followup&&a.resolvedYear<year(w)&&!a.callbackFiled)
     .sort((a,b)=>b.resolvedYear-a.resolvedYear||String(a.id).localeCompare(String(b.id)))[0];
    if(previous){b.followup=true;b.priorId=previous.id;b.priorEnding=previous.endingId;}
    b.year=year(w);b.id='context_'+b.family+'_'+b.year;return b;
@@ -35,7 +35,7 @@
   const label=c.businessId?w.businesses[c.businessId].name:c.npcId?w.npcs[c.npcId].name:w.settlements[c.settlementId].name;
   const rng=root.WorldSimulation.streamFor(w,c.year,c.family,'context-template');
   const detail=['A practical concern needs an answer.','A familiar problem has returned.'][rng.next()<.5?0:1];
-  const difficult=Number(s.scrutiny)>40?'hard':'standard';
+  const difficult=Number(s.scrutiny)>40||Number(s.relations)<25?'hard':'standard';
   const memory=(kind,valence)=>c.npcId?[{kind:'memory',type:'context_'+kind,summary:title[c.family]+': '+kind,participants:[c.npcId],valence}]:[];
   const end=(id,t,effects)=>({lines:[{sp:'narrator',t}],ending:{id,title:t,tone:'prudent',epilogue:[t],effects}});
   return {id:c.id,quest:true,energyCost:1,domain,questTitle:(c.followup?'Return: ':'')+title[c.family],
@@ -61,14 +61,14 @@
   if(out.ok){w.storyRuns[out.runId].context=c;w.storyContextYears[c.family]=c.year;}
   return out;
  };
- function unavailable(w,c){
+ function unavailable(w,c,s){
   if(c.npcId&&!alive(w,c.npcId))return 'Person is no longer available';
-  if(c.householdId&&(!w.households[c.householdId]||!w.households[c.householdId].memberIds.includes(c.npcId)))return 'Household changed';
+  if(c.householdId&&(!w.households[c.householdId]||!w.households[c.householdId].memberIds.includes(c.npcId)||!w.households[c.householdId].memberIds.includes(s&&s.npcId||'subject')))return 'Household changed';
   if(c.contractId){const a=root.EmploymentSystem.activeForPerson(w,'subject')[0];if(!a||a.id!==c.contractId)return 'Employment changed';}
   return '';
  }
- story.currentView=function(w,o){const v=native.view(w,o),r=story.liveRun(w);if(v&&v.type==='choice'&&r.context){const reason=unavailable(w,r.context);if(reason)v.options=v.options.map((x,i)=>i<2?Object.assign({},x,{available:false,unavailableReason:reason}):x);}return v;};
- story.choose=function(w,i,o){const r=story.liveRun(w);if(r&&r.context&&i<2&&unavailable(w,r.context))return {applied:false,reason:'context_changed'};return native.choose(w,i,o);};
- story.fileAway=function(w,id,o){const r=w.storyRuns&&w.storyRuns[id],c=r&&r.context;const out=native.file(w,id,o);if(out.applied&&c){const a=Object.values(w.storyArchive).find(a=>a.episodeId===r.episodeId&&a.startedYear===r.startedYear);if(a)a.context=Object.assign({},c);if(c.priorId&&w.storyArchive[c.priorId])w.storyArchive[c.priorId].callbackFiled=true;}return out;};
+ story.currentView=function(w,o){const v=native.view(w,o),r=story.liveRun(w);if(v&&v.type==='choice'&&r.context){const reason=unavailable(w,r.context,subject(o));if(reason)v.options=v.options.map((x,i)=>i<2?Object.assign({},x,{available:false,unavailableReason:reason}):x);}return v;};
+ story.choose=function(w,i,o){const r=story.liveRun(w);if(r&&r.context&&Math.min(year(w),o&&Number.isFinite(o.year)?o.year:year(w))<r.startedYear)return {applied:false,reason:'stale_year'};if(r&&r.context&&i<2&&unavailable(w,r.context,subject(o)))return {applied:false,reason:'context_changed'};return native.choose(w,i,o);};
+ story.fileAway=function(w,id,o){const r=w.storyRuns&&w.storyRuns[id],c=r&&r.context;if(c&&Math.min(year(w),o&&Number.isFinite(o.year)?o.year:year(w))<r.startedYear)return {applied:false,reason:'stale_year'};const out=native.file(w,id,o);if(out.applied&&c){const a=Object.values(w.storyArchive).find(a=>a.episodeId===r.episodeId&&a.startedYear===r.startedYear);if(a)a.context=Object.assign({},c);if(c.priorId&&w.storyArchive[c.priorId])w.storyArchive[c.priorId].callbackFiled=true;}return out;};
  root.StoryContext={candidates};
 })(globalThis);
