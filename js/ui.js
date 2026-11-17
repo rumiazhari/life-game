@@ -707,8 +707,13 @@ function renderActionReceipt(type,id,result,chips){
   const label=def?fillLabel(type==='p'?pursuitLabel(def):decisionLabel(def)):id;
   const text=result&&result.text?fill(result.text):'The action was filed.';
   const deltas=(chips||[]).map(c=>'<span class="ar-delta '+(c.plus?'up':'down')+'">'+escapePlanText(c.txt)+'</span>').join('');
+  const check=result&&result.arcadeCheck;
+  const dice=check?'<div class="ar-dice" role="status" aria-label="3d6 execution quality '+(check.success?'success':'setback')+'">'+
+    '<span class="ar-dice-faces">'+check.rolls.map(n=>'<span class="ar-die">'+n+'</span>').join('')+'</span>'+
+    '<b class="'+(check.success?'good':'bad')+'">'+(check.success?'SUCCESS':'SETBACK')+'</b>'+
+    '<small>3d6 '+(check.mod>=0?'+':'')+check.mod+' vs '+check.tn+'</small></div>':'';
   el.innerHTML='<div class="ar-copy"><span class="ar-eyebrow">ACTION ENTERED · YEAR '+escapePlanText(S.age)+'</span>'+
-    '<strong>'+escapePlanText(label)+'</strong><p>'+escapePlanText(clipText(text,100))+'</p>'+(text.length>100?'<details class="ar-full"><summary>MORE ▾</summary><p>'+escapePlanText(text)+'</p></details>':'')+'</div>'+
+    '<strong>'+escapePlanText(label)+'</strong><p>'+escapePlanText(clipText(text,100))+'</p>'+dice+(text.length>100?'<details class="ar-full"><summary>MORE ▾</summary><p>'+escapePlanText(text)+'</p></details>':'')+'</div>'+
     '<div class="ar-actions">'+(deltas?'<div class="ar-deltas">'+deltas+'</div>':'')+
     '<button type="button" data-receipt-log>FULL CASE LOG ▸</button><button type="button" data-receipt-close aria-label="Dismiss action receipt">✕</button></div>';
   el.classList.remove('hidden');
@@ -2150,15 +2155,29 @@ function performActionNow(type,id,extra){
   if(actionReservedThisYear(id)){ shake(); return; }
   const total=planHours(), used=energyUsed();
   if(used+(d.cost||0)>total){ shake(); snd('stamp'); return; }
+  // Only mapped, directly executable actions receive a quality check.
+  // Preserve their native availability and the existing once-a-year guard.
+  const contextual=typeof ContextualActions==='object'&&ContextualActions;
+  if(contextual&&contextual.config(type,id)&&!d.avail(S,extra&&extra.cid)){ shake(); return; }
   window.C={}; S.acts++;
+  // Roll BEFORE the action changes health/skills, so preview matches resolution.
+  const arcade=contextual?contextual.resolve(World,S,type,id,{year:World.year}):null;
   let r;
   if(id==='learntrade'&&extra&&extra.program&&typeof educationCompleteProgram==='function'){
     const result=educationCompleteProgram(extra.program);
     r=result.ok?{fx:{happiness:2},text:'Subject completed '+result.program.name+'. '+result.program.desc+(result.shortfall?' The unpaid '+money(result.shortfall)+' was entered as education debt.':' The certificate was paid from assets.') }:{fx:{happiness:-1},text:'Subject reached for vocational training, but the course was not available on the current record.'};
   } else r=d.apply(S,extra||{});
+  if(arcade&&r){
+    r.fx=contextual.combineFx(r.fx,contextual.bonusFor(arcade,r.fx));
+    r.arcadeCheck=arcade.check;
+  }
   const chips=r&&r.fx?applyFx(r.fx):[];
   if(r&&r.follow) pushFollow(r.follow);
-  logChips(r&&r.text?fill(r.text):'It was done.',chips,type==='p'?'plan':'decision',(type==='p'?'PURSUIT':'DECISION')+' · NOW');
+  const rollNote=arcade?' · 3d6 '+arcade.check.rolls.join('+')+
+    (arcade.check.mod>=0?'+':'')+arcade.check.mod+' vs '+arcade.check.tn+
+    (arcade.check.success?' · execution improved':' · minor setback'):'';
+  logChips((r&&r.text?fill(r.text):'It was done.')+rollNote,chips,
+    type==='p'?'plan':'decision',(type==='p'?'PURSUIT':'DECISION')+' · NOW');
   markActionDone(id);
   renderActionReceipt(type,id,r,chips);
   renderStats(window.C); updateBar(); renderPlanIfOpen();
