@@ -306,3 +306,16 @@ test('Stories card for new career chapter spends exactly one existing annual ene
  assert.equal(out.ledger,1);
  assert.equal(out.runs,1);
 });
+
+test('browser entrypoint loads Phase 3 arc and changed story runtime with fresh cache keys',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../life-game.html'),'utf8');
+ const arcs='js/systems/story-consequence-arcs.js?v=20261117-p3';
+ const engine='js/systems/story-quest-engine.js?v=20261117-p3';
+ const runtime='js/systems/story-system.js?v=20261117-p3';
+ const ui='js/ui/story-quest-ui.js?v=20261117-p3';
+ for(const f of [arcs,engine,runtime,ui])assert.ok(html.includes(f),f);
+ assert.ok(html.indexOf('js/systems/story-quests.js')<html.indexOf(arcs));
+ assert.ok(html.indexOf(arcs)<html.indexOf(runtime));
+ assert.ok(html.indexOf(runtime)<html.indexOf(engine));
+ assert.ok(html.indexOf(engine)<html.indexOf(ui));
+});
