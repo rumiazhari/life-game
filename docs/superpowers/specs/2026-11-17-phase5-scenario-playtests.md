@@ -1,7 +1,7 @@
 # Life File RPG Phase 5 — Simulated Playthrough Coverage and Real-Report Readiness
 
-**Date:** 2026-11-17 (JST)  
-**Base:** `master` e3cab8e7e7cc29f94b91e70b138fa29f68c733a3  
+**Date:** 2026-11-17 (JST)
+**Base:** `master` e3cab8e7e7cc29f94b91e70b138fa29f68c733a3
 **Branch:** `feat/rpg-phase5-simulated-playtests-20261117`
 
 ## Problem and evidence
