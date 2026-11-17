@@ -133,6 +133,7 @@
             const c=root.EmploymentSystem&&root.EmploymentSystem.activeForPerson?root.EmploymentSystem.activeForPerson(world,'subject')[0]:null;
             // Scoped story raises must remain with the employer from the original chapter.
             if(op.requireBusinessId&&(!c||c.businessId!==op.requireBusinessId))break;
+            if(op.requireContractId&&(!c||c.id!==op.requireContractId))break;
             if(c&&typeof root.EmploymentSystem.adjustSalary==='function'){
               const before=c.annualSalary;
               root.EmploymentSystem.adjustSalary(world,c.id,c.annualSalary+clamp(finite(op.amount,150),50,800),'episode_merit',year);

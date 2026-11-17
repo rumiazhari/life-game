@@ -214,3 +214,24 @@ test('failed wage route still gives the same chapter reward and a later playable
   assert.equal(r.followup,true);
 });
 
+
+test('resigning and being rehired by the same company does not redirect an old wage settlement',()=>{
+  const {ctx}=session('arcade-rehire');
+  const out=JSON.parse(expose(ctx,"JSON.stringify((function(){"+
+    "const b=BusinessSystem.create(World,{settlementId:World.activeSettlementId,sector:'retail',name:'Same Workshop'});"+
+    "EmploymentSystem.hire(World,{personId:'subject',businessId:b.id,annualSalary:1200,occupationName:'Worker',jobTier:1});"+
+    "StorySystem.startQuest(World,'quest_wage_file',{subject:S,lineage:Lineage,year:World.year});"+
+    "StorySystem.next(World,{subject:S,lineage:Lineage,year:World.year});"+
+    "WorldSimulation.streamFor=()=>({next:()=>.999});"+
+    "StorySystem.choose(World,1,{subject:S,lineage:Lineage,year:World.year});"+
+    "const old=EmploymentSystem.activeForPerson(World,'subject')[0];"+
+    "EmploymentSystem.end(World,old.id,'terminated','rehired',World.year,{subject:S});"+
+    "EmploymentSystem.hire(World,{personId:'subject',businessId:b.id,annualSalary:1750,occupationName:'Worker',jobTier:1});"+
+    "const newest=EmploymentSystem.activeForPerson(World,'subject')[0],before=newest.annualSalary;"+
+    "StorySystem.next(World,{subject:S,lineage:Lineage,year:World.year});"+
+    "StorySystem.choose(World,0,{subject:S,lineage:Lineage,year:World.year});"+
+    "return {oldId:old.id,newId:newest.id,before,after:newest.annualSalary};})())"));
+  assert.notEqual(out.oldId,out.newId);
+  assert.equal(out.after,out.before,'only the employment contract that originated the case may receive the increase');
+});
+
