@@ -69,3 +69,45 @@ test('existing character background survives old-state initialization',()=>{
   assert.doesNotMatch(expose(ctx,"document.getElementById('storySheet').innerHTML"),/data-qs-bg="/);
 });
 
+
+test('wage chapter preflights annual energy before creating a persistent story run',()=>{
+  const {ctx}=session('arcade-energy');
+  expose(ctx,"const b=BusinessSystem.create(World,{settlementId:World.activeSettlementId,sector:'retail',name:'Workshop'});"+
+    "EmploymentSystem.hire(World,{personId:'subject',businessId:b.id,annualSalary:1200,occupationName:'Worker',jobTier:1});");
+  const data=JSON.parse(expose(ctx,"JSON.stringify((function(){"+
+    "const lead=StorySystem.availableQuests(World,{subject:S,lineage:Lineage}).find(q=>q.id==='quest_wage_file');"+
+    "const before=World.storyCounter;"+
+    "const blocked=StorySystem.startQuest(World,'quest_wage_file',{subject:S,lineage:Lineage,year:World.year,remainingEnergy:0});"+
+    "return {lead,blocked,before,after:World.storyCounter,runs:Object.keys(World.storyRuns).length};})())"));
+  assert.equal(data.lead.energyCost,1);
+  assert.equal(data.blocked.reason,'no_energy');
+  assert.equal(data.before,data.after);
+  assert.equal(data.runs,0);
+  assert.equal(expose(ctx,"StorySystem.startQuest(World,'quest_wage_file',{subject:S,lineage:Lineage,year:World.year,remainingEnergy:1}).ok"),true);
+  assert.equal(expose(ctx,"StorySystem.startQuest(World,'quest_wage_file',{subject:S,lineage:Lineage,year:World.year,remainingEnergy:1}).reason"),'finish_current_episode');
+});
+test('successful story card start consumes the same energy budget as routine actions',()=>{
+  const {ctx}=session('arcade-card-energy');
+  expose(ctx,"const b=BusinessSystem.create(World,{settlementId:World.activeSettlementId,sector:'retail',name:'Foundry'});"+
+    "EmploymentSystem.hire(World,{personId:'subject',businessId:b.id,annualSalary:1300,occupationName:'Worker',jobTier:1});"+
+    "openStorySlip=function(){};renderStoryBoard();");
+  const before=expose(ctx,'energyUsed()');
+  const page=expose(ctx,"document.getElementById('storySheet').innerHTML");
+  assert.match(page,/data-qs-start="quest_wage_file"/);
+  assert.match(page,/1 ENERGY/);
+  expose(ctx,"document.getElementById('storySheet').handlers.click({target:{closest:function(sel){"+
+    "return sel==='[data-qs-start]'?{disabled:false,dataset:{qsStart:'quest_wage_file'}}:null;}}});");
+  assert.equal(expose(ctx,'energyUsed()'),before+1);
+  assert.equal(expose(ctx,'Object.keys(World.storyRuns).length'),1);
+  assert.equal(expose(ctx,"doneActionsThisYear().filter(x=>x.startsWith('story-chapter:')).length"),1);
+});
+test('a detained player cannot start a wage story with zero discretionary energy',()=>{
+  const {ctx}=session('arcade-custody');
+  expose(ctx,"const b=BusinessSystem.create(World,{settlementId:World.activeSettlementId,sector:'retail',name:'Workshop'});"+
+    "EmploymentSystem.hire(World,{personId:'subject',businessId:b.id,annualSalary:1300,occupationName:'Worker',jobTier:1});"+
+    "S.jailUntil=S.age+1;renderStoryBoard();");
+  const page=expose(ctx,"document.getElementById('storySheet').innerHTML");
+  assert.match(page,/data-qs-start="quest_wage_file" disabled/);
+  assert.equal(expose(ctx,'Object.keys(World.storyRuns).length'),0);
+});
+

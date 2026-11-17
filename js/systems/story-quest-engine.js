@@ -23,12 +23,15 @@
   return (root.StoryEpisodes||[]).filter(e=>e.quest&&!lived(world,e.id))
    .filter(e=>{try{return (!e.eligible||e.eligible(world,subject,lineage))&&(!e.cast||e.cast(world,subject,lineage)!=null);}catch(_){return false;}})
    .map(e=>({id:e.id,title:e.questTitle||e.id,hint:e.questHint||'',icon:e.questIcon||'🎲',
-      arc:e.questArc||e.domain||'LIFE',domain:e.domain||'life',followup:!!e.followup}));
+      arc:e.questArc||e.domain||'LIFE',domain:e.domain||'life',followup:!!e.followup,
+      energyCost:(e.id==='quest_wage_file'||e.id==='quest_wage_aftermath')?1:0}));
  };
  story.startQuest=function(world,id,options){
   story.ensure(world);
   if(story.hasLiveRun(world))return {ok:false,reason:'finish_current_episode'};
   const opts=options||{},subject=pickSubject(opts),lineage=pickLineage(opts);
+  const cost=(id==='quest_wage_file'||id==='quest_wage_aftermath')?1:0;
+  if(Number.isFinite(opts.remainingEnergy)&&opts.remainingEnergy<cost)return {ok:false,reason:'no_energy'};
   const def=(root.StoryEpisodes||[]).find(e=>e.quest&&e.id===id);
   if(!def||!story.availableQuests(world,{subject,lineage}).some(q=>q.id===id))
    return {ok:false,reason:'not_available'};
