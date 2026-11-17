@@ -33,12 +33,13 @@
    build(bind){const company=bind.employer.label,peer=bind.coworker.label,peerIds=bind.coworker.bind?[bind.coworker.bind]:[];return {
     title:'THE MISSING WAGES',bg:'factory_floor',scenes:{
       open:{lines:one('A pay packet comes up short at '+company+'. '+peer+' asks you to look into the ledger.'),
-       choice:{prompt:'Three ways into the same problem.',options:[
+       choice:{prompt:'How will you respond?',options:[
         {t:'Copy the accounts',note:'Find evidence',tone:'prudent',goto:'proof',check:{domain:'study',skill:'academics',difficulty:'easy',failGoto:'caught',
           successEffects:[I('wage_copy','Payroll copy','📒')],failEffects:[R(3)]}},
         {t:'Negotiate directly',note:'No evidence yet',tone:'kind',goto:'offer',check:{domain:'social',difficulty:'standard',failGoto:'refused',
           successEffects:[S('relations',2)]}},
-        {t:'Organize the workers',note:'Risk retaliation',tone:'kind',goto:'solidarity',check:{domain:'labor',skill:'social',difficulty:'hard',failGoto:'refused'}}
+        {t:'Organize the workers',note:'Risk retaliation',tone:'kind',goto:'solidarity',check:{domain:'labor',skill:'social',difficulty:'hard',failGoto:'refused'}},
+        {t:'Leave the complaint alone',note:'Guaranteed · no roll',tone:'grey',goto:'quiet'}
        ]}},
       proof:{lines:one('The numbers are copied. Someone has been pocketing the difference.'),
        choice:{prompt:'Now what?',options:[
@@ -109,7 +110,8 @@
        {t:'Take charge of care',note:'Care skill helps',tone:'kind',goto:'recover',check:{domain:'study',skill:'care',difficulty:'standard',failGoto:'overworked',
         successEffects:[F(8)],failEffects:[S('health',-4)]}},
        {t:'Pay the clinic',note:'Guaranteed treatment · $60',tone:'prudent',require:{minAssets:60},goto:'clinic',effects:[M(-60)]},
-       {t:'Ask neighbors for help',note:'Social approach',tone:'kind',goto:'clinic',check:{domain:'social',difficulty:'hard',failGoto:'alone'}}
+       {t:'Ask neighbors for help',note:'Social approach',tone:'kind',goto:'clinic',check:{domain:'social',difficulty:'hard',failGoto:'alone'}},
+        {t:'Stay and keep watch',note:'Guaranteed · tiring',tone:'kind',goto:'overworked'}
       ]}},
     recover:ending('care_recovered','CARE AT HOME','The care is difficult, but the household pulls together.',
      [F(10),S('happiness',4),I('home_remedy','Care notes','🩺'),mem('care_recovered','The family carried a difficult illness together.',.7)],'kind'),
@@ -149,7 +151,8 @@
       {t:'Examine the legal notice',note:'Prepare a petition',tone:'prudent',goto:'draft',check:{domain:'study',difficulty:'standard',failGoto:'expired',
        successEffects:[I('ward_notice','Annotated notice','📃')]}},
       {t:'Rally the neighborhood',note:'Win supporters',tone:'kind',goto:'rally',check:{domain:'social',difficulty:'hard',failGoto:'expired'}},
-      {t:'Seek a private exemption',note:'Faster, but costly',tone:'grey',goto:'exempt',check:{domain:'bureau',difficulty:'hard',failGoto:'expired'}}
+      {t:'Seek a private exemption',note:'Faster, but costly',tone:'grey',goto:'exempt',check:{domain:'bureau',difficulty:'hard',failGoto:'expired'}},
+       {t:'Decline to sign',note:'Guaranteed · no roll',tone:'grey',goto:'expired'}
      ]}},
     draft:{lines:one('You find a procedural error: the workshop never received a hearing.'),
      choice:{prompt:'File now?',options:[
@@ -201,7 +204,8 @@
       {t:'Write the editorial',tone:'prudent',goto:'printed',check:{domain:'study',difficulty:'standard',failGoto:'revision',
        successEffects:[I('press_proof','Printer proof','📰')]}},
       {t:'Persuade the headmaster',tone:'kind',goto:'approved',check:{domain:'social',difficulty:'hard',failGoto:'revision'}},
-      {t:'Print anonymously',note:'Risk being caught',tone:'grey',goto:'secret',check:{domain:'hustle',difficulty:'standard',failGoto:'caught'}}
+      {t:'Print anonymously',note:'Risk being caught',tone:'grey',goto:'secret',check:{domain:'hustle',difficulty:'standard',failGoto:'caught'}},
+       {t:'Leave the paper unwritten',note:'Guaranteed · no roll',tone:'grey',goto:'quiet'}
      ]}},
     revision:{lines:one('The first attempt fails. The typesetter leaves one blank column on the page.'),
      choice:{prompt:'You still have the press.',options:[
@@ -225,7 +229,8 @@
       {t:'Inspect the crate',note:'Trade skill helps',tone:'prudent',goto:'marked',check:{domain:'hustle',skill:'retail',difficulty:'standard',failGoto:'baddeal',
        successEffects:[I('market_receipt','Original receipt','🧾')]}},
       {t:'Buy immediately',note:'$40 · no roll',tone:'greedy',require:{minAssets:40},effects:[M(-40)],goto:'profit'},
-      {t:'Walk away and report it',note:'No purchase',tone:'kind',goto:'reported',check:{domain:'bureau',difficulty:'standard',failGoto:'followed'}}
+      {t:'Walk away and report it',note:'No purchase',tone:'kind',goto:'reported',check:{domain:'bureau',difficulty:'standard',failGoto:'followed'}},
+       {t:'Walk past the stall',note:'Guaranteed · no roll',tone:'prudent',goto:'safe'}
      ]}},
     marked:{lines:one('The stamp matches a recent warehouse theft. You now hold the original receipt.'),
       choice:{prompt:'Decide what the receipt is worth.',options:[
