@@ -65,3 +65,11 @@
 @media(prefers-reduced-motion:reduce){.qs-head h2 span,.qs-live-glyph,.qs-art svg,.vn-roll-die,.vn-roll-fx{animation:none!important}.qs-card,.qs-glyph{transition:none!important}}
 
 .slipcard.vn{position:relative}
+
+/* Existing RPG background/perk selection: compact visual controls only. */
+.qs-picks{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.qs-pick{display:flex;flex-direction:column;gap:4px;min-width:0;text-align:left;padding:11px 12px;border:1px solid #bba47c;border-radius:11px;background:#fff6dc;color:#3d3222;cursor:pointer}
+.qs-pick:hover,.qs-pick:focus-visible{border-color:#865b28;background:#f3ddb3;outline-offset:2px}
+.qs-pick strong{font:800 12px Archivo,sans-serif}
+.qs-pick small{font:11px/1.35 Archivo,sans-serif;color:#726045}
+@media(max-width:420px){.qs-picks{grid-template-columns:1fr}}

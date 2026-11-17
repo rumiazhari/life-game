@@ -25,6 +25,23 @@
   if(live){
     html+='<button class="qs-current" data-qs-resume type="button"><span class="qs-live-glyph">🎭</span><span><small>IN PROGRESS</small><strong>'+esc(live.title)+'</strong></span><b>CONTINUE ▸</b></button>';
   }
+  if(rpg&&root.RPG&&!rpg.background){
+    html+='<div class="qs-section"><b>YOUR BACKGROUND</b><small>CHOOSE ONCE · FREE</small></div>';
+    html+='<div class="qs-picks">'+root.RPG.BACKGROUNDS.map(b=>
+      '<button class="qs-pick" type="button" data-qs-bg="'+esc(b.id)+'"><strong>'+esc(b.name)+'</strong><small>'+esc(b.line)+'</small></button>').join('')+'</div>';
+  }
+  if(rpg&&root.RPG&&rpg.grade>=2){
+    const held=Object.keys(rpg.perks||{}).filter(id=>rpg.perks[id]);
+    const nativeBackground=root.RPG.BACKGROUNDS.find(b=>b.id===rpg.background);
+    const used=held.filter(id=>!nativeBackground||id!==nativeBackground.perk).length;
+    const capacity=rpg.grade>=6?3:rpg.grade>=4?2:1;
+    const eligible=root.RPG.PERKS.filter(p=>p.minGrade<=rpg.grade&&!rpg.perks[p.id]);
+    if(used<capacity&&eligible.length){
+      html+='<div class="qs-section"><b>EARNED PERK</b><small>'+(capacity-used)+' SLOT AVAILABLE</small></div>';
+      html+='<div class="qs-picks">'+eligible.map(p=>
+        '<button class="qs-pick" type="button" data-qs-perk="'+esc(p.id)+'"><strong>'+esc(p.name)+'</strong><small>'+esc(p.desc)+'</small></button>').join('')+'</div>';
+    }
+  }
   html+='<div class="qs-section"><b>CHOOSE YOUR NEXT STORY</b><small>'+leads.length+' AVAILABLE</small></div>';
   if(!leads.length&&!live)html+='<div class="qs-blank">🕯️ <strong>No open leads</strong><span>New stories emerge as your life changes.</span></div>';
   else if(!leads.length)html+='<div class="qs-blank">Finish the current chapter to see new leads.</div>';
@@ -52,6 +69,10 @@
  if(sheet)sheet.addEventListener('click',e=>{
   if(e.target.closest('[data-qs-close]')){closeBoard();return;}
   if(e.target.closest('[data-qs-resume]')){closeBoard();if(typeof root.openStorySlip==='function')root.openStorySlip(true);return;}
+  const bg=e.target.closest('[data-qs-bg]');
+  if(bg){if(root.RPG&&root.RPG.setBackground(gameWorld(),'subject',bg.dataset.qsBg).ok)renderBoard();return;}
+  const perk=e.target.closest('[data-qs-perk]');
+  if(perk){if(root.RPG&&root.RPG.unlockPerk(gameWorld(),'subject',perk.dataset.qsPerk).ok)renderBoard();return;}
   const start=e.target.closest('[data-qs-start]');if(!start||start.disabled)return;
   const result=root.StorySystem.startQuest(gameWorld(),start.dataset.qsStart,{subject:player(),lineage:lineage(),year:gameWorld().year});
   if(!result.ok){renderBoard();return;}
