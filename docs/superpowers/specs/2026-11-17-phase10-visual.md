@@ -1,0 +1,11 @@
+# Phase 10 — Compact illustrated choice feedback and social context
+
+Base `master` 8a113f8cd785ca9fd9ae56646e93e0985fc0b889, branch `feat/rpg-phase10-visual-choice-feedback-20261117`.
+
+Existing VN cards in `js/ui.js` show text, 3d6 percent and modifier breakdown. The art is already rendered by `vnBackdropArt` and IllustrationSystem. The biggest missing visual feedback is **what a branch can actually change**, and **which real NPC the branch affects**, without revealing the narrative ending. This phase adds a pure, stateless `RPGVisual` helper at `js/ui/story-impact-ui.js`, loaded before `js/ui.js`, and a scoped CSS treatment in `css/story-rpg.css`.
+
+A choice card shows compact icon chips for immediate terminal-branch effects (health/relations/skill/money/scrutiny/bond/memory/evidence/job), using exact existing `run.scenes[goto].ending.effects`; intermediate-scene targets show a **STORY CONTINUES** marker, never a fabricated guaranteed reward. The 3d6 check card displays a native CSS probability meter labeled "Chance to pass this check" and small win/setback branches. Conditional failures use `check.failGoto` and label an alternative outcome, not a guaranteed penalty. Guaranteed third choices show "NO DICE · GUARANTEED". Data is read-only and all text passes escaping.
+
+NPC-directed chapters display a compact real-relationship strip (current trust/conflict/closeness) using `run.social.npcId` or `run.thread.npcId` or `run.context.npcId` and the real NpcSystem relation, with no alternate NPC model. If NPC absent/dead, omit it instead of fictitious values. An accessible scene tracker displays current beat/choice with a clear label, not a false total-story-progress percentage. Existing dice overlay remains but shows explicit margin and accurate target on resolution; reduced-motion setting remains honored. New visuals are responsive at 320,390,768,1440px, keyboard usable, no map changes, no CSS leakage to 2.5D map.
+
+Tests: branch effect interpretation (no hidden spoilers), precise odds/target, XSS escaping, zero state mutations, absent/real NPC, CSS reduced motion, actual rendered choice and dice overlay interaction in Chrome, and all regressions/diagnostics. Merge only verified phase.

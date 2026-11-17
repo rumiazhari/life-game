@@ -38,7 +38,7 @@ test('dossier contains a persistent world briefing, direct action receipt, and v
  assert.match(source,/id="worldBrief"/);
  assert.match(source,/id="actionReceipt"/);
  assert.match(source,/css\/style.css\?v=20261116-map7/);
- assert.match(source,/js\/ui.js\?v=20261117-phase2/);
+ assert.match(source,/js\/ui.js\?v=20261117-p10/);
  assert.match(source,/js\/main.js\?v=20261115-command1/);
 });
 test('world briefing renders actual employment, company and security indicators without changing the world',()=>{
