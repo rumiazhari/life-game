@@ -6,7 +6,7 @@
  const player=()=>typeof S!=='undefined'?S:null;
  const gameWorld=()=>typeof World!=='undefined'?World:null;
  const lineage=()=>typeof Lineage!=='undefined'?Lineage:null;
- const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','"':'&quot;'}[c]));
+ const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const artFor=arc=>({WORK:'factory_floor',FAMILY:'night_flat',BUREAU:'office',SCHOOL:'schoolyard',TRADE:'dock_night'})[arc]||'street';
  function closeBoard(){const w=el('storyWrap');if(w)w.classList.add('hidden');}
  function renderBoard(){
@@ -19,21 +19,40 @@
   const archive=Object.values(gameWorld().storyArchive||{}).filter(a=>a&&a.quest)
     .sort((a,b)=>b.resolvedYear-a.resolvedYear).slice(0,9);
   const kit=Object.values(gameWorld().storyItems||{}).slice(0,15);
+  const energyLeft=typeof planHours==='function'&&typeof energyUsed==='function'?Math.max(0,planHours()-energyUsed()):Infinity;
   const rpg=root.RPG&&root.RPG.recordFor?root.RPG.recordFor(gameWorld(),'subject'):null;
   let html='<div class="qs-head"><div><small>KARSEN · PERSONAL CHRONICLE</small><h2>YOUR STORIES <span>🎲</span></h2></div><button type="button" class="qs-x" data-qs-close aria-label="Close stories">×</button></div>';
   html+='<div class="qs-stats"><span>⚔️ GRADE <b>'+ (rpg&&root.RPG.roman?root.RPG.roman(rpg.grade):'I')+'</b></span><span>✦ MERIT <b>'+(rpg?rpg.merit:0)+'</b></span><span>📜 STORIES <b>'+archive.length+'</b></span></div>';
   if(live){
     html+='<button class="qs-current" data-qs-resume type="button"><span class="qs-live-glyph">🎭</span><span><small>IN PROGRESS</small><strong>'+esc(live.title)+'</strong></span><b>CONTINUE ▸</b></button>';
   }
+  if(rpg&&root.RPG&&!rpg.background){
+    html+='<div class="qs-section"><b>YOUR BACKGROUND</b><small>CHOOSE ONCE · FREE</small></div>';
+    html+='<div class="qs-picks">'+root.RPG.BACKGROUNDS.map(b=>
+      '<button class="qs-pick" type="button" data-qs-bg="'+esc(b.id)+'"><strong>'+esc(b.name)+'</strong><small>'+esc(b.line)+'</small></button>').join('')+'</div>';
+  }
+  if(rpg&&root.RPG&&rpg.grade>=2){
+    const held=Object.keys(rpg.perks||{}).filter(id=>rpg.perks[id]);
+    const nativeBackground=root.RPG.BACKGROUNDS.find(b=>b.id===rpg.background);
+    const used=held.filter(id=>!nativeBackground||id!==nativeBackground.perk).length;
+    const capacity=rpg.grade>=6?3:rpg.grade>=4?2:1;
+    const eligible=root.RPG.PERKS.filter(p=>p.minGrade<=rpg.grade&&!rpg.perks[p.id]);
+    if(used<capacity&&eligible.length){
+      html+='<div class="qs-section"><b>EARNED PERK</b><small>'+(capacity-used)+' SLOT AVAILABLE</small></div>';
+      html+='<div class="qs-picks">'+eligible.map(p=>
+        '<button class="qs-pick" type="button" data-qs-perk="'+esc(p.id)+'"><strong>'+esc(p.name)+'</strong><small>'+esc(p.desc)+'</small></button>').join('')+'</div>';
+    }
+  }
   html+='<div class="qs-section"><b>CHOOSE YOUR NEXT STORY</b><small>'+leads.length+' AVAILABLE</small></div>';
   if(!leads.length&&!live)html+='<div class="qs-blank">🕯️ <strong>No open leads</strong><span>New stories emerge as your life changes.</span></div>';
   else if(!leads.length)html+='<div class="qs-blank">Finish the current chapter to see new leads.</div>';
   else html+='<div class="qs-grid">'+leads.map((lead,i)=>{
     const img=typeof root.vnBackdropArt==='function'?root.vnBackdropArt(artFor(lead.arc)):'';
-    return '<button class="qs-card" type="button" data-qs-start="'+esc(lead.id)+'" '+(live?'disabled title="Finish the active story first"':'')+'>'+
+    const depleted=lead.energyCost>energyLeft;
+    return '<button class="qs-card" type="button" data-qs-start="'+esc(lead.id)+'" '+(live?'disabled title="Finish the active story first"':depleted?'disabled title="No annual energy remaining"':'')+'>'+
       '<div class="qs-art">'+img+'<span class="qs-arc">'+esc(lead.arc)+'</span><span class="qs-glyph">'+esc(lead.icon)+'</span></div>'+
       '<div class="qs-cardbody"><strong>'+esc(lead.title)+'</strong><small>'+esc(lead.hint)+'</small>'+
-      '<span class="qs-play">'+(lead.followup?'↩ CONTINUATION':'▶ PLAY STORY')+'</span></div></button>';
+      '<span class="qs-play">'+(depleted?'🔒 NO ENERGY':lead.energyCost?'🔋 '+lead.energyCost+' ENERGY':lead.followup?'↩ CONTINUATION':'▶ PLAY STORY')+'</span></div></button>';
    }).join('')+'</div>';
   html+='<div class="qs-section"><b>STORY GEAR</b><small>'+kit.length+' ITEMS</small></div>';
   html+='<div class="qs-kit">'+(kit.length?kit.map(k=>'<span title="'+esc(k.label)+'">'+esc(k.icon||'📜')+' '+esc(k.label)+'</span>').join(''):
@@ -52,9 +71,16 @@
  if(sheet)sheet.addEventListener('click',e=>{
   if(e.target.closest('[data-qs-close]')){closeBoard();return;}
   if(e.target.closest('[data-qs-resume]')){closeBoard();if(typeof root.openStorySlip==='function')root.openStorySlip(true);return;}
+  const bg=e.target.closest('[data-qs-bg]');
+  if(bg){if(root.RPG&&root.RPG.setBackground(gameWorld(),'subject',bg.dataset.qsBg).ok)renderBoard();return;}
+  const perk=e.target.closest('[data-qs-perk]');
+  if(perk){if(root.RPG&&root.RPG.unlockPerk(gameWorld(),'subject',perk.dataset.qsPerk).ok)renderBoard();return;}
   const start=e.target.closest('[data-qs-start]');if(!start||start.disabled)return;
-  const result=root.StorySystem.startQuest(gameWorld(),start.dataset.qsStart,{subject:player(),lineage:lineage(),year:gameWorld().year});
+  const left=typeof planHours==='function'&&typeof energyUsed==='function'?Math.max(0,planHours()-energyUsed()):Infinity;
+  const result=root.StorySystem.startQuest(gameWorld(),start.dataset.qsStart,{subject:player(),lineage:lineage(),year:gameWorld().year,remainingEnergy:left});
   if(!result.ok){renderBoard();return;}
+  const cost=start.dataset.qsStart==='quest_wage_file'||start.dataset.qsStart==='quest_wage_aftermath'?1:0;
+  if(cost&&typeof markActionDone==='function')markActionDone('story-chapter:'+result.runId);
   closeBoard();
   if(typeof root.openStorySlip==='function')root.openStorySlip(true);
  });

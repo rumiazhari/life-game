@@ -1873,7 +1873,10 @@ function computeHours(){
 }
 function planHours(){ const total=computeHours(); return Math.max(0,total-(S.autoTrain&&total>=1?1:0)); }
 function energyUsed(){
-  const done=doneActionsThisYear().reduce((a,id)=>{const d=PUR_MAP[id]?PUR_MAP[id].cost:(DEC_MAP[id]?DEC_MAP[id].cost:0);return a+(d||0);},0);
+  const done=doneActionsThisYear().reduce((a,id)=>{
+    const d=PUR_MAP[id]?PUR_MAP[id].cost:(DEC_MAP[id]?DEC_MAP[id].cost:0);
+    return a+(d||(/^story-chapter:story:\d{5,}$/.test(String(id))?1:0));
+  },0);
   return done+S.queue.reduce((a,q)=>a+(PUR_MAP[q.id]?PUR_MAP[q.id].cost:(DEC_MAP[q.id]?DEC_MAP[q.id].cost:0)),0);
 }
 // Actions performed directly this year (the LIVE sheet resolves instantly;

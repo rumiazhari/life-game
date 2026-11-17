@@ -13,7 +13,7 @@
    const company=w.businesses&&w.businesses[c.businessId];
    const peers=Object.values(w.employmentContracts||{}).filter(x=>x.businessId===c.businessId&&x.personId!=='subject'&&x.status==='active');
    const peer=peers.map(x=>w.npcs&&w.npcs[x.personId]).find(n=>n&&n.alive!==false);
-   return [{key:'employer',label:company&&company.name||'The employer',bind:c.businessId},
+   return [{key:'employer',label:company&&company.name||'The employer',bind:c.businessId,contractId:c.id},
      {key:'coworker',label:peer&&peer.name||'A colleague',bind:peer&&peer.id||null}];};
  const one=(t)=>[{sp:'narrator',t}];
  const ending=(id,title,epilogue,effects,tone='prudent')=>({
@@ -24,13 +24,13 @@
  const S=(stat,delta)=>({kind:'stat',stat,delta});
  const R=(delta)=>({kind:'scrutiny',delta});
  const I=(id,label,icon)=>({kind:'storyItem',id,label,icon});
- const mem=(type,summary,valence)=>({kind:'memory',type,summary,valence,intensity:.65});
+ const mem=(type,summary,valence,participants=[])=>({kind:'memory',type,summary,valence,intensity:.65,participants:participants.filter(Boolean)});
  const episodes=[
 
   {id:'quest_wage_file',quest:true,questTitle:'The Missing Wages',questHint:'A payroll discrepancy puts the whole workshop at risk.',
    questIcon:'📒',questArc:'WORK',domain:'work',weight:4,cast:employerCast,
    eligible:(w,s)=>adult(s)&&!!contract(w),
-   build(bind){const company=bind.employer.label,peer=bind.coworker.label;return {
+   build(bind){const company=bind.employer.label,peer=bind.coworker.label,peerIds=bind.coworker.bind?[bind.coworker.bind]:[];return {
     title:'THE MISSING WAGES',bg:'factory_floor',scenes:{
       open:{lines:one('A pay packet comes up short at '+company+'. '+peer+' asks you to look into the ledger.'),
        choice:{prompt:'Three ways into the same problem.',options:[
@@ -68,14 +68,14 @@
         {t:'Appeal to the Bureau',tone:'prudent',goto:'restored',check:{domain:'bureau',difficulty:'severe',failGoto:'reprisal'}},
         {t:'Leave the dispute alone',tone:'cold',goto:'quiet'}
        ]}},
-      restored:ending('wages_restored','THE LEDGER HOLDS','The payroll correction is recorded. Management cannot easily forget your name.',
-        [{kind:'jobRaise',amount:260},S('happiness',5),mem('wage_restored','The wage dispute was resolved through a recorded agreement.',.7)],'kind'),
-      compromise:ending('wages_compromise','A SMALLER VICTORY','The immediate dispute ends. The books remain incomplete.',
-        [{kind:'jobRaise',amount:110},S('happiness',2),mem('wage_compromise','A limited agreement settled the wage dispute.',.3)]),
+      restored:ending('wages_restored','THE LEDGER HOLDS','Management signs a future salary increase. The old missing wages remain disputed.',
+        [{kind:'jobRaise',amount:260,requireBusinessId:bind.employer.bind,requireContractId:bind.employer.contractId},S('happiness',5),mem('wage_restored','The wage dispute was resolved through a recorded agreement.',.7,peerIds)],'kind'),
+      compromise:ending('wages_compromise','A SMALLER VICTORY','A smaller future raise is agreed. The old pay packet remains unresolved.',
+        [{kind:'jobRaise',amount:110,requireBusinessId:bind.employer.bind,requireContractId:bind.employer.contractId},S('happiness',2),mem('wage_compromise','A limited agreement settled the wage dispute.',.3,peerIds)]),
       reprisal:ending('wages_reprisals','THE WATCH LIST','The complaint fails. The employer keeps the ledger; the Bureau keeps your name.',
-        [R(12),S('happiness',-7),mem('wage_reprisals','A disputed wage claim drew unwanted scrutiny.',-.7)],'cold'),
+        [R(12),S('happiness',-7),mem('wage_reprisals','A disputed wage claim drew unwanted scrutiny.',-.7,peerIds)],'cold'),
       quiet:ending('wages_quiet','NOTHING IN WRITING','The job survives. The missing wages do not return.',
-        [S('happiness',-3),mem('wage_quiet','The missing wages went unchallenged.',-.2)],'grey')
+        [S('happiness',-3),mem('wage_quiet','The missing wages went unchallenged.',-.2,peerIds)],'grey')
     }
    }; }
   },
