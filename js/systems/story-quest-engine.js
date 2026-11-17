@@ -108,7 +108,7 @@
  };
  story.fileAway=function(world,runId,options){
   const run=world&&world.storyRuns&&world.storyRuns[runId];
-  if(run&&run.quest&&run.episodeId==='quest_wage_file'&&run.status!=='ended')
+  if(run&&run.quest&&run.status!=='ended')
     return {applied:false,reason:'not_complete'};
   const out=nativeFile(world,runId,options);
   if(out&&out.applied&&run&&run.quest){

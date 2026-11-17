@@ -90,3 +90,155 @@ test('every cross-arc choice points to a real scene, including 3d6 fail-forward 
  assert.ok(report.every(x=>x.count>=4&&x.options>=3&&x.bad.length===0),JSON.stringify(report));
 });
 
+
+test('career review uses original contract only and remembers the actual coworker',()=>{
+ const ctx=ready('career-end');const hired=hire(ctx,true);archive(ctx,'quest_wage_file','wages_restored');
+ assert.equal(start(ctx,'quest_reference_file').ok,true);
+ step(ctx);expose(ctx,"WorldSimulation.streamFor=()=>({next:()=>.999});");
+ const first=choose(ctx,0);
+ assert.equal(first.applied,true);assert.equal(first.check.success,true);
+ assert.equal(expose(ctx,"!!World.storyItems.career_letter"),true);
+ step(ctx);const second=choose(ctx,0);
+ assert.equal(second.applied,true);assert.equal(second.check.success,true);
+ const state=run(ctx,"return {ending:StorySystem.currentView(World).ending.id,"+
+  "salary:EmploymentSystem.activeForPerson(World,'subject')[0].annualSalary,"+
+  "coworkerMem:Object.values(World.relationshipMemories||{}).some(m=>m.participants.includes('npc:940001')),"+
+  "bond:World.npcs['npc:940001'].relationships[String(S.npcId||'subject')]||null};");
+ assert.equal(state.ending,'reference_raised');
+ assert.equal(state.salary,hired.annualSalary+180);
+ assert.equal(state.coworkerMem,true);
+ assert.ok(state.bond&&state.bond.closeness>=50);
+ const id=expose(ctx,"StorySystem.liveRun(World).id");
+ const before=expose(ctx,"RPG.meritOf(World,'subject')");
+ const filed=run(ctx,"return StorySystem.fileAway(World,"+JSON.stringify(id)+",{year:World.year});");
+ assert.equal(filed.applied,true);
+ assert.equal(expose(ctx,"RPG.meritOf(World,'subject')"),before+20);
+ assert.equal(run(ctx,"return StorySystem.fileAway(World,"+JSON.stringify(id)+",{year:World.year});").applied,false);
+ assert.equal(expose(ctx,"RPG.meritOf(World,'subject')"),before+20);
+ const same=run(ctx,"return StorySystem.availableQuests(World,{subject:S,lineage:Lineage}).map(q=>q.id)");
+ assert.ok(!same.includes('quest_reference_return'));
+ expose(ctx,"World.year++;");
+ assert.ok(run(ctx,"return StorySystem.availableQuests(World,{subject:S,lineage:Lineage}).map(q=>q.id)").includes('quest_reference_return'));
+});
+test('career review cannot raise a replacement contract or a rehire at the same employer',()=>{
+ for(const rehire of [false,true]){
+  const ctx=ready('career-switch-'+rehire);const hired=hire(ctx);
+  archive(ctx,'quest_wage_file','wages_compromise');
+  start(ctx,'quest_reference_file');step(ctx);
+  expose(ctx,"WorldSimulation.streamFor=()=>({next:()=>.999});");
+  assert.equal(choose(ctx,0).check.success,true);
+  const company=run(ctx,"return {id:EmploymentSystem.activeForPerson(World,'subject')[0].businessId,"+
+    "contract:EmploymentSystem.activeForPerson(World,'subject')[0].id};");
+  const after=run(ctx,"const old=EmploymentSystem.activeForPerson(World,'subject')[0];"+
+   "EmploymentSystem.end(World,old.id,'terminated','career_swap',World.year,{subject:S});"+
+   "const b="+(rehire?"BusinessSystem.get(World,old.businessId)":
+    "BusinessSystem.create(World,{settlementId:World.activeSettlementId,sector:'retail',name:'New Firm'})")+";"+
+   "const newer=EmploymentSystem.hire(World,{personId:'subject',businessId:b.id,annualSalary:1980,occupationName:'Worker',jobTier:1});"+
+   "return {id:newer.id,salary:newer.annualSalary,assets:S.assets};");
+  assert.notEqual(after.id,company.contract);
+  step(ctx);assert.equal(choose(ctx,0).check.success,true);
+  const end=run(ctx,"return {salary:EmploymentSystem.activeForPerson(World,'subject')[0].annualSalary,"+
+    "assets:S.assets,ending:StorySystem.currentView(World).ending.id};");
+  assert.equal(end.ending,'reference_raised');
+  assert.equal(end.salary,after.salary);
+  assert.equal(end.assets,after.assets);
+ }
+});
+test('career without a real coworker never invents NPC bonds and still has a guaranteed route',()=>{
+ const ctx=ready('career-nopeer');hire(ctx);archive(ctx,'quest_ward_petition','ward_expired');
+ assert.equal(start(ctx,'quest_reference_file').ok,true);step(ctx);
+ const startView=run(ctx,"return StorySystem.currentView(World,{subject:S});");
+ assert.equal(startView.options.length,3);
+ assert.equal(startView.options[2].check,null);
+ assert.equal(choose(ctx,2).applied,true);
+ const state=run(ctx,"return {ending:StorySystem.currentView(World).ending.id,"+
+  "mem:Object.values(World.relationshipMemories||{}).filter(x=>x.participants.includes('npc:0')),"+
+  "npcs:Object.keys(World.npcs||{}).length};");
+ assert.equal(state.ending,'reference_quiet');
+ assert.equal(state.mem.length,0);
+});
+test('underworld report yields canonical evidence, changes scrutiny and opens next-year witness',()=>{
+ const ctx=ready('grey-good');archive(ctx,'quest_night_market','market_profit');
+ archive(ctx,'quest_ward_petition','ward_reopened');
+ expose(ctx,'S.scrutiny=25;');
+ assert.equal(start(ctx,'quest_grey_manifest').ok,true);step(ctx);
+ expose(ctx,"WorldSimulation.streamFor=()=>({next:()=>.999});");
+ const first=choose(ctx,0);
+ assert.equal(first.check.success,true);
+ const state=run(ctx,"return {ending:StorySystem.currentView(World).ending.id,"+
+  "scrutiny:S.scrutiny,assets:S.assets,evidence:!!World.storyItems.grey_testimony};");
+ assert.equal(state.ending,'grey_reported');
+ assert.equal(state.scrutiny,16);
+ assert.equal(state.evidence,true);
+ const id=expose(ctx,"StorySystem.liveRun(World).id");
+ assert.equal(run(ctx,"return StorySystem.fileAway(World,"+JSON.stringify(id)+",{year:World.year});").applied,true);
+ assert.ok(!run(ctx,"return StorySystem.availableQuests(World,{subject:S,lineage:Lineage}).map(e=>e.id)").includes('quest_grey_witness'));
+ expose(ctx,"World.year++;");
+ assert.ok(run(ctx,"return StorySystem.availableQuests(World,{subject:S,lineage:Lineage}).map(e=>e.id)").includes('quest_grey_witness'));
+ assert.equal(start(ctx,'quest_grey_witness').ok,true);step(ctx);
+ const witness=run(ctx,"return StorySystem.currentView(World,{subject:S}).options[0]");
+ assert.equal(witness.available,true);
+ assert.equal(choose(ctx,0).check.success,true);
+ const conclusion=run(ctx,"return {ending:StorySystem.currentView(World).ending.id,scrutiny:S.scrutiny}");
+ assert.equal(conclusion.ending,'grey_witness_cleared');
+ assert.equal(conclusion.scrutiny,4);
+});
+test('underworld failed checks fail forward, without rerolls or unearned evidence',()=>{
+ const ctx=ready('grey-fail');archive(ctx,'quest_night_market','market_safe');
+ expose(ctx,'S.scrutiny=12;');
+ start(ctx,'quest_grey_manifest');step(ctx);
+ expose(ctx,"WorldSimulation.streamFor=()=>({next:()=>0});");
+ const first=choose(ctx,0);
+ assert.equal(first.applied,true);
+ assert.equal(first.check.success,false);
+ assert.equal(first.check.rolls.join(','),'1,1,1');
+ assert.equal(choose(ctx,0).applied,false);
+ const state=run(ctx,"return {ending:StorySystem.currentView(World).ending.id,"+
+  "scrutiny:S.scrutiny,evidence:!!World.storyItems.grey_testimony}");
+ assert.equal(state.ending,'grey_exposed');
+ assert.equal(state.scrutiny,23);
+ assert.equal(state.evidence,false);
+});
+test('underworld concealed outcome pays only once and a later witness can always refuse',()=>{
+ const ctx=ready('grey-cash');archive(ctx,'quest_night_market','market_profit');
+ const initial=expose(ctx,'S.assets');
+ start(ctx,'quest_grey_manifest');step(ctx);
+ expose(ctx,"WorldSimulation.streamFor=()=>({next:()=>.999});");
+ assert.equal(choose(ctx,1).check.success,true);
+ assert.equal(expose(ctx,'S.assets'),initial+80);
+ const id=expose(ctx,"StorySystem.liveRun(World).id");
+ assert.equal(run(ctx,"return StorySystem.fileAway(World,"+JSON.stringify(id)+",{year:World.year});").applied,true);
+ assert.equal(run(ctx,"return StorySystem.fileAway(World,"+JSON.stringify(id)+",{year:World.year});").applied,false);
+ assert.equal(expose(ctx,'S.assets'),initial+80);
+ expose(ctx,"World.year++;");
+ start(ctx,'quest_grey_witness');step(ctx);
+ const view=run(ctx,"return StorySystem.currentView(World,{subject:S})");
+ assert.equal(view.options[0].available,false);
+ assert.equal(view.options[2].available,true);
+ assert.equal(choose(ctx,2).applied,true);
+ assert.equal(expose(ctx,'StorySystem.currentView(World).ending.id'),'grey_witness_depart');
+});
+test('an unfinished quest cannot be archived prematurely for merit or a follow-up',()=>{
+ const ctx=ready('early-file');hire(ctx);archive(ctx,'quest_wage_file','wages_restored');
+ const started=start(ctx,'quest_reference_file');
+ const before=run(ctx,"return {count:Object.keys(World.storyArchive).length,merit:RPG.meritOf(World,'subject')}");
+ const result=run(ctx,"return StorySystem.fileAway(World,"+JSON.stringify(started.runId)+",{year:World.year});");
+ const after=run(ctx,"return {count:Object.keys(World.storyArchive).length,merit:RPG.meritOf(World,'subject'),"+
+  "status:World.storyRuns["+JSON.stringify(started.runId)+"]&&World.storyRuns["+JSON.stringify(started.runId)+"].status}");
+ assert.equal(result.applied,false);
+ assert.deepEqual(after,{...before,status:'playing'});
+});
+
+test('an employment-system error cannot turn a scoped salary review into free cash',()=>{
+ const ctx=ready('salary-failure');hire(ctx);
+ archive(ctx,'quest_wage_file','wages_restored');
+ const initial=expose(ctx,"S.assets");
+ start(ctx,'quest_reference_file');step(ctx);
+ expose(ctx,"WorldSimulation.streamFor=()=>({next:()=>.999});");
+ assert.equal(choose(ctx,0).check.success,true);
+ expose(ctx,"EmploymentSystem.adjustSalary=()=>{throw Error('simulated payroll failure')};");
+ step(ctx);assert.equal(choose(ctx,0).check.success,true);
+ const actual=run(ctx,"return {cash:S.assets,ending:StorySystem.currentView(World).ending.id}");
+ assert.equal(actual.ending,'reference_raised');
+ assert.equal(actual.cash,initial,'scoped raises never create a cash payment on exception');
+});
