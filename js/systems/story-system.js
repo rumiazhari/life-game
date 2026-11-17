@@ -131,10 +131,14 @@
         case 'jobRaise': {
           try{
             const c=root.EmploymentSystem&&root.EmploymentSystem.activeForPerson?root.EmploymentSystem.activeForPerson(world,'subject')[0]:null;
+            // Scoped story raises must remain with the employer from the original chapter.
+            if(op.requireBusinessId&&(!c||c.businessId!==op.requireBusinessId))break;
             if(c&&typeof root.EmploymentSystem.adjustSalary==='function'){
+              const before=c.annualSalary;
               root.EmploymentSystem.adjustSalary(world,c.id,c.annualSalary+clamp(finite(op.amount,150),50,800),'episode_merit',year);
-              chips.push({txt:'+'+(op.amount||220).toLocaleString('en-US')+'/YR WAGE',plus:true});
-            } else { clampMoneyDirect(S,op.amount||220,chips); }
+              if(!op.requireBusinessId||c.annualSalary>before)
+                chips.push({txt:'+'+(op.amount||220).toLocaleString('en-US')+'/YR WAGE',plus:true});
+            } else if(!op.requireBusinessId){ clampMoneyDirect(S,op.amount||220,chips); }
           }catch(e){ clampMoneyDirect(S,op.amount||220,chips); }
           break;
         }

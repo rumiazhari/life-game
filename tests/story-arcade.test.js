@@ -111,3 +111,47 @@ test('a detained player cannot start a wage story with zero discretionary energy
   assert.equal(expose(ctx,'Object.keys(World.storyRuns).length'),0);
 });
 
+
+test('wage restoration changes the original employment contract and records the actual coworker',()=>{
+  const {ctx}=session('arcade-worker-memory');
+  const out=JSON.parse(expose(ctx,"JSON.stringify((function(){"+
+    "const b=BusinessSystem.create(World,{settlementId:World.activeSettlementId,sector:'manufacturing',name:'Foundry A'});"+
+    "const peer=NpcSystem.upsert(World,{id:'npc:830001',firstName:'Mira',lastName:'Tor',birthYear:World.year-25,locationId:World.activeSettlementId});"+
+    "const me=EmploymentSystem.hire(World,{personId:'subject',businessId:b.id,annualSalary:1450,occupationName:'Worker',jobTier:1});const beforeSalary=me.annualSalary;"+
+    "EmploymentSystem.hire(World,{personId:peer.id,businessId:b.id,annualSalary:1100,occupationName:'Worker',jobTier:1});"+
+    "StorySystem.startQuest(World,'quest_wage_file',{subject:S,lineage:Lineage,year:World.year});"+
+    "const run=StorySystem.liveRun(World);"+
+    "StorySystem.next(World,{subject:S,lineage:Lineage,year:World.year});"+
+    "WorldSimulation.streamFor=()=>({next:()=>.999});"+
+    "StorySystem.choose(World,0,{subject:S,lineage:Lineage,year:World.year});"+
+    "StorySystem.next(World,{subject:S,lineage:Lineage,year:World.year});"+
+    "StorySystem.choose(World,0,{subject:S,lineage:Lineage,year:World.year});"+
+    "const changed=EmploymentSystem.activeForPerson(World,'subject')[0];"+
+    "const participants=Object.values(World.relationshipMemories||{}).flatMap(m=>m.participants);"+
+    "return {before:beforeSalary,after:changed.annualSalary,peer:peer.id,participants,ending:StorySystem.currentView(World).ending.id};})())"));
+  assert.equal(out.ending,'wages_restored');
+  assert.equal(out.after,out.before+260);
+  assert.ok(out.participants.includes(out.peer),'coworker memory must reference the stable NPC');
+});
+test('changing employer mid-case never raises the new contract or awards imaginary cash',()=>{
+  const {ctx}=session('arcade-switch');
+  const out=JSON.parse(expose(ctx,"JSON.stringify((function(){"+
+    "const a=BusinessSystem.create(World,{settlementId:World.activeSettlementId,sector:'retail',name:'First Workshop'});"+
+    "const b=BusinessSystem.create(World,{settlementId:World.activeSettlementId,sector:'retail',name:'Second Workshop'});"+
+    "EmploymentSystem.hire(World,{personId:'subject',businessId:a.id,annualSalary:1250,occupationName:'Worker',jobTier:1});"+
+    "StorySystem.startQuest(World,'quest_wage_file',{subject:S,lineage:Lineage,year:World.year});"+
+    "StorySystem.next(World,{subject:S,lineage:Lineage,year:World.year});"+
+    "WorldSimulation.streamFor=()=>({next:()=>.999});"+
+    "StorySystem.choose(World,1,{subject:S,lineage:Lineage,year:World.year});"+
+    "const old=EmploymentSystem.activeForPerson(World,'subject')[0];"+
+    "EmploymentSystem.end(World,old.id,'terminated','switched',World.year,{subject:S});"+
+    "EmploymentSystem.hire(World,{personId:'subject',businessId:b.id,annualSalary:1700,occupationName:'Clerk',jobTier:1});"+
+    "const before=EmploymentSystem.activeForPerson(World,'subject')[0].annualSalary,assets=S.assets;"+
+    "StorySystem.next(World,{subject:S,lineage:Lineage,year:World.year});"+
+    "StorySystem.choose(World,0,{subject:S,lineage:Lineage,year:World.year});"+
+    "return {before,after:EmploymentSystem.activeForPerson(World,'subject')[0].annualSalary,assets,cash:S.assets,ending:StorySystem.currentView(World).ending.id};})())"));
+  assert.equal(out.ending,'wages_compromise');
+  assert.equal(out.after,out.before,'raise must not jump to replacement employer');
+  assert.equal(out.cash,out.assets,'wage raise is not direct cash/arrears');
+});
+
