@@ -1,0 +1,650 @@
+{
+  "schema": "life-file-rpg-simulated-playthrough-v1",
+  "provenance": "automated_agent_simulation_not_human_testing",
+  "sessions": 180,
+  "terminalRuns": 180,
+  "chapterCount": 12,
+  "seedsPerPolicy": 5,
+  "policies": [
+    "bold",
+    "prudent",
+    "safe"
+  ],
+  "uniqueQuestIds": [
+    "quest_wage_file",
+    "quest_wage_aftermath",
+    "quest_kitchen_table",
+    "quest_kitchen_return",
+    "quest_ward_petition",
+    "quest_ward_return",
+    "quest_school_press",
+    "quest_night_market",
+    "quest_reference_file",
+    "quest_reference_return",
+    "quest_grey_manifest",
+    "quest_grey_witness"
+  ],
+  "results": [
+    {
+      "id": "quest_wage_file",
+      "policy": "bold",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 10,
+      "successes": 8,
+      "choices": 10,
+      "maxSteps": 4,
+      "duplicatePayouts": 0,
+      "endings": {
+        "wages_restored": 3,
+        "wages_reprisals": 2
+      }
+    },
+    {
+      "id": "quest_wage_file",
+      "policy": "prudent",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 10,
+      "successes": 9,
+      "choices": 10,
+      "maxSteps": 4,
+      "duplicatePayouts": 0,
+      "endings": {
+        "wages_restored": 4,
+        "wages_reprisals": 1
+      }
+    },
+    {
+      "id": "quest_wage_file",
+      "policy": "safe",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 0,
+      "successes": 0,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "wages_quiet": 5
+      }
+    },
+    {
+      "id": "quest_wage_aftermath",
+      "policy": "bold",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 5,
+      "successes": 1,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "wage_follow_cost": 4,
+        "wage_follow_solid": 1
+      }
+    },
+    {
+      "id": "quest_wage_aftermath",
+      "policy": "prudent",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 5,
+      "successes": 4,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "wage_follow_solid": 4,
+        "wage_follow_cost": 1
+      }
+    },
+    {
+      "id": "quest_wage_aftermath",
+      "policy": "safe",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 0,
+      "successes": 0,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "wage_follow_settle": 5
+      }
+    },
+    {
+      "id": "quest_kitchen_table",
+      "policy": "bold",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 5,
+      "successes": 4,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "care_clinic": 4,
+        "care_alone": 1
+      }
+    },
+    {
+      "id": "quest_kitchen_table",
+      "policy": "prudent",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 5,
+      "successes": 4,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "care_recovered": 4,
+        "care_overwork": 1
+      }
+    },
+    {
+      "id": "quest_kitchen_table",
+      "policy": "safe",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 0,
+      "successes": 0,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "care_clinic": 5
+      }
+    },
+    {
+      "id": "quest_kitchen_return",
+      "policy": "bold",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 5,
+      "successes": 5,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "family_taught": 5
+      }
+    },
+    {
+      "id": "quest_kitchen_return",
+      "policy": "prudent",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 5,
+      "successes": 4,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "family_taught": 4,
+        "family_rest": 1
+      }
+    },
+    {
+      "id": "quest_kitchen_return",
+      "policy": "safe",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 0,
+      "successes": 0,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "family_rest": 5
+      }
+    },
+    {
+      "id": "quest_ward_petition",
+      "policy": "bold",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 8,
+      "successes": 5,
+      "choices": 8,
+      "maxSteps": 4,
+      "duplicatePayouts": 0,
+      "endings": {
+        "ward_reopened": 2,
+        "ward_expired": 2,
+        "ward_retaliation": 1
+      }
+    },
+    {
+      "id": "quest_ward_petition",
+      "policy": "prudent",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 10,
+      "successes": 9,
+      "choices": 10,
+      "maxSteps": 4,
+      "duplicatePayouts": 0,
+      "endings": {
+        "ward_reopened": 4,
+        "ward_retaliation": 1
+      }
+    },
+    {
+      "id": "quest_ward_petition",
+      "policy": "safe",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 0,
+      "successes": 0,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "ward_expired": 5
+      }
+    },
+    {
+      "id": "quest_ward_return",
+      "policy": "bold",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 5,
+      "successes": 1,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "ward_cleared": 1,
+        "ward_noticed": 4
+      }
+    },
+    {
+      "id": "quest_ward_return",
+      "policy": "prudent",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 5,
+      "successes": 4,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "ward_organized": 4,
+        "ward_noticed": 1
+      }
+    },
+    {
+      "id": "quest_ward_return",
+      "policy": "safe",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 0,
+      "successes": 0,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "ward_depart": 5
+      }
+    },
+    {
+      "id": "quest_school_press",
+      "policy": "bold",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 7,
+      "successes": 5,
+      "choices": 7,
+      "maxSteps": 4,
+      "duplicatePayouts": 0,
+      "endings": {
+        "press_approved": 5
+      }
+    },
+    {
+      "id": "quest_school_press",
+      "policy": "prudent",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 6,
+      "successes": 5,
+      "choices": 6,
+      "maxSteps": 4,
+      "duplicatePayouts": 0,
+      "endings": {
+        "press_published": 4,
+        "press_approved": 1
+      }
+    },
+    {
+      "id": "quest_school_press",
+      "policy": "safe",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 0,
+      "successes": 0,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "press_quiet": 5
+      }
+    },
+    {
+      "id": "quest_night_market",
+      "policy": "bold",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 10,
+      "successes": 9,
+      "choices": 10,
+      "maxSteps": 4,
+      "duplicatePayouts": 0,
+      "endings": {
+        "market_profit": 4,
+        "market_baddeal": 1
+      }
+    },
+    {
+      "id": "quest_night_market",
+      "policy": "prudent",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 9,
+      "successes": 7,
+      "choices": 9,
+      "maxSteps": 4,
+      "duplicatePayouts": 0,
+      "endings": {
+        "market_followed": 1,
+        "market_returned": 3,
+        "market_baddeal": 1
+      }
+    },
+    {
+      "id": "quest_night_market",
+      "policy": "safe",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 0,
+      "successes": 0,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "market_profit": 5
+      }
+    },
+    {
+      "id": "quest_reference_file",
+      "policy": "bold",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 11,
+      "successes": 4,
+      "choices": 11,
+      "maxSteps": 6,
+      "duplicatePayouts": 0,
+      "endings": {
+        "reference_watchlist": 3,
+        "reference_raised": 2
+      }
+    },
+    {
+      "id": "quest_reference_file",
+      "policy": "prudent",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 8,
+      "successes": 5,
+      "choices": 11,
+      "maxSteps": 6,
+      "duplicatePayouts": 0,
+      "endings": {
+        "reference_trained": 3,
+        "reference_raised": 2
+      }
+    },
+    {
+      "id": "quest_reference_file",
+      "policy": "safe",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 0,
+      "successes": 0,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "reference_quiet": 5
+      }
+    },
+    {
+      "id": "quest_reference_return",
+      "policy": "bold",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 5,
+      "successes": 3,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "reference_return_recognized": 3,
+        "reference_return_setback": 2
+      }
+    },
+    {
+      "id": "quest_reference_return",
+      "policy": "prudent",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 5,
+      "successes": 4,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "reference_return_setback": 1,
+        "reference_return_community": 4
+      }
+    },
+    {
+      "id": "quest_reference_return",
+      "policy": "safe",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 0,
+      "successes": 0,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "reference_return_rest": 5
+      }
+    },
+    {
+      "id": "quest_grey_manifest",
+      "policy": "bold",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 5,
+      "successes": 3,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "grey_reported": 3,
+        "grey_exposed": 2
+      }
+    },
+    {
+      "id": "quest_grey_manifest",
+      "policy": "prudent",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 5,
+      "successes": 4,
+      "choices": 10,
+      "maxSteps": 4,
+      "duplicatePayouts": 0,
+      "endings": {
+        "grey_reported": 4,
+        "grey_exposed": 1
+      }
+    },
+    {
+      "id": "quest_grey_manifest",
+      "policy": "safe",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 0,
+      "successes": 0,
+      "choices": 10,
+      "maxSteps": 4,
+      "duplicatePayouts": 0,
+      "endings": {
+        "grey_quiet": 5
+      }
+    },
+    {
+      "id": "quest_grey_witness",
+      "policy": "bold",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 5,
+      "successes": 2,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "grey_witness_noticed": 3,
+        "grey_witness_protected": 2
+      }
+    },
+    {
+      "id": "quest_grey_witness",
+      "policy": "prudent",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 0,
+      "successes": 0,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "grey_witness_depart": 5
+      }
+    },
+    {
+      "id": "quest_grey_witness",
+      "policy": "safe",
+      "runs": 5,
+      "completed": 5,
+      "filed": 5,
+      "checks": 0,
+      "successes": 0,
+      "choices": 5,
+      "maxSteps": 2,
+      "duplicatePayouts": 0,
+      "endings": {
+        "grey_witness_depart": 5
+      }
+    }
+  ],
+  "followups": [
+    {
+      "id": "quest_wage_aftermath",
+      "after": "quest_wage_file",
+      "firstFiling": true,
+      "sameYearAvailable": false,
+      "nextYearAvailable": true,
+      "followupFiling": true,
+      "duplicatedMerit": false,
+      "firstEnding": "wages_quiet",
+      "secondEnding": "wage_follow_solid"
+    },
+    {
+      "id": "quest_kitchen_return",
+      "after": "quest_kitchen_table",
+      "firstFiling": true,
+      "sameYearAvailable": false,
+      "nextYearAvailable": true,
+      "followupFiling": true,
+      "duplicatedMerit": false,
+      "firstEnding": "care_clinic",
+      "secondEnding": "family_rest"
+    },
+    {
+      "id": "quest_ward_return",
+      "after": "quest_ward_petition",
+      "firstFiling": true,
+      "sameYearAvailable": false,
+      "nextYearAvailable": true,
+      "followupFiling": true,
+      "duplicatedMerit": false,
+      "firstEnding": "ward_expired",
+      "secondEnding": "ward_noticed"
+    },
+    {
+      "id": "quest_reference_return",
+      "after": "quest_reference_file",
+      "firstFiling": true,
+      "sameYearAvailable": false,
+      "nextYearAvailable": true,
+      "followupFiling": true,
+      "duplicatedMerit": false,
+      "firstEnding": "reference_quiet",
+      "secondEnding": "reference_return_community"
+    },
+    {
+      "id": "quest_grey_witness",
+      "after": "quest_grey_manifest",
+      "firstFiling": true,
+      "sameYearAvailable": false,
+      "nextYearAvailable": true,
+      "followupFiling": true,
+      "duplicatedMerit": false,
+      "firstEnding": "grey_quiet",
+      "secondEnding": "grey_witness_depart"
+    }
+  ],
+  "failures": []
+}
