@@ -242,3 +242,67 @@ test('an employment-system error cannot turn a scoped salary review into free ca
  assert.equal(actual.ending,'reference_raised');
  assert.equal(actual.cash,initial,'scoped raises never create a cash payment on exception');
 });
+
+test('new chapters advertise a one-energy cost while older non-wage quests remain free',()=>{
+ const ctx=ready('energy-meta');hire(ctx);archive(ctx,'quest_wage_file','wages_restored');
+ archive(ctx,'quest_night_market','market_safe');
+ const out=run(ctx,"const leads=StorySystem.availableQuests(World,{subject:S,lineage:Lineage});"+
+  "return Object.fromEntries(leads.map(x=>[x.id,x.energyCost]));");
+ assert.equal(out.quest_reference_file,1);
+ assert.equal(out.quest_grey_manifest,1);
+ assert.equal(out.quest_kitchen_table,0);
+ assert.equal(out.quest_wage_aftermath,1);
+});
+test('new chapter start rejects zero energy without mutating story state, then accepts one',()=>{
+ const ctx=ready('energy-preflight');hire(ctx);archive(ctx,'quest_wage_file','wages_restored');
+ const out=run(ctx,"const before=World.storyCounter;const blocked=StorySystem.startQuest(World,'quest_reference_file',"+
+  "{subject:S,lineage:Lineage,year:World.year,remainingEnergy:0});"+
+  "const middle=World.storyCounter;const success=StorySystem.startQuest(World,'quest_reference_file',"+
+  "{subject:S,lineage:Lineage,year:World.year,remainingEnergy:1});"+
+  "return {before,middle,blocked,success,after:World.storyCounter,live:Object.keys(World.storyRuns).length};");
+ assert.equal(out.blocked.ok,false);
+ assert.equal(out.blocked.reason,'no_energy');
+ assert.equal(out.before,out.middle);
+ assert.equal(out.success.ok,true);
+ assert.equal(out.success.energyCost,1);
+ assert.equal(out.live,1);
+ assert.equal(out.after,out.before+1);
+});
+function boardSession(){
+ const ctx=createWorldContext();
+ const elements={};
+ const make=()=>({classList:{add(){},remove(){},toggle(){},contains(){return false;}},
+  style:{},dataset:{},innerHTML:'',textContent:'',disabled:false,handlers:{},
+  addEventListener(t,fn){this.handlers[t]=fn;},removeEventListener(){},
+  appendChild(){},remove(){},focus(){},setAttribute(){},
+  querySelector(){return null;},querySelectorAll(){return [];},closest(){return null;}});
+ ctx.document={querySelector(k){return elements[k]||(elements[k]=make());},
+  querySelectorAll(){return [];},getElementById(k){return elements['#'+k]||(elements['#'+k]=make());},
+  createElement(){return make();},addEventListener(){},body:make(),documentElement:make()};
+ ctx.addEventListener=()=>{};ctx.setTimeout=()=>0;ctx.clearTimeout=()=>{};
+ ctx.setInterval=()=>0;ctx.clearInterval=()=>{};
+ loadGameFiles(ctx,['js/systems/story-quests.js',MODULE,'js/systems/story-rpg-checks.js',
+  'js/systems/story-quest-engine.js','js/systems/world-gameplay.js',
+  'js/medical.js','js/ui.js','js/ui/story-quest-ui.js']);
+ expose(ctx,"Random.setSeed('ui-p3');newWorld();newLineage();newHold();newSubject();"+
+  "S.age=28;S.alive=true;S.jailUntil=0;S.assets=700;S.health=88;World.year=S.dob+S.age;StorySystem.ensure(World);"+
+  "openStorySlip=function(){};");
+ return ctx;
+}
+test('Stories card for new career chapter spends exactly one existing annual energy',()=>{
+ const ctx=boardSession();
+ run(ctx,"const b=BusinessSystem.create(World,{settlementId:World.activeSettlementId,sector:'retail',name:'Riverside'});"+
+  "EmploymentSystem.hire(World,{personId:'subject',businessId:b.id,annualSalary:1500,occupationName:'Worker',jobTier:1});"+
+  "World.storyArchive.test={episodeId:'quest_wage_file',endingId:'wages_restored',resolvedYear:World.year-1};return true;");
+ const out=run(ctx,"renderStoryBoard();const page=document.getElementById('storySheet').innerHTML;"+
+  "const before=energyUsed();document.getElementById('storySheet').handlers.click({target:{closest(sel){"+
+  "return sel==='[data-qs-start]'?{disabled:false,dataset:{qsStart:'quest_reference_file'}}:null;}}});"+
+  "return {page,before,after:energyUsed(),runs:Object.keys(World.storyRuns).length,"+
+  "ledger:doneActionsThisYear().filter(x=>x.startsWith('story-chapter:')).length};");
+ assert.match(out.page,/data-qs-start="quest_reference_file"/);
+ assert.match(out.page,/1 ENERGY/);
+ assert.match(out.page,/CAREER/);
+ assert.equal(out.after-out.before,1);
+ assert.equal(out.ledger,1);
+ assert.equal(out.runs,1);
+});
