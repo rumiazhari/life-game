@@ -1,7 +1,7 @@
 # Life File — RPG Phase 4 Formative Playtest Protocol
 
-**Status:** Ready for participant testing; no human participant data collected.  
-**Build target:** Phase 4 on `master`, after verification.  
+**Status:** Ready for participant testing; no human participant data collected.
+**Build target:** Phase 4 on `master`, after verification.
 **Purpose:** Detect friction, opaque chance calculations, false choice agency and unclear multi-year consequences. Do not call automated test pass rates evidence of enjoyment.
 
 ## Sampling and ethics
