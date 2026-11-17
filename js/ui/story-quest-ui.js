@@ -114,8 +114,12 @@
       '<span class="qs-play">'+(depleted?'🔒 NO ENERGY':lead.energyCost?'🔋 '+lead.energyCost+' ENERGY':lead.followup?'↩ CONTINUATION':'▶ PLAY STORY')+'</span></div></button>';
    }).join('')+'</div>';
   html+='<div class="qs-section"><b>STORY GEAR</b><small>'+kit.length+' ITEMS</small></div>';
-  html+='<div class="qs-kit">'+(kit.length?kit.map(k=>'<span title="'+esc(k.label)+'">'+esc(k.icon||'📜')+' '+esc(k.label)+'</span>').join(''):
-    '<span class="qs-muted">Earn evidence and tools through choices.</span>')+'</div>';
+  const gear=root.RPGProgression?root.RPGProgression.evidenceFor(gameWorld(),player()):[];
+  html+='<div class="qs-kit">'+(kit.length?kit.map(k=>{
+    const bonus=gear.find(g=>g.id===k.id);
+    return '<span title="'+esc(k.label)+'">'+esc(k.icon||'\u{1F4DC}')+' '+esc(k.label)+
+      (bonus?'<small class="qs-gear-bonus">'+esc(bonus.domain.toUpperCase()+' +'+bonus.bonus)+'</small>':'')+'</span>';
+  }).join(''):'<span class="qs-muted">Earn evidence and tools through choices.</span>')+'</div>';
   if(archive.length)html+='<div class="qs-section"><b>CONSEQUENCES</b><small>YOUR RECENT CHAPTERS</small></div>'+
     '<div class="qs-timeline">'+archive.map(a=>'<div class="qs-history"><span>✧</span><div><strong>'+esc(a.endingTitle||a.title)+'</strong><small>'+esc(a.title)+' · '+esc(a.resolvedYear)+'</small></div></div>').join('')+'</div>';
   sheet.innerHTML=html;
