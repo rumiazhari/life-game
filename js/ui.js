@@ -707,8 +707,13 @@ function renderActionReceipt(type,id,result,chips){
   const label=def?fillLabel(type==='p'?pursuitLabel(def):decisionLabel(def)):id;
   const text=result&&result.text?fill(result.text):'The action was filed.';
   const deltas=(chips||[]).map(c=>'<span class="ar-delta '+(c.plus?'up':'down')+'">'+escapePlanText(c.txt)+'</span>').join('');
+  const check=result&&result.arcadeCheck;
+  const dice=check?'<div class="ar-dice" role="status" aria-label="3d6 execution quality '+(check.success?'success':'setback')+'">'+
+    '<span class="ar-dice-faces">'+check.rolls.map(n=>'<span class="ar-die">'+n+'</span>').join('')+'</span>'+
+    '<b class="'+(check.success?'good':'bad')+'">'+(check.success?'SUCCESS':'SETBACK')+'</b>'+
+    '<small>3d6 '+(check.mod>=0?'+':'')+check.mod+' vs '+check.tn+'</small></div>':'';
   el.innerHTML='<div class="ar-copy"><span class="ar-eyebrow">ACTION ENTERED · YEAR '+escapePlanText(S.age)+'</span>'+
-    '<strong>'+escapePlanText(label)+'</strong><p>'+escapePlanText(clipText(text,100))+'</p>'+(text.length>100?'<details class="ar-full"><summary>MORE ▾</summary><p>'+escapePlanText(text)+'</p></details>':'')+'</div>'+
+    '<strong>'+escapePlanText(label)+'</strong><p>'+escapePlanText(clipText(text,100))+'</p>'+dice+(text.length>100?'<details class="ar-full"><summary>MORE ▾</summary><p>'+escapePlanText(text)+'</p></details>':'')+'</div>'+
     '<div class="ar-actions">'+(deltas?'<div class="ar-deltas">'+deltas+'</div>':'')+
     '<button type="button" data-receipt-log>FULL CASE LOG ▸</button><button type="button" data-receipt-close aria-label="Dismiss action receipt">✕</button></div>';
   el.classList.remove('hidden');
@@ -1952,6 +1957,31 @@ function fxPreviewHtmlSafe(def){
 
 function escapePlanText(value){return String(value==null?'':value).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
 
+function contextualActionHtml(rem){
+  if(typeof ContextualActions!=='object'||!ContextualActions)return '';
+  const rows=ContextualActions.lanes(World,S,{
+    getAction:(type,id)=>type==='p'?PUR_MAP[id]:DEC_MAP[id],
+    reserved:id=>actionReservedThisYear(id),remainingEnergy:rem
+  });
+  const cards=rows.map(row=>{
+    const def=row.id?(row.type==='p'?PUR_MAP[row.id]:DEC_MAP[row.id]):null;
+    const label=def?fillLabel(row.type==='p'?pursuitLabel(def):decisionLabel(def)):'Not available';
+    const info=row.check?'🎲 '+row.check.percent+'% 3d6 QUALITY'+
+      (row.family==='risk'?' · TRACK WIN 50/50':''):def?'NATIVE ACTION':'NO ACTION';
+    const disabled=row.reason==='in_custody'?'IN CUSTODY':row.reason==='no_energy'?'NO ENERGY':'LOCKED';
+    return '<button class="arcade-tile arcade-'+row.family+(row.available?'':' locked')+
+      '" data-arcade-act="'+row.family+'" data-arcade-type="'+(row.type||'')+
+      '" data-arcade-id="'+(row.id||'')+'"'+(row.available?'':' disabled aria-disabled="true"')+'>'+
+      '<span class="arcade-glyph">'+ledgerIcon(row.icon)+'</span>'+
+      '<strong>'+escapePlanText(row.title)+'</strong>'+
+      '<span class="arcade-name">'+escapePlanText(label)+'</span>'+
+      '<span class="arcade-odds">'+(row.available?escapePlanText(info):disabled)+'</span>'+
+      '<em class="arcade-cost">'+(def?(row.cost?row.cost+' ENERGY':'FREE'):'—')+'</em></button>';
+  }).join('');
+  return '<section class="arcade-section" aria-label="Contextual RPG actions">'+
+    '<div class="focus-section-head"><span>QUICK MOVES</span><small>One tap · character-driven 3d6 quality</small></div>'+
+    '<div class="arcade-lanes">'+cards+'</div></section>';
+}
 function focusSituationHtml(rem){
   const sid=World&&World.activeSettlementId;
   const state=typeof WorldSimulation==='object'&&WorldSimulation&&sid&&WorldSimulation.getSettlementState?
@@ -1997,7 +2027,7 @@ function focusSituationHtml(rem){
     '<p class="focus-empty">No available actions. Advance or browse.</p>';
   return '<div class="focus-lead"><span class="focus-kicker">DECISION BRIEF · '+escapePlanText(currentYear())+
     ' · '+rem+' ENERGY AVAILABLE</span><span class="focus-symbol">'+ledgerIcon(S.health<38?'med':S.assets<0?'money':details?'work':unrest>.58?'alert':'book')+'</span><h3>'+escapePlanText(headline)+'</h3><p>'+escapePlanText(narrative)+'</p></div>'+
-    metrics+work+
+    metrics+work+contextualActionHtml(rem)+
     '<div class="focus-section-head"><span>OPTIONS YOU CAN TAKE NOW</span><small>Instant effect · energy cost</small></div>'+
     decisionBody+
     '<div class="focus-browse"><span>More choices</span><button type="button" data-plan-tab="pursuits">ALL PURSUITS</button>'+
@@ -2131,7 +2161,13 @@ $('#planSheet').addEventListener('click',e=>{
   const rm=e.target.closest('[data-rm]'); if(rm){S.queue.splice(+rm.dataset.rm,1);snd('paper');renderPlan();updateBar();return;}
   const uiOpen=e.target.closest('[data-ui-open]');
   if(uiOpen){ if(uiOpen.dataset.uiOpen==='household'){ snd('paper'); openHousehold(); } return; }
-  const pb=e.target.closest('[data-p]'); if(pb&&!pb.classList.contains('cant')){
+  const arcade=e.target.closest('[data-arcade-act]');
+   if(arcade){
+     if(arcade.disabled||!arcade.dataset.arcadeId)return;
+     triggerAction(arcade.dataset.arcadeType,arcade.dataset.arcadeId);
+     return;
+   }
+   const pb=e.target.closest('[data-p]'); if(pb&&!pb.classList.contains('cant')){
     let ex=null; try{ex=pb.dataset.extra?JSON.parse(pb.dataset.extra):null;}catch(err){ex=null;}
     if(ex&&pb.dataset.p==='gig'&&ex.openingId){ performActionNow('p','gig',{gigId:ex.gigId||null,openingId:ex.openingId}); return; }
     triggerAction('p',pb.dataset.p); return; }
@@ -2150,15 +2186,29 @@ function performActionNow(type,id,extra){
   if(actionReservedThisYear(id)){ shake(); return; }
   const total=planHours(), used=energyUsed();
   if(used+(d.cost||0)>total){ shake(); snd('stamp'); return; }
+  // Only mapped, directly executable actions receive a quality check.
+  // Preserve their native availability and the existing once-a-year guard.
+  const contextual=typeof ContextualActions==='object'&&ContextualActions;
+  if(contextual&&contextual.config(type,id)&&!d.avail(S,extra&&extra.cid)){ shake(); return; }
   window.C={}; S.acts++;
+  // Roll BEFORE the action changes health/skills, so preview matches resolution.
+  const arcade=contextual?contextual.resolve(World,S,type,id,{year:World.year}):null;
   let r;
   if(id==='learntrade'&&extra&&extra.program&&typeof educationCompleteProgram==='function'){
     const result=educationCompleteProgram(extra.program);
     r=result.ok?{fx:{happiness:2},text:'Subject completed '+result.program.name+'. '+result.program.desc+(result.shortfall?' The unpaid '+money(result.shortfall)+' was entered as education debt.':' The certificate was paid from assets.') }:{fx:{happiness:-1},text:'Subject reached for vocational training, but the course was not available on the current record.'};
   } else r=d.apply(S,extra||{});
+  if(arcade&&r){
+    r.fx=contextual.combineFx(r.fx,contextual.bonusFor(arcade,r.fx));
+    r.arcadeCheck=arcade.check;
+  }
   const chips=r&&r.fx?applyFx(r.fx):[];
   if(r&&r.follow) pushFollow(r.follow);
-  logChips(r&&r.text?fill(r.text):'It was done.',chips,type==='p'?'plan':'decision',(type==='p'?'PURSUIT':'DECISION')+' · NOW');
+  const rollNote=arcade?' · 3d6 '+arcade.check.rolls.join('+')+
+    (arcade.check.mod>=0?'+':'')+arcade.check.mod+' vs '+arcade.check.tn+
+    (arcade.check.success?' · execution improved':' · minor setback'):'';
+  logChips((r&&r.text?fill(r.text):'It was done.')+rollNote,chips,
+    type==='p'?'plan':'decision',(type==='p'?'PURSUIT':'DECISION')+' · NOW');
   markActionDone(id);
   renderActionReceipt(type,id,r,chips);
   renderStats(window.C); updateBar(); renderPlanIfOpen();
