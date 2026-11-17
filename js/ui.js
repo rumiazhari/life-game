@@ -3356,6 +3356,7 @@ function openStorySlip(force){
   const echo=(typeof StorySystem.echoLineFor==='function')?StorySystem.echoLineFor(World):null;
   let html='<div class="sl-head story"><span>KARSEN FILES</span><span class="sl-req">'+String(view.domain||'life').toUpperCase()+(view.sceneNo?' · SCENE '+view.sceneNo:'')+' · YEAR '+S.age+'</span></div>';
   html+='<div class="vn-titlebar">'+fill(view.title||'AN EPISODE')+'</div>';
+   if(typeof RPGVisual==='object'&&RPGVisual)html+=RPGVisual.beatMarker(StorySystem.liveRun(World),view);
   if(view.type==='ending'){
     const e=view.ending;
     html+='<div class="vn-backdrop vn-bg-'+(view.bg||'street')+' vn-endbg">'+vnBackdropArt(view.bg||'street')+(view.ending&&view.ending.tone==='kind'?laurelSVG():'')+'<div class="vn-endstamp">THE END</div></div>';
@@ -3382,6 +3383,7 @@ function openStorySlip(force){
       html+=(view.remember?'<div class="vn-remember">'+escapeHtml(view.remember)+' — that will be remembered.</div>':'');
       html+='<div class="sl-actions"><button class="sl-btn ok" data-vn="next">'+(view.isLastLine?'The scene turns ▸':'NEXT ▸')+'</button></div>';
     } else if(view.type==='choice'){
+       if(typeof RPGVisual==='object'&&RPGVisual)html+=RPGVisual.relationshipStrip(World,S,StorySystem.liveRun(World));
       html+='<div class="vn-prompt">'+escapeHtml(fill(view.prompt||'Choose.'))+'</div>';
       html+='<div class="vn-choices">'+view.options.map(o=>{
         const odds=o.check?'<b class="vn-odds '+(o.check.percent>=75?'high':o.check.percent<40?'low':'')+'">🎲 '+o.check.percent+'%</b>':'';
@@ -3393,7 +3395,8 @@ function openStorySlip(force){
           (unavailable?' disabled aria-disabled="true"':'')+'>'+
           '<span class="vn-option-head"><span>'+escapeHtml(fill(o.t))+'</span>'+odds+'</span>'+
           (unavailable?'<small>🔒 '+escapeHtml(o.unavailableReason)+'</small>':
-          (o.note?'<small>'+escapeHtml(o.note)+' · will be remembered.</small>':'<small>Will be remembered.</small>'))+mods+'</button>';
+          (o.note?'<small>'+escapeHtml(o.note)+' · will be remembered.</small>':'<small>Will be remembered.</small>'))+mods+
+           (typeof RPGVisual==='object'&&RPGVisual?RPGVisual.effectStrip(StorySystem.liveRun(World),o,World,S):'')+'</button>';
       }).join('')+'</div>';
     }
   }
@@ -3419,7 +3422,7 @@ function openStorySlip(force){
         card.onclick=null; // the committed roll cannot be pressed twice during its reveal
         card.innerHTML+='<div class="vn-roll-fx" role="status" aria-live="assertive"><div class="vn-roll-icons">'+faces+'</div>'+
           '<div class="vn-roll-result '+(r.success?'good':'bad')+'">'+(r.success?'SUCCESS':'SETBACK')+
-          '<strong>'+r.total+' / '+r.tn+'</strong></div></div>';
+          '<strong>'+r.total+' / '+r.tn+'</strong><small class="vn-roll-margin">'+(r.margin>=0?'+':'')+r.margin+' vs target · 3d6 '+(r.mod>=0?'+':'')+r.mod+'</small></div></div>';
         const reduced=typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches;
         setTimeout(()=>{openStorySlip(true);updateBar();},reduced?200:900);
       }else{openStorySlip(true);updateBar();}

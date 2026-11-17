@@ -62,7 +62,7 @@ test('the live game uses illustrated cover, visual Section C and motion-accessib
  const h=fs.readFileSync(path.resolve(__dirname,'../life-game.html'),'utf8');
  const css=fs.readFileSync(path.resolve(__dirname,'../css/style.css'),'utf8');
  assert.match(h,/cover-world-art/);assert.match(h,/SECTION C — HOME &amp; WORLD/);
- assert.match(h,/js\/ui\.js\?v=20261117-phase2/);
+ assert.match(h,/js\/ui\.js\?v=20261117-p10/);
  assert.match(css,/@media\(prefers-reduced-motion:reduce\)/);
  assert.match(css,/\.lv-smoke/);assert.match(css,/\.lv-gauge-ring/);
 });
