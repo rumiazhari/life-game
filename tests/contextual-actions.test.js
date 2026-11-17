@@ -161,3 +161,38 @@ test('ordinary unmapped rest keeps its original no-dice behavior and cost',()=>{
  assert.doesNotMatch(out.receipt,/ar-dice/);
 });
 
+
+test('Priorities renders five concise category tiles with real actions, costs and quality odds',()=>{
+ const ctx=uiSession('p2-tiles');
+ const result=run(ctx,"planTab='focus';renderPlan();return document.getElementById('planSheet').innerHTML;");
+ assert.match(result,/class="arcade-lanes"/);
+ assert.equal((result.match(/data-arcade-act=/g)||[]).length,5);
+ for(const name of ['WORK','LEARN','CONNECT','RECOVER','RISK'])assert.match(result,new RegExp('>'+name+'<'));
+ for(const id of ['overtime','study','tendspouse','walk','track'])assert.ok(result.includes('data-arcade-id="'+id+'"'),id);
+ assert.match(result,/3d6 QUALITY/);
+ assert.match(result,/1 ENERGY/);
+ assert.match(result,/TRACK WIN 50\/50/);
+ assert.match(result,/data-plan-tab="pursuits"/);
+});
+test('Priorities family tiles handle custody, spent actions and zero-energy without clickable rolls',()=>{
+ const ctx=uiSession('p2-disabled-tiles');
+ const out=run(ctx,"planTab='focus';S.__doneActions={[World.year]:['study']};renderPlan();"+
+   "const used=document.getElementById('planSheet').innerHTML;"+
+   "S.jailUntil=S.age+1;renderPlan();const jailed=document.getElementById('planSheet').innerHTML;"+
+   "return {used,jailed};");
+ assert.match(out.used,/data-arcade-act="learn"[^>]*disabled/);
+ assert.equal((out.jailed.match(/data-arcade-act="[^"]+"[^>]*disabled/g)||[]).length,5);
+ assert.match(out.jailed,/IN CUSTODY/);
+});
+test('one tap on Learn tile calls existing action executor, consumes one energy and shows the dice receipt',()=>{
+ const ctx=uiSession('p2-one-tap');
+ const out=run(ctx,"planTab='focus';renderPlan();const before={energy:energyUsed(),smarts:S.smarts,acts:S.acts||0};"+
+   "document.getElementById('planSheet').handlers.click({target:{closest:function(selector){"+
+     "return selector==='[data-arcade-act]'?{disabled:false,dataset:{arcadeAct:'learn',arcadeType:'p',arcadeId:'study'}}:null;}}});"+
+   "return {before,after:{energy:energyUsed(),smarts:S.smarts,acts:S.acts||0},receipt:document.getElementById('actionReceipt').innerHTML};");
+ assert.equal(out.after.energy-out.before.energy,1);
+ assert.equal(out.after.acts-out.before.acts,1);
+ assert.ok(out.after.smarts>out.before.smarts);
+ assert.match(out.receipt,/ar-dice/);
+});
+

@@ -1957,6 +1957,31 @@ function fxPreviewHtmlSafe(def){
 
 function escapePlanText(value){return String(value==null?'':value).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
 
+function contextualActionHtml(rem){
+  if(typeof ContextualActions!=='object'||!ContextualActions)return '';
+  const rows=ContextualActions.lanes(World,S,{
+    getAction:(type,id)=>type==='p'?PUR_MAP[id]:DEC_MAP[id],
+    reserved:id=>actionReservedThisYear(id),remainingEnergy:rem
+  });
+  const cards=rows.map(row=>{
+    const def=row.id?(row.type==='p'?PUR_MAP[row.id]:DEC_MAP[row.id]):null;
+    const label=def?fillLabel(row.type==='p'?pursuitLabel(def):decisionLabel(def)):'Not available';
+    const info=row.check?'🎲 '+row.check.percent+'% 3d6 QUALITY'+
+      (row.family==='risk'?' · TRACK WIN 50/50':''):def?'NATIVE ACTION':'NO ACTION';
+    const disabled=row.reason==='in_custody'?'IN CUSTODY':row.reason==='no_energy'?'NO ENERGY':'LOCKED';
+    return '<button class="arcade-tile arcade-'+row.family+(row.available?'':' locked')+
+      '" data-arcade-act="'+row.family+'" data-arcade-type="'+(row.type||'')+
+      '" data-arcade-id="'+(row.id||'')+'"'+(row.available?'':' disabled aria-disabled="true"')+'>'+
+      '<span class="arcade-glyph">'+ledgerIcon(row.icon)+'</span>'+
+      '<strong>'+escapePlanText(row.title)+'</strong>'+
+      '<span class="arcade-name">'+escapePlanText(label)+'</span>'+
+      '<span class="arcade-odds">'+(row.available?escapePlanText(info):disabled)+'</span>'+
+      '<em class="arcade-cost">'+(def?(row.cost?row.cost+' ENERGY':'FREE'):'—')+'</em></button>';
+  }).join('');
+  return '<section class="arcade-section" aria-label="Contextual RPG actions">'+
+    '<div class="focus-section-head"><span>QUICK MOVES</span><small>One tap · character-driven 3d6 quality</small></div>'+
+    '<div class="arcade-lanes">'+cards+'</div></section>';
+}
 function focusSituationHtml(rem){
   const sid=World&&World.activeSettlementId;
   const state=typeof WorldSimulation==='object'&&WorldSimulation&&sid&&WorldSimulation.getSettlementState?
@@ -2002,7 +2027,7 @@ function focusSituationHtml(rem){
     '<p class="focus-empty">No available actions. Advance or browse.</p>';
   return '<div class="focus-lead"><span class="focus-kicker">DECISION BRIEF · '+escapePlanText(currentYear())+
     ' · '+rem+' ENERGY AVAILABLE</span><span class="focus-symbol">'+ledgerIcon(S.health<38?'med':S.assets<0?'money':details?'work':unrest>.58?'alert':'book')+'</span><h3>'+escapePlanText(headline)+'</h3><p>'+escapePlanText(narrative)+'</p></div>'+
-    metrics+work+
+    metrics+work+contextualActionHtml(rem)+
     '<div class="focus-section-head"><span>OPTIONS YOU CAN TAKE NOW</span><small>Instant effect · energy cost</small></div>'+
     decisionBody+
     '<div class="focus-browse"><span>More choices</span><button type="button" data-plan-tab="pursuits">ALL PURSUITS</button>'+
@@ -2136,7 +2161,13 @@ $('#planSheet').addEventListener('click',e=>{
   const rm=e.target.closest('[data-rm]'); if(rm){S.queue.splice(+rm.dataset.rm,1);snd('paper');renderPlan();updateBar();return;}
   const uiOpen=e.target.closest('[data-ui-open]');
   if(uiOpen){ if(uiOpen.dataset.uiOpen==='household'){ snd('paper'); openHousehold(); } return; }
-  const pb=e.target.closest('[data-p]'); if(pb&&!pb.classList.contains('cant')){
+  const arcade=e.target.closest('[data-arcade-act]');
+   if(arcade){
+     if(arcade.disabled||!arcade.dataset.arcadeId)return;
+     triggerAction(arcade.dataset.arcadeType,arcade.dataset.arcadeId);
+     return;
+   }
+   const pb=e.target.closest('[data-p]'); if(pb&&!pb.classList.contains('cant')){
     let ex=null; try{ex=pb.dataset.extra?JSON.parse(pb.dataset.extra):null;}catch(err){ex=null;}
     if(ex&&pb.dataset.p==='gig'&&ex.openingId){ performActionNow('p','gig',{gigId:ex.gigId||null,openingId:ex.openingId}); return; }
     triggerAction('p',pb.dataset.p); return; }

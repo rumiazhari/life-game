@@ -73,3 +73,37 @@
 .qs-pick strong{font:800 12px Archivo,sans-serif}
 .qs-pick small{font:11px/1.35 Archivo,sans-serif;color:#726045}
 @media(max-width:420px){.qs-picks{grid-template-columns:1fr}}
+
+/* Phase 2: contextual arcade quick moves, independent of geographic UI. */
+.arcade-section{margin:12px 0 14px}
+.arcade-lanes{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.arcade-tile{position:relative;display:flex;flex-direction:column;align-items:flex-start;
+ gap:5px;min-width:0;min-height:132px;padding:11px 9px 10px;text-align:left;cursor:pointer;
+ border:1px solid #ac9872;border-radius:12px;background:#fff4d9;color:#352b20;
+ box-shadow:0 3px 0 #9a825b33;transition:transform .15s,border-color .15s,background .15s}
+.arcade-tile:hover:not(:disabled),.arcade-tile:focus-visible{border-color:#855722;background:#f1dfb8;transform:translateY(-2px)}
+.arcade-tile:active:not(:disabled){transform:translateY(1px)}
+.arcade-tile.locked{opacity:.48;cursor:not-allowed;filter:grayscale(.45)}
+.arcade-glyph{display:inline-flex;justify-content:center;align-items:center;width:33px;height:30px;
+ border-radius:8px;background:#3f382f;color:#f3dda8}
+.arcade-glyph .lv-icon{width:21px;height:21px}
+.arcade-tile strong{font:900 11px Archivo,sans-serif;letter-spacing:.075em}
+.arcade-name{font:700 12px/1.2 Archivo,sans-serif;overflow-wrap:anywhere;min-height:27px}
+.arcade-odds{font:700 9px/1.35 Archivo,sans-serif;color:#5a5939}
+.arcade-cost{font:800 9px Archivo,sans-serif;font-style:normal;color:#87572e;margin-top:auto}
+.arcade-risk .arcade-glyph{background:#643831}
+.arcade-recover .arcade-glyph{background:#315c58}
+.arcade-learn .arcade-glyph{background:#465c7b}
+.ar-dice{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:8px;
+ font:800 10px Archivo,sans-serif;color:#433a30}
+.ar-dice-faces{display:inline-flex;gap:3px}
+.ar-die{display:inline-grid;place-items:center;width:24px;height:24px;
+ border:1px solid #a77f39;border-radius:5px;background:#f2db9f;color:#513514;
+ box-shadow:0 2px 0 #a67b38;font:900 13px Archivo,sans-serif}
+.ar-dice b.good{color:#377152}.ar-dice b.bad{color:#9b483a}
+.ar-dice small{font:700 10px Archivo,sans-serif;color:#666152}
+@media(max-width:700px){.arcade-lanes{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+ .arcade-tile{min-height:114px;padding:9px}}
+@media(max-width:360px){.arcade-name{font-size:11px}.arcade-odds{font-size:8px}}
+@media(prefers-reduced-motion:reduce){.arcade-tile{transition:none!important}}
+
