@@ -1,0 +1,103 @@
+{
+  "schema": "life-file-rpg-release-qa-v1",
+  "provenance": "automated_vm_and_browser_qa_not_human_testing",
+  "scope": "deterministic_vm_migration_aging_not_full_mortality_simulation",
+  "seedCount": 3,
+  "yearsPerSeed": 100,
+  "stressCycles": 600,
+  "storyContinuations": 6,
+  "reproducibleSeeds": 3,
+  "corruptionProbes": 5,
+  "corruptionRejections": 5,
+  "performance": {
+    "totalMs": 11497.66,
+    "maxCycleMs": 30.67,
+    "maxSnapshotBytes": 64824,
+    "limits": {
+      "maxCycleMs": 1500,
+      "maxTotalMs": 120000,
+      "maxSnapshotBytes": 20971520,
+      "maxHeapBytes": 402653184
+    }
+  },
+  "memory": {
+    "startHeapBytes": 4261416,
+    "peakHeapBytes": 50214448,
+    "endHeapBytes": 50214448
+  },
+  "runs": [
+    {
+      "seed": 1,
+      "years": 100,
+      "cycles": 100,
+      "continuation": true,
+      "maxSnapshotBytes": 64719,
+      "maxArchive": 1,
+      "lastChecksum": "50baf5d6",
+      "peakCycleMs": 16.17,
+      "durationMs": 1372.94,
+      "errors": []
+    },
+    {
+      "seed": 1,
+      "years": 100,
+      "cycles": 100,
+      "continuation": true,
+      "maxSnapshotBytes": 64719,
+      "maxArchive": 1,
+      "lastChecksum": "50baf5d6",
+      "peakCycleMs": 14.67,
+      "durationMs": 1316.58,
+      "errors": []
+    },
+    {
+      "seed": 2,
+      "years": 100,
+      "cycles": 100,
+      "continuation": true,
+      "maxSnapshotBytes": 64824,
+      "maxArchive": 1,
+      "lastChecksum": "061f4140",
+      "peakCycleMs": 24.06,
+      "durationMs": 1967.08,
+      "errors": []
+    },
+    {
+      "seed": 2,
+      "years": 100,
+      "cycles": 100,
+      "continuation": true,
+      "maxSnapshotBytes": 64824,
+      "maxArchive": 1,
+      "lastChecksum": "061f4140",
+      "peakCycleMs": 30.67,
+      "durationMs": 2354.06,
+      "errors": []
+    },
+    {
+      "seed": 3,
+      "years": 100,
+      "cycles": 100,
+      "continuation": true,
+      "maxSnapshotBytes": 64748,
+      "maxArchive": 1,
+      "lastChecksum": "c2313863",
+      "peakCycleMs": 26.22,
+      "durationMs": 2127.9,
+      "errors": []
+    },
+    {
+      "seed": 3,
+      "years": 100,
+      "cycles": 100,
+      "continuation": true,
+      "maxSnapshotBytes": 64748,
+      "maxArchive": 1,
+      "lastChecksum": "c2313863",
+      "peakCycleMs": 29.82,
+      "durationMs": 2210.81,
+      "errors": []
+    }
+  ],
+  "failures": []
+}

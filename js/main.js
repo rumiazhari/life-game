@@ -31,6 +31,46 @@ function newFile(){
   $('#mapWrap').classList.add('hidden');
   openIntro();
 }
+/* Manual, local active-life restore. Validates/migrates detached state before swapping globals.
+ * Cross-life Archive/Achievements are deliberately not part of this backup. */
+function restoreLifeFileSnapshot(serialized){
+ if(typeof LifeFileSave!=='object'||!LifeFileSave)return {ok:false,reason:'save_unavailable'};
+ const prepared=LifeFileSave.prepare(serialized);
+ if(!prepared.ok)return prepared;
+ const previous={world:World,subject:S,lineage:Lineage,hold:Hold,followups:followups};
+ const item=prepared.snapshot;
+ try{
+  // No partial user-data restore: atomic reference swap after every validation gate.
+  World=item.world;S=item.subject;Lineage=item.lineage;Hold=item.hold;followups=item.followups;
+  queue=[];typing=false;clearInterval(typeTimer);currentType=null;
+  slipOpen=false;quietMode=false;pendingSlips=[];clearSlipQueue();
+  resetYearReport();recentYearReports=[];
+  document.body.classList.remove('slip-open','petition-open');
+  document.body.classList.add('playing');
+  const cover=$('#cover'),dossier=$('#dossier');
+  if(cover)cover.classList.add('hidden');
+  if(dossier)dossier.classList.remove('hidden');
+  for(const id of ['slipWrap','planWrap','medicalWrap','mapWrap','closedWrap']){
+   const pane=$('#'+id);if(pane)pane.classList.add('hidden');
+  }
+  const log=$('#log');if(log)log.innerHTML='';
+  window.C={};
+  renderIdentity();renderStats(null);renderYear();renderStreak();renderStage();
+  renderRecentRecord();updateBar();
+  if(typeof renderStoryBoard==='function')renderStoryBoard();
+  logEv('LOCAL FILE RESTORED. The current life and any active chapter were resumed.',null,
+   'open','RECORD RESUMED · YEAR '+World.year);
+  const active=typeof StorySystem==='object'&&StorySystem?StorySystem.liveRun(World):null;
+  return {ok:true,year:World.year,activeStory:active&&active.id||null};
+ }catch(_){
+  World=previous.world;S=previous.subject;Lineage=previous.lineage;Hold=previous.hold;
+  followups=previous.followups;
+  try{window.C={};renderIdentity();renderStats(null);renderYear();updateBar();}catch(e){}
+  return {ok:false,reason:'restore_ui_failed'};
+ }
+}
+window.restoreLifeFileSnapshot=restoreLifeFileSnapshot;
+
 $('#btn-open').addEventListener('click',()=>{ snd('paper'); startNewLife(); });
 $('#btn-reopen').addEventListener('click',()=>{ snd('paper'); $('#closedWrap').classList.add('hidden'); renderArchiveCount(); newFile(); });
 $('#btn-archive').addEventListener('click',()=>{ snd('paper'); openArchive(); });

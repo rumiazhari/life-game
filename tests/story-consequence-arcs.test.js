@@ -312,7 +312,7 @@ test('browser entrypoint loads Phase 3 arc and changed story runtime with fresh 
  const arcs='js/systems/story-consequence-arcs.js?v=20261117-p3';
  const engine='js/systems/story-quest-engine.js?v=20261117-p3';
  const runtime='js/systems/story-system.js?v=20261117-p3';
- const ui='js/ui/story-quest-ui.js?v=20261117-p8';
+ const ui='js/ui/story-quest-ui.js?v=20261117-p12';
  for(const f of [arcs,engine,runtime,ui])assert.ok(html.includes(f),f);
  assert.ok(html.indexOf('js/systems/story-quests.js')<html.indexOf(arcs));
  assert.ok(html.indexOf(arcs)<html.indexOf(runtime));

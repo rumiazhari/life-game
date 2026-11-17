@@ -10,6 +10,7 @@
     "audit:rpg": "node tools/rpg-playtest-audit.js --json",
     "simulate:rpg": "node tools/rpg-scenario-playtest.js --json",
     "aggregate:rpg": "node tools/rpg-playtest-aggregate.js --file",
-    "report:rpg": "node tools/rpg-integrity-report.js --write"
+    "report:rpg": "node tools/rpg-integrity-report.js --write",
+    "release:rpg:qa": "node --expose-gc tools/rpg-release-qa.js --write"
   }
 }
