@@ -6,85 +6,70 @@
 <title>LIFE FILE — Subject Dossier</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=Special+Elite&family=Stardos+Stencil:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=DM+Serif+Display&family=IBM+Plex+Mono:wght@500;600&family=Special+Elite&family=Stardos+Stencil:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css?v=20261116-map7">
 <link rel="stylesheet" href="css/story-rpg.css?v=20261117-p12">
 <link rel="stylesheet" href="css/mobile-adaptive.css?v=20261116-android1">
+<link rel="stylesheet" href="css/visual-design.css?v=1">
+<meta name="theme-color" content="#102d2d">
 </head>
 <body>
 <div class="desk">
-  <div class="grain"></div>
-
-  <section id="cover" class="coverwrap">
+  <section id="cover" class="coverwrap" aria-labelledby="cover-title">
     <div class="folder cover">
-      <div class="tab">SUBJECT FILE</div>
-      <div class="stamp confidential">Confidential</div>
-      <p class="kicker">FORM 114-A · DOSSIER SECTION</p>
-      <h1 class="masthead">LIFE<br>FILE</h1>
-      <div class="division">RECORDS &amp; ARCHIVES DIVISION</div>
-      <div class="cover-world-art" aria-label="Illustration of Karsen's houses, factories and government buildings">
-        <svg viewBox="0 0 640 124" role="img" aria-hidden="true" preserveAspectRatio="xMidYMid slice">
-          <rect width="640" height="124" fill="#b8c6be"/>
-          <circle cx="539" cy="29" r="20" fill="#f2ddaa"/>
-          <path d="M0 93 112 50l76 34 100-40 82 34 96-47 174 72v21H0Z" fill="#7e938b" opacity=".45"/>
-          <rect x="18" y="45" width="73" height="74" fill="#647e7b"/><rect x="33" y="58" width="12" height="11" fill="#d7ceb0"/><rect x="55" y="58" width="12" height="11" fill="#d7ceb0"/>
-          <rect x="107" y="26" width="104" height="96" fill="#9a8569"/><path d="m102 30 56-25 58 25" fill="none" stroke="#554b3d" stroke-width="9"/>
-          <rect x="145" y="51" width="31" height="71" fill="#e0cba1"/><rect x="116" y="50" width="20" height="25" fill="#d3c4a0"/><rect x="183" y="50" width="18" height="25" fill="#d3c4a0"/>
-          <path d="M233 118V63h124v55" fill="#7f7364"/><path d="m223 63 71-30 72 30" fill="none" stroke="#534737" stroke-width="8"/>
-          <rect x="245" y="78" width="28" height="25" fill="#b0beae"/><rect x="290" y="78" width="28" height="40" fill="#b0beae"/>
-          <path d="M387 121V46h126v75" fill="#775a4d"/><path d="M382 46h136L501 27H401Z" fill="#4c4d48"/>
-          <rect x="408" y="15" width="17" height="50" fill="#705449"/><rect x="465" y="4" width="20" height="52" fill="#705449"/>
-          <circle class="cover-smoke" cx="417" cy="10" r="8" fill="#f0e7d1" opacity=".6"/>
-          <rect x="404" y="65" width="14" height="23" fill="#ddc39d"/><rect x="432" y="65" width="14" height="23" fill="#ddc39d"/><rect x="460" y="65" width="14" height="23" fill="#ddc39d"/>
-          <rect x="525" y="70" width="95" height="52" fill="#b1a081"/><path d="m522 76 50-28 51 28" fill="none" stroke="#624c42" stroke-width="8"/>
-          <rect x="558" y="92" width="18" height="30" fill="#6c5545"/>
-          <path d="M0 113H640" stroke="#3c473e" stroke-width="11"/>
-          <g fill="#2d3730"><circle cx="357" cy="104" r="6"/><path d="M350 123v-12q7-9 14 0v12"/><circle cx="375" cy="108" r="5"/><path d="M370 123v-10q5-6 10 0v10"/></g>
-        </svg>
+      <div class="cover-copy">
+        <div class="cover-brand"><span class="bureau-mark" aria-hidden="true">✦</span> Records &amp; Archives Division</div>
+        <div class="cover-intro">
+          <p class="kicker">Republic of Karsen</p>
+          <h1 class="masthead" id="cover-title">Life <em>File.</em></h1>
+          <p class="coverline">Grow up in a changing republic. Shape your life through family, work, and the choices you make each year.</p>
+          <button id="btn-open" class="btn btn-big">Open a new file <span aria-hidden="true">→</span></button>
+        </div>
+        <div class="cover-links">
+          <button id="btn-archive" class="archive-link">Bureau archive <span id="archive-count"></span> <span aria-hidden="true">↗</span></button>
+          <button id="btn-achieve-cover" class="archive-link">Commendations <span id="achieve-count"></span> <span aria-hidden="true">↗</span></button>
+        </div>
       </div>
-      <p class="coverline">One life. A changing society. Every choice leaves a mark.</p>
-      <div class="cover-actions">
-        <button id="btn-open" class="btn btn-big">Open a New File ▸</button>
-        <span class="micro">you drive · the bureau vetoes · no appeals</span>
-      </div>
-      <button id="btn-archive" class="archive-link">THE BUREAU ARCHIVE <span id="archive-count"></span> ▸</button>
-      <button id="btn-achieve-cover" class="archive-link">COMMENDATIONS <span id="achieve-count"></span> ▸</button>
-      <div class="note">
-        <span class="paperclip"></span>
-        CLERK'S NOTE · Karsen records people, not just numbers. Every year changes the file.
-      </div>
-      <div class="formno">FORM 114-A · REV. 1962 · PRINTED IN QUADRUPLICATE</div>
+      <figure class="cover-world-art">
+        <img src="assets/karsen-riverfront.webp" width="1200" height="800" alt="Karsen's riverfront, with a rail bridge, factories and people walking along the river.">
+        <figcaption>Karsen riverfront</figcaption>
+      </figure>
     </div>
   </section>
 
   <section id="dossier" class="dossier folder hidden">
-    <div class="tabstrip" id="tabstrip">
+    <nav class="tabstrip" id="tabstrip" aria-label="Dossier">
       <div class="dtab dtab-file" id="tab-name">FILE: —</div>
-      <button id="btn-stories" class="dtab dtab-story">🎲 STORIES ▸</button>
-      <button id="btn-map" class="dtab">MAP ▸</button>
-      <button id="btn-hold" class="dtab" aria-label="The Hold">HOLD ▸</button>
-      <button id="btn-caselog" class="dtab" aria-label="Case Log">LOG ▸</button>
-      <button id="btn-achieve" class="dtab" aria-label="Commendations and achievements">AWARDS ▸</button>
+      <button id="btn-stories" class="dtab">Stories</button>
+      <button id="btn-map" class="dtab">Map</button>
+      <button id="btn-hold" class="dtab" aria-label="The Hold">Hold</button>
+      <button id="btn-caselog" class="dtab" aria-label="Case Log">Case log</button>
+      <button id="btn-achieve" class="dtab" aria-label="Commendations and achievements">Awards</button>
       <button id="btn-sound" class="dtab">SOUND: ON</button>
-    </div>
+    </nav>
     <header class="dhead">
       <div class="dtop">
         <div>
-          <p class="kicker">SUBJECT DOSSIER · SECTION 114-A</p>
-          <h2 class="dtitle">LIFE FILE</h2>
-          <p class="dintent">GOAL <b id="d-intent">—</b></p>
-          <p class="dintent">CHARACTER <b id="d-disp">—</b></p>
-          <p class="dintent">STAGE <b id="d-stage">—</b></p>
+          <p class="kicker">Life File</p>
+          <h2 class="dtitle">Subject dossier</h2>
         </div>
-        <div class="stamp mini">Confidential</div>
+        <div class="dprofile">
+          <p class="dintent"><span>Life stage</span> <b id="d-stage">—</b></p>
+          <p class="dintent"><span>Goal</span> <b id="d-intent">—</b></p>
+          <p class="dintent"><span>Character</span> <b id="d-disp">—</b></p>
+        </div>
       </div>
       <div id="lifeRibbon" class="life-ribbon" aria-hidden="true"></div>
       <section id="worldBrief" class="world-brief" aria-label="Your world this year"></section>
       <div id="actionReceipt" class="action-receipt hidden" role="status" aria-live="polite"></div>
     </header>
+    <section class="recent-record" id="recentRecord" aria-label="Recent record" aria-live="polite">
+      <div class="recent-record-head"><span>RECENT RECORD</span><button id="recentRecordOpen" type="button">CASE LOG</button></div>
+      <div class="recent-record-body" id="recentRecordBody">No annual report filed yet.</div>
+    </section>
+
     <div class="spread">
       <div class="page page-left">
-        <span class="hole t"></span><span class="hole b"></span>
         <div class="sec-h">SECTION A — IDENTIFICATION <span>FORM A-1</span></div>
         <div class="idgrid">
           <div class="photo"><div class="photo-art" id="photo-art"></div><em class="photo-cap" id="photo-cap">FILE PHOTO</em></div>
@@ -113,13 +98,10 @@
         <div class="stat hotspot" id="row-looks" data-hotspot="looks"><span class="slabel">LOOKS</span><div class="sbar"><div class="sfill f-looks" id="fill-looks"></div></div><b class="sval" id="val-looks">0</b></div>
         <div class="sparkrow" id="sparkRow" aria-hidden="true"></div>
         <div class="frow moneyrow hotspot" data-hotspot="assets"><span class="flabel">ASSETS ON RECORD</span><span class="fval big" id="val-assets">$0</span></div>
-        <p class="pagefoot">Earlier pages are sealed. Do not attempt to turn back.</p>
       </div>
       <div class="page page-right">
-        <span class="hole t"></span><span class="hole b"></span>
         <div class="sec-h">SECTION C — HOME &amp; WORLD <span>LIVE</span></div>
         <div id="inventory"></div>
-        <div class="coffeering"></div>
       </div>
     </div>
   </section>
@@ -133,16 +115,11 @@
       <button id="btn-plan" class="btn-plan disabled"><b id="plan-label">NO AGENCY YET</b><span class="hpips" id="plan-pips"></span></button>
     </div>
     <div class="advrow">
-      <button id="btn-advance" class="btn btn-advance" style="flex:1">Advance the Year ▸</button>
-      <button id="btn-fastforward" class="btn btn-advance" style="flex:0 0 auto;font-size:14px;padding:11px 14px 10px">Fast Forward ▸▸</button>
+      <button id="btn-advance" class="btn btn-advance">Advance the Year ▸</button>
+      <button id="btn-fastforward" class="btn btn-advance">Fast Forward ▸▸</button>
     </div>
-    <p class="micro bar-micro" id="bar-micro">plan the year, then stamp it · the record only moves forward</p>
+    <p class="micro bar-micro" id="bar-micro"></p>
   </div></div>
-
-  <div class="recent-record" id="recentRecord" aria-live="polite">
-    <div class="recent-record-head"><span>RECENT RECORD</span><button id="recentRecordOpen" type="button">CASE LOG</button></div>
-    <div class="recent-record-body" id="recentRecordBody">No annual report filed yet.</div>
-  </div>
 
   <div id="hotspotBubble" class="hidden"></div>
 
