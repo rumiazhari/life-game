@@ -46,12 +46,11 @@ test('world briefing renders actual employment, company and security indicators 
  const sid=get(ctx,'World.activeSettlementId');
  get(ctx,'renderWorldBrief()');
  const display=html(ctx,'worldBrief');
- assert.match(display,/LIVE WORLD RECORD/);
+ assert.match(display,/wb-place/);
  assert.match(display,/LABOR MARKET/);
- assert.match(display,/Employment/);
  assert.match(display,/PUBLIC UNREST/);
  assert.match(display,/EMPLOYERS UNDER STRAIN/);
- assert.match(display,/REVIEW YOUR CHOICES/);
+ assert.match(display,/Review your choices/);
  assert.ok(display.includes(String(get(ctx,'World.year'))));
  assert.ok(display.includes(get(ctx,'World.place')));
  assert.ok(typeof sid==='string');

@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="css/style.css?v=20261116-map7">
 <link rel="stylesheet" href="css/story-rpg.css?v=20261117-p12">
 <link rel="stylesheet" href="css/mobile-adaptive.css?v=20261116-android1">
-<link rel="stylesheet" href="css/visual-design.css?v=1">
+<link rel="stylesheet" href="css/visual-design.css?v=2">
 <meta name="theme-color" content="#102d2d">
 </head>
 <body>
@@ -70,37 +70,44 @@
 
     <div class="spread">
       <div class="page page-left">
-        <div class="sec-h">SECTION A — IDENTIFICATION <span>FORM A-1</span></div>
+        <h3 class="sec-h">Profile</h3>
         <div class="idgrid">
-          <div class="photo"><div class="photo-art" id="photo-art"></div><em class="photo-cap" id="photo-cap">FILE PHOTO</em></div>
+          <figure class="photo dossier-photo"><div class="photo-art" id="photo-art"></div><figcaption class="photo-cap" id="photo-cap">File photo</figcaption></figure>
           <div class="idfields">
-            <div class="frow"><span class="flabel">NAME</span><span class="fval" id="id-name">—</span></div>
-            <div class="frow"><span class="flabel">SEX · FILE №</span><span class="fval" id="id-file">—</span></div>
-            <div class="frow"><span class="flabel">BORN</span><span class="fval" id="id-dob">—</span></div>
-            <div class="frow hotspot" data-hotspot="job"><span class="flabel">OCCUPATION</span><span class="fval" id="val-job">—</span></div>
-            <div class="frow"><span class="flabel">CIVIL STATUS</span><span class="fval" id="val-status">—</span></div>
-            <div class="frow hotspot" data-hotspot="vice"><span class="flabel">VICE NOTES</span><span class="fval" id="val-vice">none on record</span></div>
-            <div class="frow"><span class="flabel">MARKED</span><span class="fval" id="val-marked">none</span></div>
-            <div class="frow hotspot" data-hotspot="skills"><span class="flabel">SKILLS</span><span class="fval" id="val-skills">none developed</span></div>
-            <div class="frow hotspot" data-hotspot="education"><span class="flabel">EDUCATION</span><span class="fval" id="val-education">no formal record</span></div>
+            <h4 class="profile-name" id="id-name">—</h4>
+            <div class="profile-born" id="id-dob">—</div>
+            <div class="profile-summary">
+              <div class="frow hotspot" data-hotspot="job"><span class="flabel">Work</span><span class="fval" id="val-job">—</span></div>
+              <div class="frow hotspot" data-hotspot="education"><span class="flabel">Education</span><span class="fval" id="val-education">—</span></div>
+              <div class="frow"><span class="flabel">Civil status</span><span class="fval" id="val-status">—</span></div>
+            </div>
           </div>
         </div>
-        <div class="sec-h">KIN &amp; ASSOCIATES <span>TENDED ANNUALLY</span></div>
-        <div class="kinsplit">
-          <div class="kincol"><div class="kincol-h">KIN INDEX</div><div id="kin"></div></div>
-          <div class="kincol assoc"><div class="kincol-h">ASSOCIATES INDEX</div><div id="assoc"></div></div>
-        </div>
-        <div id="standing"></div>
-        <div class="sec-h">SECTION B — VITAL INDICES <span>ANNUAL</span></div>
+        <h3 class="sec-h">Vital signs</h3>
         <div class="stat hotspot" id="row-health" data-hotspot="health"><span class="slabel">HEALTH</span><div class="sbar"><div class="sfill f-health" id="fill-health"></div></div><b class="sval" id="val-health">0</b></div>
         <div class="stat hotspot" id="row-happiness" data-hotspot="happiness"><span class="slabel">HAPPINESS</span><div class="sbar"><div class="sfill f-happiness" id="fill-happiness"></div></div><b class="sval" id="val-happiness">0</b></div>
         <div class="stat hotspot" id="row-smarts" data-hotspot="smarts"><span class="slabel">SMARTS</span><div class="sbar"><div class="sfill f-smarts" id="fill-smarts"></div></div><b class="sval" id="val-smarts">0</b></div>
         <div class="stat hotspot" id="row-looks" data-hotspot="looks"><span class="slabel">LOOKS</span><div class="sbar"><div class="sfill f-looks" id="fill-looks"></div></div><b class="sval" id="val-looks">0</b></div>
         <div class="sparkrow" id="sparkRow" aria-hidden="true"></div>
         <div class="frow moneyrow hotspot" data-hotspot="assets"><span class="flabel">ASSETS ON RECORD</span><span class="fval big" id="val-assets">$0</span></div>
+        <h3 class="sec-h">People <span>Kin &amp; associates</span></h3>
+        <div class="kinsplit">
+          <div class="kincol"><div class="kincol-h">Kin</div><div id="kin"></div></div>
+          <div class="kincol assoc"><div class="kincol-h">Associates</div><div id="assoc"></div></div>
+        </div>
+        <div id="standing"></div>
+        <details class="lv-archive profile-record">
+          <summary><span>Personal record</span><i aria-hidden="true">▾</i></summary>
+          <div class="lv-archive-body">
+            <div class="frow"><span class="flabel">Sex · File №</span><span class="fval" id="id-file">—</span></div>
+            <div class="frow hotspot" data-hotspot="skills"><span class="flabel">Skills</span><span class="fval" id="val-skills">none developed</span></div>
+            <div class="frow hotspot" data-hotspot="vice"><span class="flabel">Vice notes</span><span class="fval" id="val-vice">none on record</span></div>
+            <div class="frow"><span class="flabel">Marked</span><span class="fval" id="val-marked">none</span></div>
+          </div>
+        </details>
       </div>
       <div class="page page-right">
-        <div class="sec-h">SECTION C — HOME &amp; WORLD <span>LIVE</span></div>
+        <h3 class="sec-h">Home &amp; world</h3>
         <div id="inventory"></div>
       </div>
     </div>
@@ -247,12 +254,13 @@
 <script src="js/systems/story-social.js?v=20261117-p7"></script>
 <script src="js/systems/story-threads.js?v=20261117-p9"></script>
 <script src="js/systems/life-file-save.js?v=20261117-p12"></script>
-<script src="js/illustration.js?v=20260824-illus1"></script>
+<script src="js/illustration.js?v=20260824-illus1-dossier2"></script>
 <script src="js/systems/persistent-people-ui.js?v=20260824-illus1"></script>
 <script src="js/ui/employment-ui.js?v=20260826-dis1"></script>
 <script src="js/medical.js?v=20260804-phase4a3"></script>
 <script src="js/education.js?v=20260803-phase3"></script>
-<script src="js/ui.js?v=20261117-p12"></script>
+<script src="js/ui/dossier-art.js?v=1"></script>
+<script src="js/ui.js?v=20261117-p12-dossier2"></script>
 <script src="js/ui/story-quest-ui.js?v=20261117-p12"></script>
 <script src="js/systems/world-gameplay.js?v=20261116-map7"></script>
 <script src="js/main.js?v=20261117-p12"></script>

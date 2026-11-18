@@ -99,7 +99,7 @@ test('decisions tab lists decision slips, not pursuits',()=>{
   assert.equal(result.seal,true);
 });
 
-test('inventory groups the right page into boxed sections with pinned labels intact',()=>{
+test('inventory keeps home actions visible and groups supporting records in disclosures',()=>{
   const context=uiContext('inventory-groups');
   configureAdult(context);
   const result=JSON.parse(expose(context,`(function(){
@@ -113,7 +113,9 @@ test('inventory groups the right page into boxed sections with pinned labels int
       additionalCosts:html.includes('ADDITIONAL HOUSEHOLD COSTS'),
       projectedTotal:html.includes('PROJECTED TOTAL OUTLAY'),
       actionGrid:html.includes('inv-actions')&&html.includes('id="invOpenMedical"')&&html.includes('id="invOpenHousehold"')&&html.includes('id="invOpenFamilyHealth"'),
-      standingLive:html.includes('PERSONAL STANDING')
+      standingLive:html.includes('Personal standing'),
+      financesCollapsed:html.includes('data-ledger="finances"><summary>'),
+      settlementCollapsed:html.includes('data-ledger="settlement"><summary>')
     });
   })()`));
   assert.equal(result.lifestyleBox,true);
@@ -124,6 +126,8 @@ test('inventory groups the right page into boxed sections with pinned labels int
   assert.equal(result.projectedTotal,true);
   assert.equal(result.actionGrid,true);
   assert.equal(result.standingLive,true);
+  assert.equal(result.financesCollapsed,true);
+  assert.equal(result.settlementCollapsed,true);
 });
 
 test('at-home inventory uses the family-table group box',()=>{

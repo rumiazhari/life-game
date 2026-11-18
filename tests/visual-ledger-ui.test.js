@@ -11,7 +11,7 @@ function ui(seed){
   getElementById(x){return els['#'+x]||(els['#'+x]=make());},createElement(){return make();},
   addEventListener(){},body:make(),documentElement:make()};
  c.addEventListener=()=>{};c.setTimeout=()=>0;c.clearTimeout=()=>{};c.setInterval=()=>0;c.clearInterval=()=>{};
- loadGameFiles(c,['js/systems/world-gameplay.js','js/medical.js','js/ui.js']);c.activeConditions=()=>[];
+ loadGameFiles(c,['js/systems/world-gameplay.js','js/medical.js','js/illustration.js','js/ui/dossier-art.js','js/ui.js']);c.activeConditions=()=>[];
  expose(c,"Random.setSeed("+JSON.stringify(seed)+");newWorld();newLineage();newHold();newSubject();"+
   "S.age=30;World.year=S.dob+30;S.livingAtHome=false;S.assets=1400;S.health=70;"+
   "S.jobTier=0;S.jobName='Unemployed';S.career=null;S.eduStage=null;S.jailUntil=0;S.garnishUntil=0;"+
@@ -61,8 +61,80 @@ test('annual record keeps full story behind compact visual beats',()=>{
 test('the live game uses illustrated cover, visual Section C and motion-accessible CSS',()=>{
  const h=fs.readFileSync(path.resolve(__dirname,'../life-game.html'),'utf8');
  const css=fs.readFileSync(path.resolve(__dirname,'../css/style.css'),'utf8');
- assert.match(h,/cover-world-art/);assert.match(h,/SECTION C — HOME &amp; WORLD/);
+ assert.match(h,/cover-world-art/);assert.match(h,/<h3 class="sec-h">Home &amp; world<\/h3>/);
  assert.match(h,/js\/ui\.js\?v=20261117-p12/);
  assert.match(css,/@media\(prefers-reduced-motion:reduce\)/);
  assert.match(css,/\.lv-smoke/);assert.match(css,/\.lv-gauge-ring/);
+});
+
+test('housing art distinguishes every housing type and reacts separately to unrest and surveillance',()=>{
+ const c=ui('visual-housing-types');
+ const read=()=>{expose(c,'renderInventory()');return html(c,'inventory').match(/<svg class="lv-scene-svg"[\s\S]*?<\/svg>/)?.[0];};
+ const images=['none','shelter','room','flat','house','townhouse','estate'].map(id=>{
+  expose(c,'S.lifestyle.housing='+JSON.stringify(id));
+  const svg=read();
+  assert.match(svg,new RegExp('data-housing="'+id+'"'));
+  return svg.replace(/data-housing="[^"]*"|aria-label="[^"]*"/g,'');
+ });
+ assert.equal(new Set(images).size,7);
+ expose(c,'World.settlements[World.activeSettlementId].security.unrest=.86;World.settlements[World.activeSettlementId].security.surveillance=.15');
+ assert.match(read(),/data-unrest="high"/);
+ assert.doesNotMatch(read(),/class="lv-surveillance"/);
+ expose(c,'World.settlements[World.activeSettlementId].security.unrest=.12;World.settlements[World.activeSettlementId].security.surveillance=.88');
+ assert.doesNotMatch(read(),/class="lv-unrest"/);
+ assert.match(read(),/class="lv-surveillance"/);
+});
+
+test('dossier illustration reads actual household membership and changes portrait without a new identity',()=>{
+ const c=ui('visual-profile');
+ expose(c,"S.age=9;S.eduStage='lower';S.livingAtHome=true;renderIdentity();renderInventory()");
+ const first=html(c,'photo-art'),family=html(c,'inventory');
+ assert.match(first,/data-attire="school"/);
+ assert.match(first,/data-age="child"/);
+ assert.match(family,/lv-person/);
+ expose(c,"S.age=36;S.eduStage=null;S.jobName='Physician';S.jobTier=4;S.livingAtHome=false;S.assets=12000;renderDossierPortrait()");
+ const older=html(c,'photo-art');
+ assert.match(older,/data-attire="healthcare"/);
+ assert.match(older,/data-age="adult"/);
+ assert.match(older,/data-means="comfortable"/);
+ assert.equal(first.match(/data-identity="([^"]+)"/)[1],older.match(/data-identity="([^"]+)"/)[1]);
+ expose(c,"S.assets=-40;renderDossierPortrait()");
+ assert.match(html(c,'photo-art'),/data-means="strained"/);
+});
+
+test('home illustration follows co-resident records instead of drawing absent parents',()=>{
+ const c=ui('visual-residence');
+ expose(c,"S.age=4;S.livingAtHome=true;S.mother.alive=true;S.mother.present=true;S.mother.estranged=false;World.npcs[S.mother.npcId].alive=true;renderInventory()");
+ const count=()=> (html(c,'inventory').match(/class="lv-person"/g)||[]).length;
+ const initial=count();
+ assert.ok(initial>=2);
+ expose(c,'S.mother.present=false;renderInventory()');
+ assert.equal(count(),initial-1);
+});
+
+test('deterministic dossier art leaves the simulation and its RNG untouched',()=>{
+ const c=ui('visual-view-only');
+ const invariant=expose(c,`(function(){
+   const state=()=>JSON.stringify([S,World,Lineage,Hold]);
+   const expected=Random.create("art-isolation").next();
+   Random.setSeed("art-isolation");
+   const before=state(), house=currentHousing(), residents=dossierResidents(dossierHousehold(),null);
+   const spec={housing:house,place:currentSettlement().name,kind:currentSettlement().kind,
+     people:residents,means:'steady',unrest:.4,surveillance:.8};
+   return DossierArt.scene(spec)===DossierArt.scene(spec)&&DossierArt.portrait(S)===DossierArt.portrait(S)&&state()===before&&Random.next()===expected;
+ })()`);
+ assert.equal(invariant,true);
+});
+
+test('the balance updates immediately after a same-year change in assets',()=>{
+ const c=ui('visual-balance');
+ c.requestAnimationFrame=()=>0;
+ const amounts=expose(c,`(function(){
+   const cell=$('#val-assets');
+   renderAssetsValue(cell);
+   S.assets=12000;
+   renderAssetsValue(cell);
+   return [cell.textContent,money(S.assets)];
+ })()`);
+ assert.equal(amounts[0],amounts[1]);
 });
