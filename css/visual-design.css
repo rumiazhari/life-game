@@ -180,6 +180,8 @@ body { background: var(--bureau); }
   letter-spacing: .04em;
   text-transform: uppercase;
 }
+.tabstrip #btn-stories { background: #dfebe1; color: var(--bureau); }
+.tabstrip #btn-stories:hover { background: #f5f5e7; }
 .tabstrip button:hover { background: #315854; color: #fff; }
 .tabstrip .dtab-file {
   display: flex;
@@ -321,7 +323,7 @@ body:not(:has(.overlay:not(.hidden))):has(#coachBar:not(.hidden)) .dossier .rece
   border-top: 1px solid var(--bureau-line);
   box-shadow: 0 -6px 28px #071d1a55;
 }
-.actionbar .barinner { max-width: 1230px; }
+.actionbar .barinner { width: min(1230px, 100%); }
 .actionbar :is(.datestamp, .streakbadge, .btn-plan, .btn-advance) {
   height: auto;
   min-height: 44px;
@@ -391,6 +393,10 @@ body.playing .actionbar #btn-fastforward { flex: 0 0 auto; }
   box-shadow: none;
 }
 .overlay :is(.arow.clickable, .qs-card, .chipbtn, .lifebtn, .household-tile):hover { background: #e6eee4; }
+#planWrap .slipbtn.dark { background: #f7e6dd; border-left: 3px solid var(--red); }
+.overlay :is(.chipbtn.sel, .lifebtn.active) { background: #dce9dc; border-color: var(--green); box-shadow: inset 0 0 0 1px var(--green); }
+.overlay .subject-chip.good { background: #e5eee1; border-left-color: var(--green); }
+.overlay .subject-chip.bad { background: #f6e6df; border-left-color: var(--red); }
 #planWrap :is(.slipbtn, .rec-chip, .strategy-option):hover { background: #e6eee4; border-color: var(--blue); }
 #planWrap .ptab.active, #planWrap .cstamp.ready { background: var(--bureau); color: var(--paper-hi); border-color: var(--bureau); }
 .qs-current, .vn-relation, .vn-beat { background: var(--bureau); border-color: var(--bureau-line); }
@@ -406,7 +412,7 @@ body.playing .actionbar #btn-fastforward { flex: 0 0 auto; }
   .cover .masthead { font-size: clamp(65px, 13vw, 90px); }
   #cover .coverline { margin: 13px 0 18px; }
   .cover-links { gap: 4px 16px; padding-top: 7px; }
-  .cover-world-art { min-height: 182px; aspect-ratio: 1.8; }
+  .cover-world-art { width: 100%; height: clamp(180px, 55vw, 330px); }
   .cover-world-art figcaption { inset: auto auto 9px 9px; }
   .dossier { padding: 0 0 calc(135px + env(safe-area-inset-bottom)); }
   .tabstrip { gap: 4px; margin: 0 0 15px; }
