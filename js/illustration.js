@@ -156,14 +156,35 @@
     return s;
   }
 
+  function dossierWardrobe(attire,means,graduate,cloth){
+    const garments={
+      infant:['#9e6756','<path d="M21 92l61 27M79 91l-61 27" stroke="#f2d6a3" stroke-width="5"/><path d="M25 100l33 16m9-17-27 17" stroke="#593c39" opacity=".47"/>'],
+      school:['#355d56','<path d="M37 85l13 11 13-11 7 7-13 10h-14L30 92z" fill="#f1ddba"/><path d="M49 98h4v22h-4z" fill="#927349"/><rect x="67" y="102" width="10" height="8" rx="1" fill="#d3ab6d"/>'],
+      university:['#5d5341','<path d="M36 84l14 16 14-16-7 21H43z" fill="#e4c59a"/><path d="M25 91v29m50-29v29" stroke="#a87452" stroke-width="5"/>'],
+      healthcare:['#dadbc9','<path d="M34 86l14 16v18M66 86l-14 16v18" fill="none" stroke="#94a89c" stroke-width="2"/><path d="M66 104h13v10H66z" fill="#a5b4a9"/><path d="M72 106v5m-2-2h5" stroke="#a24736" stroke-width="1.4"/>'],
+      office:['#364c4a','<path d="M35 85l15 9 15-9-15 29z" fill="#eee1bd"/><path d="M50 95l-4 4 4 15 4-15z" fill="#9d5847"/><path d="M36 86l-7 13 11 3-4 7 12 11m16-34 7 13-11 3 4 7-12 11" fill="none" stroke="#8a9a86"/>'],
+      workwear:['#536b64','<path d="M34 89v31m32-31v31" stroke="#899586" stroke-width="7"/><path d="M37 103h26v16H37z" fill="#405752" stroke="#b2ac8d"/><path d="M45 108h10" stroke="#b2ac8d"/>'],
+      uniform:['#616647','<path d="M24 93l12-5m28 0 12 5" stroke="#dbc18b" stroke-width="3"/><path d="M48 87h4v33h-4zM63 102h12v10H63z" fill="#394734"/><circle cx="69" cy="105" r="2" fill="#d7ac62"/>'],
+      custody:['#77756a','<path d="M36 85l14 9 14-9m-40 16h52m-60 8h68m-74 9h80" fill="none" stroke="#d4ccae" stroke-width="2.1"/>'],
+      civilian:[cloth[0],'<path d="M37 85q13 17 26 0m-27 5q14 18 28 0" fill="none" stroke="#dfcb9c" stroke-width="2.5"/><path d="M48 105v15" stroke="#dfcb9c" opacity=".45"/>']
+    };
+    const [color,details]=garments[attire]||garments.civilian;
+    const finish=means==='strained'?'<path d="M19 110l8-3 2 6-8 3z" fill="#d8bf91" opacity=".65"/><path d="M20 111l6 3m-5-5 6 3" stroke="#4e5047" stroke-width=".6"/>':
+      means==='comfortable'?'<path d="M16 114q5-20 20-24m48 24q-5-20-20-24" fill="none" stroke="#d6b87d" opacity=".6"/><circle cx="54" cy="108" r="1.2" fill="#e5c284"/><circle cx="54" cy="115" r="1.2" fill="#e5c284"/>':'';
+    const credential=graduate?'<path d="m71 96 4 3-4 3-4-3z" fill="#d0a35f" stroke="#735b3a" stroke-width=".6"/>':'';
+    return '<path d="M6 120Q10 93 30 86l10-3h20l10 3q20 7 24 34z" fill="'+color+'"/>'+
+      '<path d="M6 120q5-20 20-29v29zm88 0q-5-20-20-29v29z" fill="#1c3330" opacity=".24"/>'+details+finish+credential;
+  }
+
   /* ---------------- the portrait itself ---------------------------------- */
   function personPortrait(descriptor,options){
     var d=normDescriptor(descriptor), opts=options||{};
-    var band=d.band, cacheKey='p|'+featureSignature(d.id)+'|'+band+'|'+d.sex+'|'+
-      (d.deceased?'d':'a')+'|'+d.clothing+'|'+(opts.bust?'b':'card');
+    var band=d.band, dossier=opts.dossier===true;
+    var cacheKey='p|'+d.id+'|'+band+'|'+d.sex+'|'+(d.deceased?'d':'a')+'|'+d.clothing+'|'+(opts.bust?'b':'card');
+    if(dossier) cacheKey+=JSON.stringify([opts.attire,opts.means,opts.graduate,Math.floor(d.age/5)]);
     if(portraitCache.has(cacheKey)) return portraitCache.get(cacheKey);
 
-    var f=visualIdentity(d.id), r=rngFor('pose:'+d.id+':'+band);
+    var f=visualIdentity(d.id);
     var isMale=d.sex==='M', knownSex=isMale||d.sex==='F';
     var skin=SKIN[f.skin], hairCol=greyBlend(HAIRC[f.hairColor][0],greyT(d.age));
     var cloth=CLOTH[f.cloth];
@@ -183,40 +204,54 @@
     var figScale=band==='infant'?.8:band==='child'?.88:band==='teen'?.95:1;
 
     var parts=[];
-    parts.push('<svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">');
+    const context=dossier?' class="dossier-portrait-svg" data-identity="'+fnv1a(d.id).toString(36)+'" data-age="'+band+
+      '" data-attire="'+String(opts.attire||'civilian').replace(/[^a-z]/g,'')+'" data-means="'+String(opts.means||'steady').replace(/[^a-z]/g,'')+'"':'';
+    parts.push('<svg viewBox="0 0 100 120" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"'+context+'>');
     parts.push('<defs>'+
       '<radialGradient id="'+gid+'v" cx="50%" cy="40%" r="78%"><stop offset="52%" stop-color="'+PAPER+'"/><stop offset="100%" stop-color="#c9bb97"/></radialGradient>'+
       '<linearGradient id="'+gid+'f" x1="0" y1="0" x2="1" y2="0"><stop offset="50%" stop-color="'+skin[0]+'"/><stop offset="100%" stop-color="'+skin[1]+'"/></linearGradient>'+
       '<filter id="'+gid+'n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="linear" slope="0.5"/></feComponentTransfer></filter>'+
       '</defs>');
     parts.push('<rect width="100" height="120" fill="url(#'+gid+'v)"/>');
+    if(dossier){
+      const back=opts.means==='comfortable'?'#456d62':opts.means==='strained'?'#697970':'#53766d';
+      parts.push('<rect width="100" height="120" fill="'+back+'"/><path d="M0 19q53-18 100-4v59Q51 38 0 72z" fill="#b0b894" opacity=".40"/>'+
+        '<circle cx="62" cy="48" r="42" fill="#ede2b7" opacity=".25"/><path d="M0 104 100 78v42H0z" fill="#223f38" opacity=".34"/>'+
+        '<rect x="6" y="6" width="88" height="108" fill="none" stroke="#e9d5a9" stroke-width=".5" opacity=".5"/>');
+    }
 
     /* figure (scaled for children; slight stoop for elders) */
     var tf='translate(50 118) scale('+figScale+') translate(-50 -118)';
+    if(dossier&&band==='infant') tf='translate(50 121) scale(.95 .86) translate(-50 -118)';
     if(band==='elder') tf+=' rotate(-1.6 50 118)';
     parts.push('<g transform="'+tf+'">');
     /* long hair behind (women, styles 2/4) */
     var hstyle=knownSex?(isMale?f.hairStyleM:f.hairStyleF):f.hairStyleM;
-    if(!isMale&&(hstyle===2||hstyle===4)) parts.push(femaleHair(hstyle,hairCol,rec,band));
+    if(!isMale&&(hstyle===2||hstyle===4)&&!(dossier&&band==='infant')) parts.push(femaleHair(hstyle,hairCol,rec,band));
     /* shoulders + clothing */
-    parts.push('<path d="M8 120 Q10 92 30 86 Q40 82 50 82 Q60 82 70 86 Q90 92 92 120 Z" fill="'+cloth[0]+'"/>');
-    parts.push('<path d="M8 120 Q10 96 26 89 L26 120 Z" fill="'+cloth[1]+'"/><path d="M92 120 Q90 96 74 89 L74 120 Z" fill="'+cloth[1]+'"/>');
-    if(opts.bust){ /* tighter framing crops lower torso */ }
-    var collarCol=['#d8cba6','#efe6cd','#cfc19a'][f.collar];
-    parts.push('<path d="M40 84 Q50 92 60 84 L57 104 L43 104 Z" fill="'+collarCol+'" opacity=".9"/>');
-    if(isMale&&f.tie&&band!=='infant'&&band!=='child') parts.push('<path d="M50 90 L46.5 95 L50 112 L53.5 95 Z" fill="'+(f.beard===1?RED:DARK)+'"/>');
-    if(!isMale&&f.pendant) parts.push('<circle cx="50" cy="99" r="2" fill="'+AMBER+'"/>');
-    if(d.clothing==='uniform') parts.push('<circle cx="66" cy="97" r="2.6" fill="'+RED+'"/><line x1="30" y1="91" x2="38" y2="89" stroke="'+collarCol+'" stroke-width="3"/>');
-    else if(d.clothing==='worker') parts.push('<rect x="41" y="92" width="18" height="28" fill="'+collarCol+'" opacity=".55"/>');
-    else if(d.clothing==='gown') parts.push('<path d="M34 88 L50 116 L66 88" fill="none" stroke="'+AMBER+'" stroke-width="4" opacity=".7"/>');
+    if(dossier) parts.push(dossierWardrobe(opts.attire,opts.means,opts.graduate,cloth));
+    else {
+      parts.push('<path d="M8 120 Q10 92 30 86 Q40 82 50 82 Q60 82 70 86 Q90 92 92 120 Z" fill="'+cloth[0]+'"/>');
+      parts.push('<path d="M8 120 Q10 96 26 89 L26 120 Z" fill="'+cloth[1]+'"/><path d="M92 120 Q90 96 74 89 L74 120 Z" fill="'+cloth[1]+'"/>');
+      var collarCol=['#d8cba6','#efe6cd','#cfc19a'][f.collar];
+      parts.push('<path d="M40 84 Q50 92 60 84 L57 104 L43 104 Z" fill="'+collarCol+'" opacity=".9"/>');
+      if(isMale&&f.tie&&band!=='infant'&&band!=='child') parts.push('<path d="M50 90 L46.5 95 L50 112 L53.5 95 Z" fill="'+(f.beard===1?RED:DARK)+'"/>');
+      if(!isMale&&f.pendant) parts.push('<circle cx="50" cy="99" r="2" fill="'+AMBER+'"/>');
+      if(d.clothing==='uniform') parts.push('<circle cx="66" cy="97" r="2.6" fill="'+RED+'"/><line x1="30" y1="91" x2="38" y2="89" stroke="'+collarCol+'" stroke-width="3"/>');
+      else if(d.clothing==='worker') parts.push('<rect x="41" y="92" width="18" height="28" fill="'+collarCol+'" opacity=".55"/>');
+      else if(d.clothing==='gown') parts.push('<path d="M34 88 L50 116 L66 88" fill="none" stroke="'+AMBER+'" stroke-width="4" opacity=".7"/>');
+    }
     /* neck + head */
     parts.push('<rect x="42" y="64" width="16" height="22" rx="7" fill="'+skin[1]+'"/>');
     parts.push('<ellipse cx="'+(50-fw)+'" cy="'+(cy+2)+'" rx="'+(3.4*f.earScale)+'" ry="'+(5*f.earScale)+'" fill="'+skin[1]+'"/>'+
                '<ellipse cx="'+(50+fw)+'" cy="'+(cy+2)+'" rx="'+(3.4*f.earScale)+'" ry="'+(5*f.earScale)+'" fill="'+skin[1]+'"/>');
     parts.push('<ellipse cx="50" cy="'+cy+'" rx="'+fw+'" ry="'+fh+'" fill="url(#'+gid+'f)"/>');
     /* front hair */
-    if(isMale||knownSex===false) parts.push(maleHair(hstyle,hairCol,rec,band));
+    if(dossier&&band==='infant') parts.push('<path d="M38 34q4-10 16-8m-9 4q8-8 15-4" fill="none" stroke="'+hairCol+'" stroke-width="2.6" stroke-linecap="round"/>');
+    else if(isMale||knownSex===false) parts.push(maleHair(hstyle,hairCol,rec,band));
     else parts.push(femaleHair(hstyle,hairCol,rec,band));
+    if(dossier) parts.push('<path d="M'+(50-fw*.83)+' '+(cy+4)+'q4 13 15 17m'+(fw*.7)+' 0q12-4 16-16" fill="none" stroke="'+skin[1]+'" stroke-width="2" opacity=".46"/>'+
+      '<ellipse cx="'+(50-fw*.58)+'" cy="'+(cy+9)+'" rx="3.7" ry="2.4" fill="#b66b55" opacity=".32"/><ellipse cx="'+(50+fw*.58)+'" cy="'+(cy+9)+'" rx="3.7" ry="2.4" fill="#b66b55" opacity=".28"/>');
     /* face */
     var eyY=cy+3, exL=50-fw*.42, exR=50+fw*.42;
     var eyeSpread=f.eyes===1?1.12:f.eyes===2?.9:1;
@@ -264,7 +299,7 @@
     parts.push('</g>');
 
     /* archival photograph treatment */
-    parts.push('<rect width="100" height="120" fill="#d8cba6" opacity="'+wearOpacity+'"/>');
+    parts.push('<rect width="100" height="120" fill="#d8cba6" opacity="'+(dossier ? wearOpacity*.34 : wearOpacity)+'"/>');
     if(band==='elder'||band==='middle') parts.push('<rect width="100" height="120" fill="#8d8676" opacity="'+(d.deceased?'.2':'.08')+'"/>');
     parts.push('<rect width="100" height="120" filter="url(#'+gid+'n)" opacity="0.09"/>');
     parts.push('<g stroke="'+CREAM+'" stroke-width="0.5" opacity="0.22"><line x1="14" y1="6" x2="20" y2="40"/><line x1="82" y1="80" x2="88" y2="112"/></g>');

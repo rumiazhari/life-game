@@ -674,32 +674,30 @@ function renderWorldBrief(){
   const employment=Number(economy.employmentIndex)||0;
   const issue=S.health<38?{
     title:'Health at risk',note:'Care vs income',icon:'med'}:
-    S.assets<0?{title:'Household deficit',note:'Earn · borrow · reduce costs',icon:'money'}:
+    S.assets<0?{title:'Household deficit',note:'Earn · borrow · reduce costs'}:
     business&&business.status==='struggling'?{
-      title:'Employer under strain',note:'Payroll vs job security',icon:'work'}:
-    S.age>=16&&!work?{title:'Find a livelihood',note:'Openings · qualifications · wages',icon:'work'}:
-    unrest>.58?{title:'Political unrest',note:'Surveillance · public action · risk',icon:'alert'}:
-    work?{title:'Workplace and alliances',note:'Wages · coworkers · Bureau',icon:'family'}:
-    {title:'Life ahead',note:'Family · learning · opportunity',icon:'book'};
+      title:'Employer under strain',note:'Payroll vs job security'}:
+    S.age>=16&&!work?{title:'Find a livelihood',note:'Openings · qualifications · wages'}:
+    unrest>.58?{title:'Political unrest',note:'Surveillance · public action · risk'}:
+    work?{title:'Workplace and alliances',note:'Wages · coworkers · Bureau'}:
+    {title:'Life ahead',note:'Family · learning · opportunity'};
   const distressed=market&&market.businesses?Math.round(market.distressRate*market.businesses):0;
   const metrics=[
-    {icon:'money',label:'PERSONAL ASSETS',value:money(Number(S.assets)||0),note:S.assets<0?'Deficit':'Balance',tone:S.assets<0?'danger':''},
-    {icon:'work',label:'LABOR MARKET',value:settlement?Math.round(employment*100)+'/100':'—',note:'Employment',tone:employment<.35?'danger':employment<.50?'warning':''},
-    {icon:'alert',label:'PUBLIC UNREST',value:settlement?Math.round(unrest*100)+'/100':'—',note:'Public order',tone:unrest>.58?'danger':unrest>.34?'warning':''},
-    {icon:'bank',label:'EMPLOYERS UNDER STRAIN',value:market&&market.businesses?distressed+' / '+market.businesses:'—',note:'Companies',tone:market&&market.businesses&&market.distressRate>.45?'warning':''}
+    {icon:'money',label:'PERSONAL ASSETS',value:money(Number(S.assets)||0),tone:S.assets<0?'danger':''},
+    {icon:'work',label:'LABOR MARKET',value:settlement?Math.round(employment*100)+'/100':'—',tone:employment<.35?'danger':employment<.50?'warning':''},
+    {icon:'alert',label:'PUBLIC UNREST',value:settlement?Math.round(unrest*100)+'/100':'—',tone:unrest>.58?'danger':unrest>.34?'warning':''},
+    {icon:'bank',label:'EMPLOYERS UNDER STRAIN',value:market&&market.businesses?distressed+' / '+market.businesses:'—',tone:market&&market.businesses&&market.distressRate>.45?'warning':''}
   ];
   const canChoose=typeof planHours==='function'&&planHours()>0&&S.alive&&S.jailUntil<=S.age;
-  el.innerHTML='<div class="wb-top"><div><span class="wb-overline">SECTION D · CURRENT SITUATION</span>'+
-    '<span class="wb-place">'+escapePlanText(settlementName)+' · '+escapePlanText(World.year)+'</span></div>'+
-    '<span class="wb-file">LIVE WORLD RECORD</span></div>'+
-    '<div class="wb-main"><div class="wb-lead"><span class="wb-section">THIS YEAR</span>'+ledgerIcon(issue.icon)+
-      '<h3>'+escapePlanText(issue.title)+'</h3><p>'+escapePlanText(issue.note)+'</p></div>'+
-      '<div class="wb-metrics">'+metrics.map(m=>'<div class="wb-metric'+(m.tone?' '+m.tone:'')+'"><span>'+
-        ledgerIcon(m.icon)+m.label+'</span><strong>'+escapePlanText(m.value)+'</strong><small>'+m.note+'</small></div>').join('')+'</div></div>'+
-    '<div class="wb-bottom"><span>'+(work&&business?'EMPLOYED AT '+escapePlanText(business.name)+
-      ' · '+escapePlanText(work.occupationName):'YOUR FILE · '+escapePlanText(S.age)+' YEARS OLD')+
-    '</span><button type="button" data-open-priorities '+(canChoose?'':'disabled')+
-      '>REVIEW YOUR CHOICES <span aria-hidden="true">▸</span></button></div>';
+  const current=work&&business?work.occupationName+' at '+business.name:
+    S.age+' '+(S.age===1?'year':'years')+' old';
+  el.innerHTML='<div class="wb-main"><div class="wb-lead">'+
+    '<span class="wb-place">'+escapePlanText(settlementName)+' · '+escapePlanText(World.year)+'</span>'+
+    '<h3>'+escapePlanText(issue.title)+'</h3><p>'+escapePlanText(issue.note)+'</p></div>'+
+    '<div class="wb-metrics">'+metrics.map(m=>'<div class="wb-metric'+(m.tone?' '+m.tone:'')+'"><span>'+
+      ledgerIcon(m.icon)+m.label+'</span><strong>'+escapePlanText(m.value)+'</strong></div>').join('')+'</div>'+
+    '<div class="wb-bottom"><span>'+escapePlanText(current)+'</span><button type="button" data-open-priorities '+
+       (canChoose?'':'disabled')+'>Review your choices <span aria-hidden="true">→</span></button></div></div>';
 }
 function renderActionReceipt(type,id,result,chips){
   const el=$('#actionReceipt');if(!el)return;
@@ -724,38 +722,51 @@ function clearActionReceipt(){
 
 /* ================= RENDER ================= */
 function syncHoldTab(){ const b=$('#btn-hold'); if(b) b.classList.toggle('hidden',!S.holdMember); }
-let __photoBand=''; let __photoSwapTimer=null;
+let __photoBand='', __photoMarkup='', __photoSwapTimer=null;
 function renderIdentity(){
-  $('#id-name').textContent=S.last.toUpperCase()+', '+S.first;
+  $('#id-name').textContent=S.first+' '+S.last;
   $('#id-file').textContent=S.sex+' · '+S.id;
-  $('#id-dob').textContent=S.dob+' · '+S.place;
+  $('#id-dob').textContent='Born '+S.dob+' · '+S.place;
   $('#tab-name').textContent='FILE: '+S.last.toUpperCase()+', '+S.first.toUpperCase();
-  // The file photo ages with the subject. When the age BAND changes (a real
-  // life-stage transition, not every birthday), the clerk swaps it with a
-  // brief lift-and-develop ceremony and a replacement mark.
-  const photoEl=document.querySelector('.photo');
-  const newArt=illusAvailable()
-    ?IllustrationSystem.personPortrait(IllustrationSystem.subjectDescriptor(S))
-    :portraitSVG(S.sex,S.photoSeed,S.photoTint,S.age);
-  $('#photo-art').innerHTML=newArt;
-  $('#photo-cap').textContent='FILE PHOTO · '+S.dob;
-  if(photoEl&&illusAvailable()&&!quietMode){
-    const band=IllustrationSystem.ageBandOf(S.age);
-    if(__photoBand&&__photoBand!==band){
-      photoEl.classList.remove('photo-swap');
-      void photoEl.offsetWidth;
-      photoEl.classList.add('photo-swap');
-      let mark=photoEl.querySelector('.photo-replace-mark');
-      if(!mark){ mark=document.createElement('span'); mark.className='photo-replace-mark'; photoEl.appendChild(mark); }
-      mark.textContent='REPLACED '+currentYear();
-      if(__photoSwapTimer)clearTimeout(__photoSwapTimer);
-      __photoSwapTimer=setTimeout(()=>{
-        photoEl.classList.remove('photo-swap');
-        const m=photoEl.querySelector('.photo-replace-mark'); if(m)m.remove();
-      },2400);
-    }
-    __photoBand=band;
+  renderDossierPortrait();
+}
+function dossierWorkSector(){
+  if(!World||typeof EmploymentSystem!=='object'||typeof BusinessSystem!=='object')return null;
+  const contract=EmploymentSystem.activeForPerson(World,'subject')[0];
+  return contract?BusinessSystem.get(World,contract.businessId)?.sector:null;
+}
+function dossierHousehold(){
+  const record=World?.npcs?.[S.npcId], household=World?.households?.[record?.householdId];
+  if(S.age>=16&&!S.livingAtHome&&household?.id===World?.subjectBirthHouseholdId)return null;
+  return household||null;
+}
+function dossierAppearanceMeans(household){
+  const personal=Number(S.assets)||0;
+  if(!(S.age<16||S.livingAtHome))return DossierArt.meansOf(personal);
+  const finances=household?.finances;
+  if(finances&&(finances.savings||finances.debt))return DossierArt.meansOf((Number(finances.savings)||0)-(Number(finances.debt)||0));
+  const openingMeans={destitute:'strained',poor:'strained',modest:'steady',comfortable:'comfortable',wealthy:'comfortable'};
+  return openingMeans[S.familyTier]||DossierArt.meansOf(personal);
+}
+function renderDossierPortrait(sector=dossierWorkSector()){
+  const photoArt=$('#photo-art');
+  if(!photoArt)return;
+  const newArt=typeof DossierArt==='object'
+    ?DossierArt.portrait(S,sector,dossierAppearanceMeans(dossierHousehold()))
+    :illusAvailable()?IllustrationSystem.subjectPortrait(S):portraitSVG(S.sex,S.photoSeed,S.photoTint,S.age);
+  if(__photoMarkup!==newArt||!photoArt.innerHTML){photoArt.innerHTML=newArt;__photoMarkup=newArt;}
+  $('#photo-cap').textContent='Age '+S.age+' · '+currentYear();
+  const photoEl=photoArt.parentElement;
+  if(!photoEl||!illusAvailable())return;
+  const band=IllustrationSystem.ageBandOf(S.age);
+  if(__photoBand&&__photoBand!==band&&!quietMode){
+    if(__photoSwapTimer)clearTimeout(__photoSwapTimer);
+    photoEl.classList.remove('photo-swap');
+    void photoEl.offsetWidth;
+    photoEl.classList.add('photo-swap');
+    __photoSwapTimer=setTimeout(()=>photoEl.classList.remove('photo-swap'),700);
   }
+  __photoBand=band;
 }
 function viceText(v){return v===0?'none on record':v<=2?'minor notations':v<=5?'a pattern':'the Bureau has a folder on the folder';}
 function standingText(v){return v<25?'a name people avoid':v<45?'unremarkable':v<65?'well liked':v<85?'well regarded':'the toast of the district';}
@@ -799,25 +810,10 @@ function renderKin(changed){
   $('#standing').innerHTML='<div class="kinrow standingrow hotspot" data-hotspot="relations"><span class="kr-l">STANDING</span><span class="kr-n">'+standingText(S.relations)+'</span><b class="sval standing-val" id="standing-val">'+S.relations+'</b></div>';
   if(changed&&changed.relations){ const sv=$('#standing-val'); sv.classList.add(changed.relations>0?'up':'down'); }
 }
-let assetsAnimToken=0,shownAssets=null;
 function renderAssetsValue(el){
   if(!el)return;
   el.classList.toggle('debt',S.assets<0);
-  const target=S.assets;
-  if(shownAssets===null||quietMode||typeof requestAnimationFrame!=='function'||!isFinite(target)){shownAssets=target;el.textContent=money(target);return;}
-  const from=shownAssets;
-  if(from===target){el.textContent=money(target);return;}
-  const token=++assetsAnimToken,start=Date.now(),dur=clamp(320+Math.abs(target-from)*0.02,320,700);
-  shownAssets=target;
-  el.textContent=money(from);
-  const stepFn=t=>{
-    if(token!==assetsAnimToken)return;
-    let p=dur>0?(t-start)/dur:1;p=Math.max(0,Math.min(1,p));
-    const e=1-Math.pow(1-p,3);
-    el.textContent=money(Math.round(from+(target-from)*e));
-    if(p<1)requestAnimationFrame(stepFn);
-  };
-  requestAnimationFrame(stepFn);
+  el.textContent=money(S.assets);
 }
 function renderStats(changed){
   ensurePersonalSystems(S); updatePersonalStanding();
@@ -838,7 +834,9 @@ function renderStats(changed){
   renderKin(changed);
   renderIntent();
   renderDisposition();
-  renderInventory();
+  const sector=dossierWorkSector();
+  renderDossierPortrait(sector);
+  renderInventory(sector);
   renderSparks();
   renderCoach();
   syncHoldTab();
@@ -903,40 +901,24 @@ function ledgerIcon(name){
   return '<svg class="lv-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+
     (LEDGER_PATHS[name]||LEDGER_PATHS.bank)+'</svg>';
 }
-function ledgerScene(home,children,place){
-  // A little architectural vignette, not an image request or a second map.
-  // The main silhouette actually responds to the selected housing type.
-  const unhoused=home&&home.id==='none';
-  const people=Array.from({length:Math.min(5,Math.max(1,Number(children)||0)+1)},(_,i)=>
-    '<g transform="translate('+(450+i*26)+' 0)" class="lv-person">'+
-      '<circle cx="0" cy="121" r="'+(i?6:8)+'" fill="#483e32"/>'+
-      '<path d="M-9 157v-17q9-12 18 0v17" fill="'+(i%2?'#70543c':'#37516a')+'"/>'+
-    '</g>').join('');
-  const building=unhoused
-    ?'<path d="M123 109h213l-38-58H168z" fill="#bca57d" stroke="#634c34" stroke-width="4"/>'+
-      '<path d="M166 109v52h133v-52" fill="#d4c29c"/><path d="M208 161v-31h35v31" fill="#66553e"/>'
-    :'<g class="lv-house"><path d="M134 72h205l-18 91H146z" fill="#d5c7a5" stroke="#6c5941" stroke-width="3"/>'+
-      '<path d="m113 77 121-62 122 62-10 14-112-53-112 53z" fill="#735047" stroke="#614439" stroke-width="3"/>'+
-      '<rect x="195" y="111" width="56" height="52" fill="#795f46"/>'+
-      '<rect x="153" y="101" width="30" height="33" fill="#688a94" stroke="#695b47" stroke-width="4"/>'+
-      '<rect x="269" y="101" width="30" height="33" fill="#688a94" stroke="#695b47" stroke-width="4"/>'+
-      '<path d="M168 101v33M284 101v33" stroke="#d4ccae" stroke-width="3"/>'+
-      '<rect x="295" y="29" width="19" height="36" fill="#7b5644"/>'+
-      '<circle class="lv-smoke" cx="304" cy="18" r="9" fill="#eee9de" opacity=".62"/>'+
-      '</g>';
-  return '<svg class="lv-scene-svg" viewBox="0 0 640 184" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Illustration of '+escapePlanText(unhoused?'temporary shelter':'home')+' and household in '+escapePlanText(place)+'">'+
-    '<rect width="640" height="184" fill="#b9c2bb"/><circle cx="538" cy="37" r="23" fill="#efdfad"/>'+
-    '<path d="M0 111 82 77l97 37 95-33 106 40 89-35 171 42v56H0z" fill="#90a29a"/>'+
-    '<g opacity=".50" fill="#6e8985"><rect x="11" y="55" width="55" height="83"/><rect x="69" y="78" width="40" height="55"/>'+
-    '<rect x="359" y="67" width="64" height="72"/><rect x="432" y="42" width="51" height="97"/><rect x="501" y="66" width="46" height="73"/>'+
-    '<rect x="555" y="48" width="71" height="90"/></g>'+
-    '<path d="M0 151q160-10 320 2t320-7v38H0z" fill="#718478"/>'+
-    '<path d="M0 166h640v18H0z" fill="#6b7169"/>'+
-    building+
-    '<g><path d="M48 161v-47" stroke="#544f3e" stroke-width="7"/><circle cx="48" cy="103" r="25" fill="#596c50"/>'+
-    '<circle cx="65" cy="112" r="18" fill="#687a5c"/></g>'+people+
-    '<path d="M0 172h640" stroke="#d7c8a0" stroke-width="2" stroke-dasharray="19 15" opacity=".6"/>'+
-    '</svg>';
+function dossierResidents(household,sector){
+  const subject={id:S.npcId||('subject:'+S.id),age:S.age,attire:DossierArt.attireFor(S,sector)};
+  const members=(household?.memberIds||[]).filter(id=>id!==S.npcId).map(id=>World.npcs[id]).filter(npc=>{
+    if(!npc?.alive||npc.locationId!==World.activeSettlementId)return false;
+    if(npc.roleTags?.includes('mother'))return guardiansOf().includes(S.mother);
+    if(npc.roleTags?.includes('father'))return guardiansOf().includes(S.father);
+    return true;
+  });
+  const people=members.map(npc=>{
+    const age=Math.max(0,currentYear()-npc.birthYear);
+    const eduStage=npc.education?.status==='enrolled'?npc.education.level:null;
+    return {id:npc.id,age,attire:DossierArt.attireFor({age,eduStage},npc.employment?.sector)};
+  });
+  // Older files may have a child count without individual household records.
+  const ownChildren=(household?.memberIds||[]).filter(id=>World.npcs[id]?.flags?.parentSubjectId===S.npcId).length;
+  const legacyChildren=Math.min(6,Math.max(0,(Number(S.kids)||0)-ownChildren));
+  for(let i=0;i<legacyChildren;i++)people.push({id:subject.id+':child:'+i,age:7});
+  return [subject,...people];
 }
 function ledgerGauge(label,value,icon,reverse){
   const n=clamp(Number(value)||0,0,100),p=Math.round(n);
@@ -953,15 +935,19 @@ function ledgerHouseCard(icon,label,name,sub,hotspot){
     '<div class="lv-home-meta"><small>'+escapePlanText(label)+'</small><strong>'+escapePlanText(name)+'</strong><span>'+escapePlanText(sub)+'</span></div>'+
     (hotspot?'<span class="lv-card-link" aria-hidden="true">▸</span>':'')+'</div>';
 }
-function renderInventory(){
+function renderInventory(sector=dossierWorkSector()){
   const el=$('#inventory');if(!el||!S)return;
   ensurePersonalSystems(S);updatePersonalStanding();
   const home=currentHousing(),food=currentFood(),care=S.kids>0?currentChildcare():null;
-  const dependent=S.age<16||S.livingAtHome,conditions=activeConditions();
-  const here=currentSettlement(),building=currentBuilding(),travel=S.traveling?settlementById(S.traveling.to):null;
+  const dependent=S.age<16||S.livingAtHome;
+  const here=currentSettlement(),building=currentBuilding();
   const locale=typeof WorldSimulation==='object'&&WorldSimulation&&World?
     WorldSimulation.getSettlementConditions(World,here.id):null;
-  const illnesses=conditions.length;
+  const household=dossierHousehold();
+  const security=typeof WorldSimulation==='object'?WorldSimulation.getSettlementState(World,here.id)?.security:null;
+  const people=typeof DossierArt==='object'?dossierResidents(household,sector):[];
+  const art=people.length?DossierArt.scene({housing:home,place:here.name,kind:here.kind,
+    means:dossierAppearanceMeans(household),people,unrest:security?.unrest,surveillance:security?.surveillance}):'';
   const title=dependent?'AT THE FAMILY TABLE':'HOUSEHOLD & LIFESTYLE';
   const count=Math.max(0,Number(S.kids)||0);
   const homeSub=dependent?'Family household':home.rent?money(home.rent)+'/yr':'No rent';
@@ -971,19 +957,12 @@ function renderInventory(){
   const meals=ledgerHouseCard('meal','FOOD',food.name,foodSub,dependent?'':'food');
   const caregiving=care?ledgerHouseCard('care','CHILDCARE',care.name,careSub,''):'';
   const guards=dependent?'<span class="lv-guardian">GUARDIANSHIP · '+escapePlanText(GUARD_INFO[guardTier()].label)+'</span>':'';
-  const glance='<div class="lv-glance"><div class="lv-section-title">PERSONAL STANDING <span>LIVE</span></div>'+
+  const glance='<div class="lv-glance"><div class="lv-section-title">Personal standing</div>'+
     '<div class="lv-gauges">'+ledgerGauge('FREEDOM',S.freedom,'freedom',false)+
        ledgerGauge('SCRUTINY',S.scrutiny,'eye',true)+
-       ledgerGauge('SECURITY',Math.min(S.housingSecurity,S.financialSecurity),'shield',false)+'</div>'+
-    '<div class="lv-personal-flags">'+
-       '<div>'+ledgerIcon('family')+'<span>'+escapePlanText(S.married?S.partner||'Married':S.status==='Attached'?S.partner||'Partner':'Single')+'</span></div>'+
-       '<div>'+ledgerIcon('med')+'<span>'+(illnesses?illnesses+' ACTIVE CONDITION'+(illnesses===1?'':'S'):'HEALTH: '+Math.round(S.health)+'/100')+'</span></div>'+
-       '<div>'+ledgerIcon('map')+'<span>'+escapePlanText(here.name)+(travel?' → '+escapePlanText(travel.name):'')+'</span></div>'+
-    '</div></div>';
+       ledgerGauge('SECURITY',Math.min(S.housingSecurity,S.financialSecurity),'shield',false)+'</div></div>';
   let expense='';
   if(!dependent){
-    const household=typeof HouseholdSystem==='object'&&HouseholdSystem&&World?
-      HouseholdSystem.findByMember(World,S.npcId):null;
     const out=typeof HouseholdSystem==='object'&&HouseholdSystem&&World?
       HouseholdSystem.estimateOutlay(World,household,S,{year:currentYear()}):
       {personalLifestyleOutlay:0,additionalHouseholdCosts:0,projectedTotalOutlay:0};
@@ -1003,7 +982,7 @@ function renderInventory(){
         '<span title="PERSONAL LIFESTYLE OUTLAY"><i class="lv-key personal"></i>LIFESTYLE <b>'+money(personal)+'</b></span>'+
         '<span title="ADDITIONAL HOUSEHOLD COSTS"><i class="lv-key additional"></i>FAMILY <b>'+money(extra)+'</b></span>'+
         (other?'<span><i class="lv-key other"></i>OTHER <b>'+money(other)+'</b></span>':'')+'</div>'+
-      '<span class="lv-a11y-total" aria-label="PROJECTED TOTAL OUTLAY">PROJECTED TOTAL OUTLAY</span></div>';
+      '<span class="lv-a11y-total" aria-label="PROJECTED TOTAL OUTLAY"></span></div>';
   }
   const dues=(S.liabilities||[]);
   const debts='<div class="lv-debts"><div class="lv-section-title">LIABILITIES <span>'+dues.length+'</span></div>'+
@@ -1024,17 +1003,20 @@ function renderInventory(){
       (familyHealthPendingCount()?'<span class="family-health-badge">'+familyHealthPendingCount()+'</span>':'')+'</button></div>';
   // Authority-heavy simulations are retained, accessible but collapsed.
   const extended=employmentUiPanels()+renderServiceRecord();
+  const openSections=new Set(Array.from(el.querySelectorAll?.('details[data-ledger][open]')||[],section=>section.dataset.ledger));
+  const disclosure=(id,label,icon,body)=>body?'<details class="lv-archive" data-ledger="'+id+'"'+
+    (openSections.has(id)?' open':'')+'><summary>'+ledgerIcon(icon)+'<span>'+label+
+    '</span><i aria-hidden="true">▾</i></summary><div class="lv-archive-body">'+body+'</div></details>':'';
   el.innerHTML='<div class="lv-ledger">'+
-    '<div class="lv-scene"><div class="lv-illustration">'+ledgerScene(home,count,here.name)+'</div>'+
-      '<div class="lv-scene-head"><small>YOUR HOUSEHOLD · '+escapePlanText(currentYear())+'</small><strong>'+
-        escapePlanText(here.name)+'</strong><span>'+escapePlanText(building?building.name:home.name)+'</span>'+guards+'</div></div>'+
-    '<div class="lv-section-title">'+title+' <span>'+ (dependent?'FAMILY':'ANNUAL')+'</span></div>'+
+    '<figure class="lv-scene"><div class="lv-illustration">'+art+'</div>'+
+      '<figcaption class="lv-scene-head"><div><strong>'+escapePlanText(home.name)+'</strong><span>'+
+        escapePlanText(building&&home.id!=='none'?building.name+' · '+here.name:here.name)+'</span></div>'+
+        '<div class="lv-scene-meta">'+(people.length?'<span>'+people.length+(people.length===1?' resident':' residents')+'</span>':'')+guards+'</div></figcaption></figure>'+
+    actions+'<div class="lv-section-title">'+title+'</div>'+
     '<div class="lv-home-grid">'+housing+meals+caregiving+'</div>'+glance+
-    '<div class="lv-finance-grid">'+expense+debts+'</div>'+world+actions+
-    (extended?'<details class="lv-archive"><summary>'+ledgerIcon('book')+
-      '<span>WORK · GOVERNMENT · SERVICE FILES</span><i aria-hidden="true">▾</i></summary>'+
-      '<div class="lv-archive-body">'+extended+'</div></details>':'')+
-    '</div>';
+    '<div class="lv-disclosures">'+disclosure('finances','Household finances','money','<div class="lv-finance-grid">'+expense+debts+'</div>')+
+    disclosure('settlement','Settlement conditions','map',world)+
+    disclosure('service','Work, government &amp; service','book',extended)+'</div></div>';
 }
 
 function openMedicalTreatmentPicker(conditionId){
@@ -4878,7 +4860,7 @@ function openIntro(){
   const famGood=famT&&!/hard|neglect|poor/i.test(famT.label+' '+(famT.line||''));
   const disabled=introRerolls<=0;
   slip.innerHTML='<div class="is-head">SUBJECT FILE · FORM 0</div>'+
-    '<div class="intro-identity-row"><div class="photo intro-photo"><div class="photo-art">'+portraitSVG(S.sex,S.photoSeed,S.photoTint,S.age)+'</div><em class="photo-cap">FILE PHOTO · '+S.dob+'</em></div><div class="subject-identity"><div class="subject-name">'+S.first+' '+S.last+'</div><div class="subject-meta"><span><b>SEX</b> '+sexSym(S.sex)+'</span><span><b>BORN</b> '+S.dob+'</span><span><b>PLACE</b> '+S.place+'</span></div></div></div>'+ 
+    '<div class="intro-identity-row"><div class="photo intro-photo"><div class="photo-art">'+(typeof DossierArt==='object'?DossierArt.portrait(S,null,dossierAppearanceMeans(dossierHousehold())):portraitSVG(S.sex,S.photoSeed,S.photoTint,S.age))+'</div><em class="photo-cap">FILE PHOTO · '+S.dob+'</em></div><div class="subject-identity"><div class="subject-name">'+S.first+' '+S.last+'</div><div class="subject-meta"><span><b>SEX</b> '+sexSym(S.sex)+'</span><span><b>BORN</b> '+S.dob+'</span><span><b>PLACE</b> '+S.place+'</span></div></div></div>'+
     '<div class="subject-grid">'+
       '<div class="subject-chip origin '+(famGood?'good':'bad')+'"><b><span class="subject-icon">&#8962;</span> ORIGIN</b><span>'+(famT?famT.label:'Unknown household')+'</span></div>'+ 
       '<div class="subject-chip outlook '+(guardGood?'good':'bad')+'"><b><span class="subject-icon">&#9881;</span> OUTLOOK</b><span>'+gi.label+'</span></div>'+ 
